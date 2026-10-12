@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KnowOps AI — IT Operations Knowledge & Incident Copilot</title>
+  <meta name="description" content="AI-powered knowledge base and operations assistant for SREs, DevOps, and on-call engineers. Real-time RAG retrieval with source-grounded runbook citations.">
+  
+  <!-- Modern Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+
+  <!-- Main Grid Layout -->
+  <div class="app-layout">
+    
+    <!-- Top Global Header -->
+    <header class="app-header" id="app-header">
+      <div class="header-left">
+        <div class="brand-logo" id="brand-logo">
+          <span class="logo-icon">⚡</span>
+          <div class="brand-text">
+            <span class="brand-title">KnowOps <span class="accent-text">AI</span></span>
+            <span class="brand-subtitle">Incident & Runbook Copilot</span>
+          </div>
+        </div>
+
+        <div class="status-cluster" id="status-cluster">
+          <div class="status-pill status-healthy" id="pill-db-status" title="Neon pgvector HNSW Index Online">
+            <span class="status-dot"></span>
+            <span class="status-label">PostgreSQL Vector</span>
+          </div>
+          <div class="status-pill" id="pill-kb-stats" title="Active Runbooks & Chunks">
+            <span class="status-counter" id="stat-docs">4</span> Runbooks &bull; 
+            <span class="status-counter" id="stat-chunks">61</span> Chunks
+          </div>
+          <div class="status-pill status-llm" id="pill-model-status">
+            <span class="llm-tag">Gemini 2.5 Flash</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <button class="btn btn-secondary" id="btn-diagnostics" title="Inspect system health">
+          <span class="btn-icon">🩺</span> Diagnostics
+        </button>
+        <button class="btn btn-primary" id="btn-auth-toggle">
+          <span class="btn-icon">🔐</span> <span id="auth-btn-label">Sign In</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- App Body (Sidebar + Workspace) -->
+    <div class="app-body">
+
+      <!-- Left Sidebar: Runbooks & Threads -->
+      <aside class="app-sidebar" id="app-sidebar">
+        <div class="sidebar-action">
+          <button class="btn btn-glow btn-full" id="btn-new-conversation">
+            <span class="btn-icon">+</span> New Incident Session
+          </button>
+        </div>
+
+        <!-- Runbook Quick Links -->
+        <div class="sidebar-section">
+          <div class="section-title">Knowledge Runbooks</div>
+          <div class="runbook-list" id="runbook-list">
+            <div class="runbook-item" id="rb-card-dr" data-query="How do I perform a database failover?">
+              <span class="rb-icon">🛡️</span>
+              <div class="rb-info">
+                <div class="rb-name">Disaster Recovery</div>
+                <div class="rb-meta">Failover &bull; RTO/RPO &bull; Backups</div>
+              </div>
+            </div>
+            <div class="runbook-item" id="rb-card-k8s" data-query="What is the procedure for rolling back a Kubernetes deployment?">
+              <span class="rb-icon">☸️</span>
+              <div class="rb-info">
+                <div class="rb-name">Kubernetes Operations</div>
+                <div class="rb-meta">Rollbacks &bull; Scaling &bull; Pods</div>
+              </div>
+            </div>
+            <div class="runbook-item" id="rb-card-api" data-query="What should I do if the API returns 502 Bad Gateway?">
+              <span class="rb-icon">🔍</span>
+              <div class="rb-info">
+                <div class="rb-name">API Troubleshooting</div>
+                <div class="rb-meta">502 Errors &bull; 401 Auth &bull; Logs</div>
+              </div>
+            </div>
+            <div class="runbook-item" id="rb-card-oncall" data-query="Who is the primary contact for P1 incident escalation?">
+              <span class="rb-icon">📟</span>
+              <div class="rb-info">
+                <div class="rb-name">On-Call Playbook</div>
+                <div class="rb-meta">SLAs &bull; Escalation &bull; Paging</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Threads -->
+        <div class="sidebar-section session-section">
+          <div class="section-title">Incident Sessions</div>
+          <div class="session-list" id="session-list">
+            <!-- Dynamic session items injected by app.js -->
+            <div class="session-item active" id="session-active-item">
+              <span class="session-icon">💬</span>
+              <div class="session-text">Current Active Session</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Operator User Banner -->
+        <div class="sidebar-footer" id="sidebar-footer">
+          <div class="user-badge" id="user-badge">
+            <div class="user-avatar" id="user-avatar">OP</div>
+            <div class="user-details">
+              <div class="user-name" id="user-name-display">Guest Operator</div>
+              <div class="user-role" id="user-role-display">Read-Only Access</div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Chat Stage -->
+      <main class="chat-workspace" id="chat-workspace">
+        
+        <!-- Thread Bar -->
+        <div class="workspace-header" id="workspace-header">
+          <div class="thread-info">
+            <span class="thread-badge" id="thread-badge">Session #New</span>
+            <span class="thread-hint">Grounding strictly constrained to verified runbooks</span>
+          </div>
+          <div class="thread-controls">
+            <label for="select-top-k" class="control-label">Context Depth:</label>
+            <select id="select-top-k" class="select-top-k" title="Number of knowledge chunks retrieved">
+              <option value="3">top_k = 3 (Fast)</option>
+              <option value="5" selected>top_k = 5 (Standard)</option>
+              <option value="10">top_k = 10 (Deep)</option>
+            </select>
+            <button class="btn btn-icon-only" id="btn-clear-chat" title="Clear current view">🧹</button>
+          </div>
+        </div>
+
+        <!-- Chat Stream Area -->
+        <div class="messages-feed" id="messages-feed">
+          
+          <!-- Hero / Empty State -->
+          <div class="hero-welcome" id="hero-welcome">
+            <div class="hero-icon">⚡</div>
+            <h1 class="hero-title">How can KnowOps assist your operations today?</h1>
+            <p class="hero-subtitle">
+              Ask natural-language questions about disaster recovery, Kubernetes deployments,
+              troubleshooting API outages, or incident escalation. Every answer is grounded with direct runbook citations.
+            </p>
+
+            <div class="prompt-grid" id="prompt-grid">
+              <button class="prompt-card" id="btn-prompt-failover" data-query="How do I perform a database failover?">
+                <span class="prompt-icon">🛡️</span>
+                <div class="prompt-content">
+                  <div class="prompt-title">Database Failover</div>
+                  <div class="prompt-desc">Step-by-step promote replica &amp; verify</div>
+                </div>
+              </button>
+              <button class="prompt-card" id="btn-prompt-rollback" data-query="What is the procedure for rolling back a Kubernetes deployment?">
+                <span class="prompt-icon">☸️</span>
+                <div class="prompt-content">
+                  <div class="prompt-title">Kubernetes Rollback</div>
+                  <div class="prompt-desc">Undo rollout to specific revision</div>
+                </div>
+              </button>
+              <button class="prompt-card" id="btn-prompt-502" data-query="What should I do if the API returns 502 Bad Gateway?">
+                <span class="prompt-icon">🚨</span>
+                <div class="prompt-content">
+                  <div class="prompt-title">502 Bad Gateway</div>
+                  <div class="prompt-desc">Triage ingress &amp; pod crash loops</div>
+                </div>
+              </button>
+              <button class="prompt-card" id="btn-prompt-escalate" data-query="Who is the primary contact for P1 incident escalation?">
+                <span class="prompt-icon">📞</span>
+                <div class="prompt-content">
+                  <div class="prompt-title">P1 Escalation Matrix</div>
+                  <div class="prompt-desc">On-call phone tree &amp; response SLAs</div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Bottom Query Dock -->
+        <div class="query-dock" id="query-dock">
+          <form class="query-form" id="query-form">
+            <div class="input-wrapper">
+              <textarea 
+                id="input-question" 
+                class="query-input" 
+                placeholder="Ask about runbooks, failover procedures, kubectl commands, or incidents..." 
+                rows="1"
+                required
+              ></textarea>
+              <button type="submit" class="btn-send" id="btn-send-query" title="Submit query (Enter)">
+                <span class="send-icon">➤</span>
+              </button>
+            </div>
+            <div class="dock-hints">
+              <span>Press <kbd>Enter</kbd> to ask &bull; <kbd>Shift + Enter</kbd> for newline</span>
+              <span id="citation-hint" class="citation-hint">Grounded in 61 pgvector HNSW chunks</span>
+            </div>
+          </form>
+        </div>
+
+      </main>
+
+    </div>
+
+  </div>
+
+  <!-- Operator Login Modal -->
+  <div class="modal-backdrop hidden" id="modal-login">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">🔐 Operator Authentication</div>
+        <button class="btn-close" id="btn-close-login">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          Sign in to unlock operator session history and secure operational endpoints.
+        </p>
+        <form id="form-login">
+          <div class="form-group">
+            <label for="input-username" class="form-label">Operator Username</label>
+            <input type="text" id="input-username" class="form-input" value="admin" required autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label for="input-password" class="form-label">Password</label>
+            <input type="password" id="input-password" class="form-input" value="admin" required autocomplete="current-password">
+          </div>
+          <div class="auth-hint">
+            <span>Development credentials: <code>admin</code> / <code>admin</code></span>
+          </div>
+          <div class="form-error hidden" id="login-error-msg"></div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" id="btn-cancel-login">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-login">Sign In (JWT)</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- System Diagnostics Modal -->
+  <div class="modal-backdrop hidden" id="modal-diagnostics">
+    <div class="modal-card modal-wide">
+      <div class="modal-header">
+        <div class="modal-title">🩺 KnowOps System Diagnostics</div>
+        <button class="btn-close" id="btn-close-diag">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="diag-grid">
+          <div class="diag-card">
+            <div class="diag-label">Database Connection</div>
+            <div class="diag-val" id="diag-db-val">Testing...</div>
+          </div>
+          <div class="diag-card">
+            <div class="diag-label">Ingested Runbooks</div>
+            <div class="diag-val" id="diag-docs-val">-</div>
+          </div>
+          <div class="diag-card">
+            <div class="diag-label">Vector Embeddings</div>
+            <div class="diag-val" id="diag-chunks-val">-</div>
+          </div>
+          <div class="diag-card">
+            <div class="diag-label">Auth Token</div>
+            <div class="diag-val" id="diag-jwt-val">None</div>
+          </div>
+        </div>
+
+        <div class="diag-section">
+          <div class="diag-subheading">Active Stack Configuration</div>
+          <table class="diag-table">
+            <tr><td>Backend API</td><td>FastAPI (Python 3.11) on Port 8000</td></tr>
+            <tr><td>Vector Store</td><td>PostgreSQL + pgvector (HNSW Index, 768 Dimensions)</td></tr>
+            <tr><td>Embedding Model</td><td>Google Gemini text-embedding-001 (RETRIEVAL_QUERY)</td></tr>
+            <tr><td>Chat LLM</td><td>Google Gemini Flash (Grounded RAG synthesis)</td></tr>
+            <tr><td>Similarity Threshold</td><td>Cosine Similarity &ge; 0.55 (Calibrated in Phase 2.4)</td></tr>
+          </table>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn btn-primary" id="btn-refresh-diag">Refresh Diagnostics</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Application Logic -->
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

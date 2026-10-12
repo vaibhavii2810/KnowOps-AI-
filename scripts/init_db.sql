@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE TABLE IF NOT EXISTS chunks (
     id SERIAL PRIMARY KEY,
     document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    heading TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
     embedding vector(768) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()

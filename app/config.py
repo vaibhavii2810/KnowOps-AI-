@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     database_url: str = ""
     gemini_api_key: str = ""
-    gemini_chat_model: str = "gemini-2.5-flash"
+    gemini_chat_model: str = "gemini-flash-lite-latest"
     gemini_embed_model: str = "gemini-embedding-001"
     embed_dim: int = 768
     jwt_secret: str = "dev-secret"
