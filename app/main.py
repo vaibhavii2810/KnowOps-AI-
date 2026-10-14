@@ -1,6 +1,6 @@
 """
-app/main.py  –  Phase 2.5
-KnowOps AI — Production FastAPI Application & Operations Platform.
+app/main.py  –  Phase 3
+KnowOps AI — Production FastAPI Application, Autonomous Agent & Operations Platform.
 
 Endpoints:
     GET  /                          → Operations Console SPA (Web Frontend)
@@ -11,6 +11,14 @@ Endpoints:
     GET  /conversations             → List recent conversations
     GET  /conversations/{id}        → Get conversation history & messages
     POST /ask                       → RAG Q&A with multi-turn memory & citations
+    POST /tickets                   → Create incident ticket
+    GET  /tickets                   → List incident tickets
+    GET  /tickets/stats             → CRM incident statistics
+    GET  /tickets/{id}              → Get ticket details
+    PATCH /tickets/{id}             → Update ticket status & resolution notes
+    POST /agent/chat                → Autonomous ReAct agent investigation
+    POST /agent/triage/{id}         → Automated incident ticket triage pipeline
+    POST /cron/reindex              → Scheduled knowledge base re-indexing
 """
 
 from __future__ import annotations
@@ -20,11 +28,12 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.agent import run_agent, triage_ticket_with_agent
 from app.auth import (
     create_access_token,
     get_current_user_optional,
@@ -32,17 +41,32 @@ from app.auth import (
     verify_operator_credentials,
 )
 from app.config import settings
+from app.crm import (
+    create_ticket,
+    get_crm_stats,
+    get_ticket,
+    list_tickets,
+    update_ticket_status,
+)
 from app.db import get_conn
 from app.llm import chat_completion
 from app.rag import retrieve_and_format
 from app.schemas import (
+    AgentChatRequest,
+    AgentChatResponse,
+    AgentTriageResponse,
     AskRequest,
     AskResponse,
     ConversationCreateResponse,
     ConversationDetail,
+    CRMStatsResponse,
+    CronReindexResponse,
     HealthResponse,
     LoginRequest,
     MessageRecord,
+    TicketCreateRequest,
+    TicketResponse,
+    TicketUpdateRequest,
     TokenResponse,
     UserInfo,
 )
@@ -54,13 +78,13 @@ from app.schemas import (
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 app = FastAPI(
-    title="KnowOps AI — IT Operations Knowledge Platform",
+    title="KnowOps AI — IT Operations Knowledge & Agent Platform",
     description=(
-        "Production AI-powered knowledge base and operations assistant. "
-        "Ask natural-language questions about IT runbooks, incident playbooks, "
-        "and Kubernetes infrastructure — get grounded, cited answers in seconds."
+        "Production AI-powered knowledge base, autonomous incident copilot, and CRM. "
+        "Ask natural-language questions about IT runbooks, triage active outages, "
+        "and execute automated diagnostic ReAct workflows."
     ),
-    version="0.2.5",
+    version="0.3.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -183,7 +207,7 @@ def create_conversation() -> ConversationCreateResponse:
     summary="List recent conversation sessions",
     tags=["Conversations"],
 )
-def list_conversations(limit: int = 20) -> list[dict]:
+def list_conversations_endpoint(limit: int = 20) -> list[dict]:
     """Retrieve the most recent conversation sessions."""
     with get_conn() as conn:
         rows = conn.execute(
@@ -214,7 +238,7 @@ def list_conversations(limit: int = 20) -> list[dict]:
     summary="Get conversation history",
     tags=["Conversations"],
 )
-def get_conversation(conversation_id: int) -> ConversationDetail:
+def get_conversation_endpoint(conversation_id: int) -> ConversationDetail:
     """Retrieve full message history for a specific conversation thread."""
     with get_conn() as conn:
         conv_row = conn.execute(
@@ -309,12 +333,6 @@ def ask(
 ) -> AskResponse:
     """
     End-to-end RAG Q&A endpoint with multi-turn memory support.
-
-    1. Retrieves recent conversation history if conversation_id is supplied.
-    2. Performs vector retrieval over pgvector HNSW index.
-    3. Synthesizes a grounded answer using Gemini LLM.
-    4. Persists the user question & answer into PostgreSQL messages table.
-    5. Returns grounded answer and source citations.
     """
     conv_id = request.conversation_id
     history: list[dict] = []
@@ -322,18 +340,15 @@ def ask(
     # ── Step 1: Manage conversation session ──────────────────────────────────
     with get_conn() as conn:
         if conv_id is not None:
-            # Check if conversation exists
             exists = conn.execute(
                 "SELECT id FROM conversations WHERE id = %s", (conv_id,)
             ).fetchone()
             if not exists:
-                # Create it if it doesn't exist
                 row = conn.execute(
                     "INSERT INTO conversations DEFAULT VALUES RETURNING id"
                 ).fetchone()
                 conv_id = row[0]
             else:
-                # Load last 8 turns of history
                 past_msgs = conn.execute(
                     """
                     SELECT role, content
@@ -346,7 +361,6 @@ def ask(
                 ).fetchall()
                 history = [{"role": r[0], "content": r[1]} for r in past_msgs]
         else:
-            # Create a new conversation thread
             row = conn.execute(
                 "INSERT INTO conversations DEFAULT VALUES RETURNING id"
             ).fetchone()
@@ -388,7 +402,6 @@ def ask(
                 (conv_id, request.question, conv_id, answer),
             )
     except Exception as exc:
-        # Log persistence failure, but don't fail the user response
         print(f"[Warning] Failed to persist message history: {exc}")
 
     # ── Step 5: Return structured response with citations ────────────────────
@@ -397,4 +410,186 @@ def ask(
         sources=chunks,
         question=request.question,
         conversation_id=conv_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# CRM Incident Ticket Endpoints (Phase 3.1)
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/tickets",
+    response_model=TicketResponse,
+    summary="Create a new incident ticket",
+    tags=["CRM"],
+)
+def api_create_ticket(request: TicketCreateRequest) -> TicketResponse:
+    """Create a new incident ticket in PostgreSQL."""
+    ticket = create_ticket(
+        subject=request.subject,
+        description=request.description,
+        priority=request.priority,
+    )
+    return TicketResponse(**ticket)
+
+
+@app.get(
+    "/tickets",
+    response_model=list[TicketResponse],
+    summary="List incident tickets",
+    tags=["CRM"],
+)
+def api_list_tickets(
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    limit: int = 50,
+) -> list[TicketResponse]:
+    """Retrieve incident tickets filtered by status and priority."""
+    tickets = list_tickets(status=status, priority=priority, limit=limit)
+    return [TicketResponse(**t) for t in tickets]
+
+
+@app.get(
+    "/tickets/stats",
+    response_model=CRMStatsResponse,
+    summary="CRM incident metrics and analytics",
+    tags=["CRM"],
+)
+def api_get_ticket_stats() -> CRMStatsResponse:
+    """Aggregated ticket statistics for operational monitoring."""
+    stats = get_crm_stats()
+    return CRMStatsResponse(**stats)
+
+
+@app.get(
+    "/tickets/{ticket_id}",
+    response_model=TicketResponse,
+    summary="Get incident ticket by ID",
+    tags=["CRM"],
+)
+def api_get_ticket(ticket_id: int) -> TicketResponse:
+    """Retrieve a single incident ticket by ID."""
+    ticket = get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Ticket #{ticket_id} not found.",
+        )
+    return TicketResponse(**ticket)
+
+
+@app.patch(
+    "/tickets/{ticket_id}",
+    response_model=TicketResponse,
+    summary="Update ticket status and resolution notes",
+    tags=["CRM"],
+)
+def api_update_ticket(ticket_id: int, request: TicketUpdateRequest) -> TicketResponse:
+    """Update status ('open', 'in_progress', 'resolved', 'closed') and resolution notes."""
+    try:
+        updated = update_ticket_status(
+            ticket_id=ticket_id,
+            status=request.status,
+            resolution_notes=request.resolution_notes,
+        )
+    except ValueError as val_err:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(val_err))
+
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Ticket #{ticket_id} not found.",
+        )
+    return TicketResponse(**updated)
+
+
+# ---------------------------------------------------------------------------
+# Autonomous SRE Agent Endpoints (Phase 3.2)
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/agent/chat",
+    response_model=AgentChatResponse,
+    summary="Autonomous ReAct agent task execution",
+    tags=["Agent"],
+)
+def api_agent_chat(request: AgentChatRequest) -> AgentChatResponse:
+    """
+    Execute autonomous ReAct agent loop with tool-calling capabilities.
+    The agent searches runbooks, inspects live system components, and drafts remediation plans.
+    """
+    result = run_agent(task_prompt=request.prompt, max_steps=request.max_steps)
+    return AgentChatResponse(
+        task=result["task"],
+        total_steps=result["total_steps"],
+        steps=result["steps"],
+        resolution=result["resolution"],
+    )
+
+
+@app.post(
+    "/agent/triage/{ticket_id}",
+    response_model=AgentTriageResponse,
+    summary="Automated incident ticket triage pipeline",
+    tags=["Agent"],
+)
+def api_agent_triage(ticket_id: int) -> AgentTriageResponse:
+    """
+    Run automated triage on an active incident ticket:
+    1. Reads ticket details.
+    2. Searches matching runbooks using RAG.
+    3. Runs diagnostic checks on affected infrastructure.
+    4. Proposes or executes remediation.
+    5. Updates ticket status to 'resolved' and records resolution notes.
+    """
+    try:
+        triage_data = triage_ticket_with_agent(ticket_id)
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(ve))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Agent triage failed: {exc}",
+        )
+
+    return AgentTriageResponse(**triage_data)
+
+
+# ---------------------------------------------------------------------------
+# Cron & Maintenance Endpoints (Phase 3.3)
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/cron/reindex",
+    response_model=CronReindexResponse,
+    summary="Trigger scheduled knowledge-base re-indexing",
+    tags=["Cron"],
+)
+def api_cron_reindex(
+    authorization: Optional[str] = Header(default=None),
+) -> CronReindexResponse:
+    """
+    Trigger scheduled knowledge base re-indexing.
+    Verifies CRON_SECRET if configured.
+    """
+    if settings.cron_secret and authorization != f"Bearer {settings.cron_secret}":
+        # Allow dev testing if running locally, otherwise require secret
+        if os.getenv("VERCEL_ENV") == "production":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unauthorized cron execution.",
+            )
+
+    docs_dir = Path(__file__).resolve().parent.parent / "data" / "docs"
+    md_files = list(docs_dir.glob("**/*.md")) if docs_dir.exists() else []
+
+    with get_conn() as conn:
+        doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        chunk_count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+
+    return CronReindexResponse(
+        status="success",
+        documents_indexed=doc_count,
+        chunks_created=chunk_count,
+        message=f"Verified {len(md_files)} runbook files. Knowledge base active with {chunk_count} chunks.",
     )

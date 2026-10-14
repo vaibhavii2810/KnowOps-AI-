@@ -151,3 +151,136 @@ class HealthResponse(BaseModel):
     knowledge_base: dict = Field(
         description="Knowledge base stats: document count, chunk count."
     )
+
+
+# ---------------------------------------------------------------------------
+# CRM Ticket Schemas (Phase 3.1)
+# ---------------------------------------------------------------------------
+
+class TicketCreateRequest(BaseModel):
+    """Payload for POST /tickets."""
+
+    subject: str = Field(
+        ...,
+        min_length=3,
+        max_length=200,
+        description="Brief incident subject line.",
+        examples=["Primary Database Unreachable: Failover Required"],
+    )
+    description: str = Field(
+        ...,
+        min_length=5,
+        max_length=5000,
+        description="Detailed incident symptoms or stack trace.",
+        examples=["Database connection pool exhausted. Ingress reporting 502 Bad Gateway."],
+    )
+    priority: str = Field(
+        default="P2",
+        description="Incident priority level: P1, P2, P3, or P4.",
+        examples=["P1"],
+    )
+
+
+class TicketUpdateRequest(BaseModel):
+    """Payload for PATCH /tickets/{id}."""
+
+    status: str = Field(
+        ...,
+        description="New ticket status: open, in_progress, resolved, closed.",
+        examples=["resolved"],
+    )
+    resolution_notes: Optional[str] = Field(
+        default=None,
+        description="Notes or steps taken by operator/agent to resolve.",
+        examples=["Promoted db-replica-01.internal to primary. Scaled pods."],
+    )
+
+
+class TicketResponse(BaseModel):
+    """Response payload representing an incident ticket."""
+
+    id: int = Field(description="Ticket primary key ID.")
+    subject: str = Field(description="Incident subject.")
+    description: str = Field(description="Incident description.")
+    priority: str = Field(description="Priority: P1, P2, P3, P4.")
+    status: str = Field(description="Status: open, in_progress, resolved, closed.")
+    created_at: str = Field(description="Creation timestamp.")
+    updated_at: str = Field(description="Last update timestamp.")
+    resolution_notes: Optional[str] = Field(default=None, description="Resolution notes if resolved.")
+
+
+class CRMStatsResponse(BaseModel):
+    """Response payload for GET /tickets/stats."""
+
+    total_tickets: int
+    open: int
+    in_progress: int
+    resolved: int
+    active_p1_incidents: int
+
+
+# ---------------------------------------------------------------------------
+# Autonomous Agent Schemas (Phase 3.2)
+# ---------------------------------------------------------------------------
+
+class AgentChatRequest(BaseModel):
+    """Payload for POST /agent/chat."""
+
+    prompt: str = Field(
+        ...,
+        min_length=3,
+        max_length=2000,
+        description="Autonomous instruction for the SRE agent.",
+        examples=["Investigate why the worker pod is crashing and propose a fix."],
+    )
+    max_steps: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="Maximum ReAct reasoning steps before synthesizing a final resolution.",
+    )
+
+
+class AgentStep(BaseModel):
+    """A single ReAct reasoning/action step."""
+
+    step: int
+    thought: str = Field(description="Internal reasoning about current state and next move.")
+    action: Optional[str] = Field(default=None, description="Tool invoked.")
+    args: Optional[dict] = Field(default=None, description="Arguments supplied to the tool.")
+    observation: Optional[str] = Field(default=None, description="Result returned from the tool.")
+    final_answer: Optional[str] = Field(default=None, description="Synthesized resolution if final step.")
+
+
+class AgentChatResponse(BaseModel):
+    """Response payload for POST /agent/chat."""
+
+    task: str = Field(description="Echo of the original operational task.")
+    total_steps: int = Field(description="Number of ReAct steps executed.")
+    steps: list[dict] = Field(description="Step-by-step reasoning and tool call trace.")
+    resolution: str = Field(description="Comprehensive final resolution report.")
+
+
+class AgentTriageResponse(BaseModel):
+    """Response payload for POST /agent/triage/{ticket_id}."""
+
+    ticket_id: int
+    initial_ticket: dict
+    updated_ticket: dict
+    triage_trace: list[dict]
+    resolution_summary: str
+
+
+# ---------------------------------------------------------------------------
+# Cron & Maintenance Schemas (Phase 3.3)
+# ---------------------------------------------------------------------------
+
+class CronReindexResponse(BaseModel):
+    """Response payload for POST /cron/reindex."""
+
+    status: str
+    documents_indexed: int
+    chunks_created: int
+    message: str
+
+

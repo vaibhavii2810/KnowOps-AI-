@@ -1,0 +1,120 @@
+{
+  "name": "KnowOps AI — Automated Incident Triage Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "incident-alert",
+        "options": {}
+      },
+      "id": "node-webhook-trigger",
+      "name": "Incoming Alert Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/tickets",
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "subject",
+              "value": "={{ $json.body.alert_name || 'Production Alert: High Error Rate' }}"
+            },
+            {
+              "name": "description",
+              "value": "={{ $json.body.message || 'Alert triggered from monitoring system. Requires immediate triage.' }}"
+            },
+            {
+              "name": "priority",
+              "value": "={{ $json.body.severity || 'P1' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-create-ticket",
+      "name": "Create Incident Ticket",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:8000/agent/triage/{{ $json.id }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "node-agent-triage",
+      "name": "Autonomous Agent Triage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/mock/webhook/knowops-incidents",
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "=🚨 *Incident #{{ $json.ticket_id }} Triaged by KnowOps Agent*\n*Subject:* {{ $json.initial_ticket.subject }}\n*Resolution:* {{ $json.resolution_summary }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-notify-slack",
+      "name": "Notify On-Call Channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Incoming Alert Webhook": {
+      "main": [
+        [
+          {
+            "node": "Create Incident Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Incident Ticket": {
+      "main": [
+        [
+          {
+            "node": "Autonomous Agent Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Autonomous Agent Triage": {
+      "main": [
+        [
+          {
+            "node": "Notify On-Call Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {}
+}

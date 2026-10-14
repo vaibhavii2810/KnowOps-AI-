@@ -519,6 +519,185 @@
     };
     elBtnCloseDiag.onclick = () => elModalDiagnostics.classList.add('hidden');
     elBtnRefreshDiag.onclick = () => checkHealth();
+
+    // CRM Modal Triggers (Phase 3)
+    const elBtnCrmToggle = document.getElementById('btn-crm-toggle');
+    const elModalCrm = document.getElementById('modal-crm');
+    const elBtnCloseCrm = document.getElementById('btn-close-crm');
+    const elBtnToggleNewTicket = document.getElementById('btn-toggle-new-ticket');
+    const elBtnCancelCreate = document.getElementById('btn-cancel-create-ticket');
+    const elInlineTicketForm = document.getElementById('inline-ticket-form');
+    const elFormCreateTicket = document.getElementById('form-create-ticket');
+    const elBtnRefreshTickets = document.getElementById('btn-refresh-tickets');
+
+    if (elBtnCrmToggle) {
+      elBtnCrmToggle.onclick = () => {
+        loadCrmData();
+        elModalCrm.classList.remove('hidden');
+      };
+    }
+    if (elBtnCloseCrm) elBtnCloseCrm.onclick = () => elModalCrm.classList.add('hidden');
+    if (elBtnToggleNewTicket) {
+      elBtnToggleNewTicket.onclick = () => elInlineTicketForm.classList.toggle('hidden');
+    }
+    if (elBtnCancelCreate) {
+      elBtnCancelCreate.onclick = () => elInlineTicketForm.classList.add('hidden');
+    }
+    if (elBtnRefreshTickets) elBtnRefreshTickets.onclick = () => loadCrmData();
+    if (elFormCreateTicket) elFormCreateTicket.onsubmit = handleCreateTicketSubmit;
+  }
+
+  // ---------------------------------------------------------------------------
+  // CRM & Agent Triage Handlers (Phase 3)
+  // ---------------------------------------------------------------------------
+  async function loadCrmData() {
+    try {
+      const [resStats, resTickets] = await Promise.all([
+        fetch('/tickets/stats'),
+        fetch('/tickets?limit=50')
+      ]);
+
+      if (resStats.ok) {
+        const stats = await resStats.json();
+        document.getElementById('crm-total-tickets').textContent = stats.total_tickets;
+        document.getElementById('crm-open-tickets').textContent = stats.open;
+        document.getElementById('crm-prog-tickets').textContent = stats.in_progress;
+        document.getElementById('crm-res-tickets').textContent = stats.resolved;
+        document.getElementById('crm-p1-tickets').textContent = stats.active_p1_incidents;
+      }
+
+      if (resTickets.ok) {
+        const tickets = await resTickets.json();
+        renderTicketsTable(tickets);
+      }
+    } catch (err) {
+      console.warn('Failed to load CRM data:', err);
+    }
+  }
+
+  function renderTicketsTable(tickets) {
+    const tbody = document.getElementById('tickets-table-body');
+    if (!tickets || tickets.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:16px;">No incident tickets recorded.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = tickets.map(t => {
+      const pClass = `priority-${t.priority.toLowerCase()}`;
+      const sClass = t.status.toLowerCase();
+      const isResolved = t.status === 'resolved';
+
+      return `
+        <tr id="ticket-row-${t.id}">
+          <td><strong>#${t.id}</strong></td>
+          <td><span class="priority-pill ${pClass}">${t.priority}</span></td>
+          <td>
+            <div style="font-weight:600; color:#fff;">${escapeHtml(t.subject)}</div>
+            <div style="font-size:11px; color:#94a3b8; max-width:380px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+              ${escapeHtml(t.description)}
+            </div>
+          </td>
+          <td><span class="status-tag ${sClass}">${t.status.replace('_', ' ')}</span></td>
+          <td>
+            ${isResolved 
+              ? `<span style="font-size:11px; color:#6ee7b7;">✓ Resolved</span>`
+              : `<button class="btn-triage" data-ticket-id="${t.id}">🤖 Auto-Triage</button>`
+            }
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    // Bind Auto-Triage buttons
+    tbody.querySelectorAll('.btn-triage').forEach(btn => {
+      btn.onclick = () => {
+        const ticketId = parseInt(btn.getAttribute('data-ticket-id'), 10);
+        executeAgentTriage(ticketId, btn);
+      };
+    });
+  }
+
+  async function handleCreateTicketSubmit(e) {
+    e.preventDefault();
+    const subject = document.getElementById('new-ticket-subject').value.trim();
+    const priority = document.getElementById('new-ticket-priority').value;
+    const description = document.getElementById('new-ticket-desc').value.trim();
+
+    try {
+      const res = await fetch('/tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject, priority, description })
+      });
+
+      if (!res.ok) throw new Error('Failed to create ticket');
+
+      document.getElementById('form-create-ticket').reset();
+      document.getElementById('inline-ticket-form').classList.add('hidden');
+      loadCrmData();
+    } catch (err) {
+      alert(`Error creating ticket: ${err.message}`);
+    }
+  }
+
+  async function executeAgentTriage(ticketId, triggerBtn) {
+    const traceBox = document.getElementById('agent-trace-box');
+    const targetSpan = document.getElementById('trace-ticket-target');
+    const statusPill = document.getElementById('trace-status-pill');
+    const stepsContainer = document.getElementById('agent-trace-steps');
+    const summaryBox = document.getElementById('agent-resolution-summary');
+    const summaryText = document.getElementById('agent-resolution-text');
+
+    traceBox.classList.remove('hidden');
+    targetSpan.textContent = `Ticket #${ticketId}`;
+    statusPill.textContent = 'Agent Reasoning (ReAct)...';
+    statusPill.style.background = 'rgba(245, 158, 11, 0.2)';
+    statusPill.style.color = '#fbbf24';
+    stepsContainer.innerHTML = '<div style="font-size:12px; color:#94a3b8; padding:8px;">Running autonomous investigation: lookup_runbook → diagnostics → remediation...</div>';
+    summaryBox.classList.add('hidden');
+
+    if (triggerBtn) {
+      triggerBtn.disabled = true;
+      triggerBtn.textContent = 'Triaging...';
+    }
+
+    try {
+      const res = await fetch(`/agent/triage/${ticketId}`, { method: 'POST' });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || 'Triage failed');
+      }
+
+      const data = await res.json();
+
+      // Render ReAct trace steps
+      stepsContainer.innerHTML = data.triage_trace.map(s => `
+        <div class="trace-step-item">
+          <div class="step-thought"><strong>Step ${s.step}:</strong> ${escapeHtml(s.thought || '')}</div>
+          ${s.action ? `<div class="step-action-tag">⚡ Action: ${escapeHtml(s.action)}(${escapeHtml(JSON.stringify(s.args || {}))})</div>` : ''}
+          ${s.observation ? `<div class="step-observation-box">${escapeHtml(s.observation)}</div>` : ''}
+        </div>
+      `).join('');
+
+      // Render resolution summary
+      summaryText.textContent = data.resolution_summary;
+      summaryBox.classList.remove('hidden');
+
+      statusPill.textContent = 'Incident Triaged & Resolved';
+      statusPill.style.background = 'rgba(16, 185, 129, 0.2)';
+      statusPill.style.color = '#6ee7b7';
+
+      // Refresh ticket list to show resolved status
+      loadCrmData();
+
+    } catch (err) {
+      statusPill.textContent = 'Triage Error';
+      statusPill.style.background = 'rgba(239, 68, 68, 0.2)';
+      statusPill.style.color = '#f87171';
+      stepsContainer.innerHTML = `<div style="color:#f87171; font-size:12px;">Error: ${escapeHtml(err.message)}</div>`;
+    } finally {
+      if (triggerBtn) triggerBtn.disabled = false;
+    }
   }
 
   // Run on DOM Ready

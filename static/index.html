@@ -46,6 +46,9 @@
       </div>
 
       <div class="header-right">
+        <button class="btn btn-secondary" id="btn-crm-toggle" title="Incident tickets & autonomous agent triage">
+          <span class="btn-icon">🎫</span> Incidents CRM
+        </button>
         <button class="btn btn-secondary" id="btn-diagnostics" title="Inspect system health">
           <span class="btn-icon">🩺</span> Diagnostics
         </button>
@@ -248,6 +251,93 @@
             <button type="submit" class="btn btn-primary" id="btn-submit-login">Sign In (JWT)</button>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Incident CRM & Autonomous Agent Triage Modal -->
+  <div class="modal-backdrop hidden" id="modal-crm">
+    <div class="modal-card modal-extra-wide">
+      <div class="modal-header">
+        <div class="modal-title">🎫 Incident CRM &amp; Autonomous Agent Triage</div>
+        <button class="btn-close" id="btn-close-crm">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- CRM Analytics Cards -->
+        <div class="crm-stats-row" id="crm-stats-row">
+          <div class="crm-stat-card"><span class="crm-stat-num" id="crm-total-tickets">-</span>Total Tickets</div>
+          <div class="crm-stat-card"><span class="crm-stat-num stat-open" id="crm-open-tickets">-</span>Open</div>
+          <div class="crm-stat-card"><span class="crm-stat-num stat-prog" id="crm-prog-tickets">-</span>In Progress</div>
+          <div class="crm-stat-card"><span class="crm-stat-num stat-res" id="crm-res-tickets">-</span>Resolved</div>
+          <div class="crm-stat-card"><span class="crm-stat-num stat-p1" id="crm-p1-tickets">-</span>Active P1 Outages</div>
+        </div>
+
+        <!-- Create New Ticket Toggle -->
+        <div class="crm-action-bar">
+          <button class="btn btn-secondary btn-sm" id="btn-toggle-new-ticket">+ Report New Incident</button>
+          <button class="btn btn-secondary btn-sm" id="btn-refresh-tickets">↻ Refresh</button>
+        </div>
+
+        <!-- Inline New Ticket Form (Hidden by default) -->
+        <div class="inline-ticket-form hidden" id="inline-ticket-form">
+          <form id="form-create-ticket">
+            <div class="form-row-compact">
+              <div class="form-group flex-2">
+                <label for="new-ticket-subject" class="form-label">Incident Subject</label>
+                <input type="text" id="new-ticket-subject" class="form-input" placeholder="e.g. Ingress 502 Bad Gateway" required>
+              </div>
+              <div class="form-group flex-1">
+                <label for="new-ticket-priority" class="form-label">Priority</label>
+                <select id="new-ticket-priority" class="form-input">
+                  <option value="P1">P1 — Critical Outage</option>
+                  <option value="P2" selected>P2 — Degraded Service</option>
+                  <option value="P3">P3 — Low Impact</option>
+                  <option value="P4">P4 — Informational</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="new-ticket-desc" class="form-label">Description &amp; Symptoms</label>
+              <textarea id="new-ticket-desc" class="form-input" rows="2" placeholder="Details of the alert, logs, or error codes..." required></textarea>
+            </div>
+            <div class="form-actions-compact">
+              <button type="submit" class="btn btn-primary btn-sm">Create Incident Ticket</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-cancel-create-ticket">Cancel</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Live Tickets Table -->
+        <div class="tickets-table-wrapper">
+          <table class="tickets-table" id="tickets-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Priority</th>
+                <th>Subject</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="tickets-table-body">
+              <tr><td colspan="5" style="text-align:center; padding:16px;">Loading incident tickets from PostgreSQL...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Live Agent Execution Trace -->
+        <div class="agent-trace-box hidden" id="agent-trace-box">
+          <div class="agent-trace-header">
+            <span class="trace-title">🤖 ReAct Agent Execution Trace (<span id="trace-ticket-target">Ticket #...</span>)</span>
+            <span class="trace-status" id="trace-status-pill">Thinking...</span>
+          </div>
+          <div class="agent-trace-steps" id="agent-trace-steps"></div>
+          <div class="agent-resolution-summary hidden" id="agent-resolution-summary">
+            <div class="res-title">Triage Summary &amp; Recommended Next Steps:</div>
+            <div class="res-body" id="agent-resolution-text"></div>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
