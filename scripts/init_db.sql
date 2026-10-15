@@ -24,8 +24,11 @@ CREATE TABLE IF NOT EXISTS tickets (
     id SERIAL PRIMARY KEY,
     subject TEXT NOT NULL,
     description TEXT NOT NULL,
+    priority TEXT NOT NULL DEFAULT 'P2',
     status TEXT NOT NULL DEFAULT 'open',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    resolution_notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS conversations (
