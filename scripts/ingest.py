@@ -46,11 +46,11 @@ from app.llm import embed_document
 
 DOCS_DIR = PROJECT_ROOT / "data" / "docs"
 
-# Target chunk size in characters (≈ 300 tokens @ 4 chars/token)
-CHUNK_SIZE = 1_200
+# Target chunk size in characters (build guide 3.2: ~500 chars ≈ 125 tokens)
+CHUNK_SIZE = 500
 
-# Number of characters to overlap between consecutive text-split chunks
-CHUNK_OVERLAP = 150
+# Overlap used only when a single line is longer than CHUNK_SIZE and must be hard-split
+CHUNK_OVERLAP = 50
 
 # Minimum characters a chunk must have to be worth embedding
 MIN_CHUNK_CHARS = 80
@@ -139,27 +139,58 @@ def split_text_with_overlap(
         start += size - overlap
 
 
+def split_units(body: str, size: int = CHUNK_SIZE) -> Generator[str, None, None]:
+    """
+    Yield paragraphs no longer than *size*. An oversized paragraph is broken
+    into its lines; only a single line longer than *size* is hard-split.
+    """
+    for para in re.split(r"\n\s*\n", body):
+        para = para.strip()
+        if len(para) <= size:
+            yield para
+            continue
+        for line in para.splitlines():
+            line = line.strip()
+            if len(line) <= size:
+                yield line
+            else:
+                yield from split_text_with_overlap(line, size)
+
+
+def pack_paragraphs(body: str, size: int = CHUNK_SIZE) -> list[str]:
+    """Greedily join paragraph units into pieces of at most *size* characters."""
+    pieces: list[str] = []
+    current = ""
+    for unit in split_units(body, size):
+        if not unit:
+            continue
+        if current and len(current) + 2 + len(unit) > size:
+            pieces.append(current)
+            current = unit
+        else:
+            current = f"{current}\n\n{unit}" if current else unit
+    if current:
+        pieces.append(current)
+    return pieces
+
+
 def make_chunks(text: str) -> list[tuple[str, str]]:
     """
     Full chunking pipeline for one document:
-      1. Split on heading boundaries   →  coarse semantic sections
-      2. Further split large sections  →  fine-grained overlap chunks
+      1. Split on heading boundaries        →  coarse semantic sections
+      2. Pack each section's paragraphs     →  ~CHUNK_SIZE pieces, never mid-paragraph
+         unless a single line is itself too long
 
     Returns:
         List of (heading, chunk_text) tuples ready for embedding.
     """
     chunks: list[tuple[str, str]] = []
-    sections = split_by_headings(text)
 
-    for heading, body in sections:
-        if len(body) <= CHUNK_SIZE:
-            if len(body) >= MIN_CHUNK_CHARS:
-                chunks.append((heading, body))
-        else:
-            for sub in split_text_with_overlap(body):
-                sub = sub.strip()
-                if len(sub) >= MIN_CHUNK_CHARS:
-                    chunks.append((heading, sub))
+    for heading, body in split_by_headings(text):
+        for piece in pack_paragraphs(body):
+            piece = piece.strip()
+            if len(piece) >= MIN_CHUNK_CHARS:
+                chunks.append((heading, piece))
 
     return chunks
 
@@ -230,7 +261,7 @@ def ingest_file(filepath: Path, conn, verbose: bool = True) -> dict:
     # Derive metadata
     _, body = extract_frontmatter(raw_text)
     title = extract_title_from_markdown(body) or filepath.stem.replace("_", " ").title()
-    source = str(filepath.relative_to(PROJECT_ROOT))
+    source = filepath.relative_to(PROJECT_ROOT).as_posix()  # same key on Windows and Vercel
 
     if verbose:
         print(f"\n📄 Ingesting: {source}")
