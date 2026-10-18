@@ -214,3 +214,22 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   being understood).
 - **Tradeoff accepted:** Every code change takes a few extra minutes for the docs and the quiz.
 - **Revisit if:** The overhead stops being worth it.
+
+### D-022 · JWT required on every route except `/health`, `/auth/login`, and the static shell
+- **Date · by · source:** 2026-10-17 · Vaishnavi (with Claude) · Build guide
+- **Decision:** `Depends(get_current_user_required)` was added to `/conversations*`, `/ask`, `/tickets*`,
+  `/agent/chat`, `/agent/triage/{id}`. `/ask` switched from `get_current_user_optional` to required.
+  `GET /`, `/static/*`, `/docs`, `/redoc` and `/cron/reindex` stay unauthenticated.
+- **Why:** Phase 5.4's literal instruction is "protect every route except `/health` and `/auth/login`", but
+  `GET /` only serves the static SPA shell (no data) and must load before a browser can even show the login
+  form, so treating it as part of the login surface (like `/auth/login` itself) is necessary, not a loophole.
+  `/docs`/`/redoc` are the same kind of shell, served by FastAPI itself. `/cron/reindex` already enforces its
+  own `CRON_SECRET` bearer check (D-020) — it's a service-to-service call from Vercel Cron, not an operator,
+  so the operator JWT dependency doesn't apply to it.
+- **Alternatives considered:** Protecting `GET /` too (breaks the console before anyone can log in, since the
+  JWT has to come from somewhere); adding JWT *and* keeping `CRON_SECRET` on `/cron/reindex` (two secrets to
+  manage for one caller, no added safety since Cron isn't an operator).
+- **Tradeoff accepted:** The SPA shell and generated docs are visible to anyone; no data lives there, so that's
+  acceptable. `static/js/app.js` now gates `/ask`, conversations, tickets and agent triage on `jwtToken` and
+  shows the login modal instead of firing a request that 401s.
+- **Revisit if:** `GET /` or `/docs` start returning anything sensitive.

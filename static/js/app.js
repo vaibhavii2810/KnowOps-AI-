@@ -62,6 +62,15 @@
     await loadRecentConversations();
   }
 
+  // Phase 5.4: every API route except /health and /auth/login now requires a JWT.
+  // Build headers for a fetch call; pass withJson=true to also set Content-Type.
+  function authHeaders(withJson) {
+    const headers = {};
+    if (withJson) headers['Content-Type'] = 'application/json';
+    if (jwtToken) headers['Authorization'] = `Bearer ${jwtToken}`;
+    return headers;
+  }
+
   // ---------------------------------------------------------------------------
   // Health & Diagnostics
   // ---------------------------------------------------------------------------
@@ -165,6 +174,7 @@
       updateAuthUI(currentUser);
       elModalLogin.classList.add('hidden');
       elFormLogin.reset();
+      loadRecentConversations();
     } catch (err) {
       elLoginErrorMsg.textContent = err.message;
       elLoginErrorMsg.classList.remove('hidden');
@@ -176,14 +186,20 @@
     currentUser = null;
     localStorage.removeItem('knowops_jwt');
     updateAuthUI(null);
+    elSessionList.innerHTML = '';
+    activeConversationId = null;
   }
 
   // ---------------------------------------------------------------------------
   // Conversation Sessions (Multi-Turn)
   // ---------------------------------------------------------------------------
   async function loadRecentConversations() {
+    if (!jwtToken) {
+      elSessionList.innerHTML = '';
+      return;
+    }
     try {
-      const res = await fetch('/conversations?limit=15');
+      const res = await fetch('/conversations?limit=15', { headers: authHeaders() });
       if (res.ok) {
         const conversations = await res.json();
         renderSessionList(conversations);
@@ -235,7 +251,7 @@
     elHeroWelcome.style.display = 'none';
 
     try {
-      const res = await fetch(`/conversations/${id}`);
+      const res = await fetch(`/conversations/${id}`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         data.messages.forEach(msg => {
@@ -259,6 +275,12 @@
   async function submitQuery(queryText) {
     if (!queryText || !queryText.trim()) return;
 
+    // Phase 5.4: /ask now requires a signed-in operator.
+    if (!jwtToken) {
+      elModalLogin.classList.remove('hidden');
+      return;
+    }
+
     // Hide hero welcome
     if (elHeroWelcome) {
       elHeroWelcome.style.display = 'none';
@@ -275,15 +297,10 @@
 
     const topK = parseInt(elSelectTopK.value, 10) || 5;
 
-    const headers = { 'Content-Type': 'application/json' };
-    if (jwtToken) {
-      headers['Authorization'] = `Bearer ${jwtToken}`;
-    }
-
     try {
       const res = await fetch('/ask', {
         method: 'POST',
-        headers: headers,
+        headers: authHeaders(true),
         body: JSON.stringify({
           question: queryText,
           conversation_id: activeConversationId,
@@ -551,10 +568,17 @@
   // CRM & Agent Triage Handlers (Phase 3)
   // ---------------------------------------------------------------------------
   async function loadCrmData() {
+    if (!jwtToken) {
+      const tbody = document.getElementById('tickets-table-body');
+      if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:16px;">Sign in to view incident tickets.</td></tr>';
+      }
+      return;
+    }
     try {
       const [resStats, resTickets] = await Promise.all([
-        fetch('/tickets/stats'),
-        fetch('/tickets?limit=50')
+        fetch('/tickets/stats', { headers: authHeaders() }),
+        fetch('/tickets?limit=50', { headers: authHeaders() })
       ]);
 
       if (resStats.ok) {
@@ -619,6 +643,10 @@
 
   async function handleCreateTicketSubmit(e) {
     e.preventDefault();
+    if (!jwtToken) {
+      alert('Please sign in to create a ticket.');
+      return;
+    }
     const subject = document.getElementById('new-ticket-subject').value.trim();
     const priority = document.getElementById('new-ticket-priority').value;
     const description = document.getElementById('new-ticket-desc').value.trim();
@@ -626,7 +654,7 @@
     try {
       const res = await fetch('/tickets', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(true),
         body: JSON.stringify({ subject, priority, description })
       });
 
@@ -641,6 +669,10 @@
   }
 
   async function executeAgentTriage(ticketId, triggerBtn) {
+    if (!jwtToken) {
+      elModalLogin.classList.remove('hidden');
+      return;
+    }
     const traceBox = document.getElementById('agent-trace-box');
     const targetSpan = document.getElementById('trace-ticket-target');
     const statusPill = document.getElementById('trace-status-pill');
@@ -662,7 +694,7 @@
     }
 
     try {
-      const res = await fetch(`/agent/triage/${ticketId}`, { method: 'POST' });
+      const res = await fetch(`/agent/triage/${ticketId}`, { method: 'POST', headers: authHeaders() });
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.detail || 'Triage failed');

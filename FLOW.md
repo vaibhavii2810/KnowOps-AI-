@@ -39,9 +39,11 @@ created on first use by `llm.get_client()` (`lru_cache` → one client per proce
 
 ## 3. Every request
 
-`CORSMiddleware` → route match → dependencies (`get_current_user_optional` / `_required` →
-`security_bearer` reads `Authorization: Bearer <jwt>`) → request body validated against `app/schemas.py`
-(422 if invalid) → route handler → response serialised through its `response_model`.
+`CORSMiddleware` → route match → dependencies (`get_current_user_required` on every route below except
+`/health`, `/auth/login`, `GET /`, `/static/*`, `/docs`, `/redoc`, `/cron/reindex` — Phase 5.4, D-022 →
+`security_bearer` reads `Authorization: Bearer <jwt>`, missing/invalid/expired → 401) → request body
+validated against `app/schemas.py` (422 if invalid) → route handler → response serialised through its
+`response_model`.
 
 ## 4. Route call chains
 
@@ -69,7 +71,7 @@ Depends(auth.get_current_user_required)
 
 ### `POST /ask` — the main RAG path
 ```
-ask(AskRequest, Depends(auth.get_current_user_optional))
+ask(AskRequest, Depends(auth.get_current_user_required))   ← Phase 5.4: now required, was optional
   1. [DB] create a conversation, or load its history (first 8 messages, oldest first)
   2. rag.retrieve_and_format(question, top_k)
        → rag.retrieve(query, top_k, threshold=0.55)
@@ -88,14 +90,14 @@ ask(AskRequest, Depends(auth.get_current_user_optional))
   5. AskResponse(answer, sources=chunks, question, conversation_id)
 ```
 
-### Conversations
+### Conversations (all `Depends(auth.get_current_user_required)` — Phase 5.4)
 ```
 POST /conversations         → create_conversation()          → [DB] INSERT conversations
 GET  /conversations         → list_conversations_endpoint()  → [DB] conversations LEFT JOIN messages (counts)
 GET  /conversations/{id}    → get_conversation_endpoint()    → [DB] conversation + messages (404 if missing)
 ```
 
-### Tickets (mock CRM)
+### Tickets (mock CRM) (all `Depends(auth.get_current_user_required)` — Phase 5.4)
 ```
 POST  /tickets         → api_create_ticket()    → crm.create_ticket()        → [DB] INSERT (priority forced into P1–P4, default P2)
 GET   /tickets         → api_list_tickets()     → crm.list_tickets()         → [DB] SELECT, P1 first, newest first
@@ -105,7 +107,7 @@ PATCH /tickets/{id}    → api_update_ticket()    → crm.update_ticket_status()
 ```
 `/tickets/stats` is registered before `/tickets/{ticket_id}` — keep that order or "stats" is parsed as an id.
 
-### `POST /agent/chat` — ReAct loop
+### `POST /agent/chat` — ReAct loop (`Depends(auth.get_current_user_required)` — Phase 5.4)
 ```
 api_agent_chat(AgentChatRequest) → agent.run_agent(prompt, max_steps)
   for step in 1..max_steps:
@@ -123,7 +125,7 @@ api_agent_chat(AgentChatRequest) → agent.run_agent(prompt, max_steps)
 → {task, total_steps, steps, resolution} → AgentChatResponse
 ```
 
-### `POST /agent/triage/{ticket_id}`
+### `POST /agent/triage/{ticket_id}` (`Depends(auth.get_current_user_required)` — Phase 5.4)
 ```
 api_agent_triage(ticket_id) → agent.triage_ticket_with_agent(ticket_id)
   → crm.get_ticket            (missing → ValueError → 404)
@@ -177,15 +179,17 @@ DOMContentLoaded → init()
   → restoreAuthSession()       GET /auth/me   (JWT from localStorage "knowops_jwt")
   → loadRecentConversations()  GET /conversations?limit=15
 
-User actions:
-  ask question       → submitQuery()               POST /ask   (sends the JWT if logged in)
-  log in             → handleLoginSubmit()         POST /auth/login
-  open conversation  → switchConversation()        GET /conversations/{id}
-  open CRM tab       → loadCrmData()               GET /tickets/stats + GET /tickets?limit=50
-  create ticket      → handleCreateTicketSubmit()  POST /tickets
-  triage ticket      → executeAgentTriage()        POST /agent/triage/{id}
+User actions (Phase 5.4: `authHeaders()` attaches the JWT; each of these bails out to the login modal /
+shows a "sign in" message instead of firing the request when `jwtToken` is null, since the route now 401s):
+  ask question       → submitQuery()               POST /ask                           (requires JWT)
+  log in             → handleLoginSubmit()         POST /auth/login → loadRecentConversations()
+  open conversation  → switchConversation()        GET /conversations/{id}             (requires JWT)
+  open CRM tab       → loadCrmData()               GET /tickets/stats + GET /tickets   (requires JWT)
+  create ticket      → handleCreateTicketSubmit()  POST /tickets                       (requires JWT)
+  triage ticket      → executeAgentTriage()        POST /agent/triage/{id}             (requires JWT)
+  sign out           → logout()                    clears jwtToken + session list
 ```
-Only `/auth/me` and `/ask` send the `Authorization` header, so Phase 5.4 has to update `app.js` too.
+Every call above now sends `Authorization: Bearer <jwt>` via `authHeaders()`.
 
 ## 7. Module dependencies
 

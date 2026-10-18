@@ -36,7 +36,6 @@ from fastapi.staticfiles import StaticFiles
 from app.agent import run_agent, triage_ticket_with_agent
 from app.auth import (
     create_access_token,
-    get_current_user_optional,
     get_current_user_required,
     verify_operator_credentials,
 )
@@ -185,7 +184,9 @@ def get_me(user: dict = Depends(get_current_user_required)) -> UserInfo:
     summary="Create a new conversation session",
     tags=["Conversations"],
 )
-def create_conversation() -> ConversationCreateResponse:
+def create_conversation(
+    current_user: dict = Depends(get_current_user_required),
+) -> ConversationCreateResponse:
     """Initialize a new multi-turn conversation thread in PostgreSQL."""
     with get_conn() as conn:
         row = conn.execute(
@@ -207,7 +208,10 @@ def create_conversation() -> ConversationCreateResponse:
     summary="List recent conversation sessions",
     tags=["Conversations"],
 )
-def list_conversations_endpoint(limit: int = 20) -> list[dict]:
+def list_conversations_endpoint(
+    limit: int = 20,
+    current_user: dict = Depends(get_current_user_required),
+) -> list[dict]:
     """Retrieve the most recent conversation sessions."""
     with get_conn() as conn:
         rows = conn.execute(
@@ -238,7 +242,10 @@ def list_conversations_endpoint(limit: int = 20) -> list[dict]:
     summary="Get conversation history",
     tags=["Conversations"],
 )
-def get_conversation_endpoint(conversation_id: int) -> ConversationDetail:
+def get_conversation_endpoint(
+    conversation_id: int,
+    current_user: dict = Depends(get_current_user_required),
+) -> ConversationDetail:
     """Retrieve full message history for a specific conversation thread."""
     with get_conn() as conn:
         conv_row = conn.execute(
@@ -329,7 +336,7 @@ def health() -> HealthResponse:
 )
 def ask(
     request: AskRequest,
-    current_user: Optional[dict] = Depends(get_current_user_optional),
+    current_user: dict = Depends(get_current_user_required),
 ) -> AskResponse:
     """
     End-to-end RAG Q&A endpoint with multi-turn memory support.
@@ -423,7 +430,10 @@ def ask(
     summary="Create a new incident ticket",
     tags=["CRM"],
 )
-def api_create_ticket(request: TicketCreateRequest) -> TicketResponse:
+def api_create_ticket(
+    request: TicketCreateRequest,
+    current_user: dict = Depends(get_current_user_required),
+) -> TicketResponse:
     """Create a new incident ticket in PostgreSQL."""
     ticket = create_ticket(
         subject=request.subject,
@@ -443,6 +453,7 @@ def api_list_tickets(
     status: Optional[str] = None,
     priority: Optional[str] = None,
     limit: int = 50,
+    current_user: dict = Depends(get_current_user_required),
 ) -> list[TicketResponse]:
     """Retrieve incident tickets filtered by status and priority."""
     tickets = list_tickets(status=status, priority=priority, limit=limit)
@@ -455,7 +466,9 @@ def api_list_tickets(
     summary="CRM incident metrics and analytics",
     tags=["CRM"],
 )
-def api_get_ticket_stats() -> CRMStatsResponse:
+def api_get_ticket_stats(
+    current_user: dict = Depends(get_current_user_required),
+) -> CRMStatsResponse:
     """Aggregated ticket statistics for operational monitoring."""
     stats = get_crm_stats()
     return CRMStatsResponse(**stats)
@@ -467,7 +480,10 @@ def api_get_ticket_stats() -> CRMStatsResponse:
     summary="Get incident ticket by ID",
     tags=["CRM"],
 )
-def api_get_ticket(ticket_id: int) -> TicketResponse:
+def api_get_ticket(
+    ticket_id: int,
+    current_user: dict = Depends(get_current_user_required),
+) -> TicketResponse:
     """Retrieve a single incident ticket by ID."""
     ticket = get_ticket(ticket_id)
     if not ticket:
@@ -484,7 +500,11 @@ def api_get_ticket(ticket_id: int) -> TicketResponse:
     summary="Update ticket status and resolution notes",
     tags=["CRM"],
 )
-def api_update_ticket(ticket_id: int, request: TicketUpdateRequest) -> TicketResponse:
+def api_update_ticket(
+    ticket_id: int,
+    request: TicketUpdateRequest,
+    current_user: dict = Depends(get_current_user_required),
+) -> TicketResponse:
     """Update status ('open', 'in_progress', 'resolved', 'closed') and resolution notes."""
     try:
         updated = update_ticket_status(
@@ -513,7 +533,10 @@ def api_update_ticket(ticket_id: int, request: TicketUpdateRequest) -> TicketRes
     summary="Autonomous ReAct agent task execution",
     tags=["Agent"],
 )
-def api_agent_chat(request: AgentChatRequest) -> AgentChatResponse:
+def api_agent_chat(
+    request: AgentChatRequest,
+    current_user: dict = Depends(get_current_user_required),
+) -> AgentChatResponse:
     """
     Execute autonomous ReAct agent loop with tool-calling capabilities.
     The agent searches runbooks, inspects live system components, and drafts remediation plans.
@@ -533,7 +556,10 @@ def api_agent_chat(request: AgentChatRequest) -> AgentChatResponse:
     summary="Automated incident ticket triage pipeline",
     tags=["Agent"],
 )
-def api_agent_triage(ticket_id: int) -> AgentTriageResponse:
+def api_agent_triage(
+    ticket_id: int,
+    current_user: dict = Depends(get_current_user_required),
+) -> AgentTriageResponse:
     """
     Run automated triage on an active incident ticket:
     1. Reads ticket details.
