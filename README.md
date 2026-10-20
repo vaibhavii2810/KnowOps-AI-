@@ -4,7 +4,7 @@ An AI-powered technical support backend for DevOps/SRE teams. It answers support
 runbook knowledge base with citations (RAG), and runs an agent that can search the knowledge base,
 create, check and triage incident tickets, and escalate to a human.
 
-**Progress:** Phases 1–4 of 15 complete. Live status of every phase: [AGENTS.md](AGENTS.md#phase-status).
+**Progress:** Phases 1–5 of 15 complete. Live status of every phase: [AGENTS.md](AGENTS.md#phase-status).
 
 ## Stack (free tier)
 

@@ -108,7 +108,7 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Why:** The guide asks for ~500 chars on paragraph/heading boundaries. Never cutting mid-paragraph keeps
   each chunk readable as a citation.
 - **Alternatives considered:** Fixed-size windows (cut sentences in half); larger chunks (less precise retrieval).
-- **Tradeoff accepted:** More chunks means more embedding calls (78 so far) and less context per chunk.
+- **Tradeoff accepted:** More chunks means more embedding calls (80 so far) and less context per chunk.
 - **Revisit if:** Answers miss context that spans sections.
 
 ### D-011 · Idempotent ingestion keyed on the file path
@@ -233,3 +233,15 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   acceptable. `static/js/app.js` now gates `/ask`, conversations, tickets and agent triage on `jwtToken` and
   shows the login modal instead of firing a request that 401s.
 - **Revisit if:** `GET /` or `/docs` start returning anything sensitive.
+
+### D-023 · `top_k` default 5, caller-configurable 1–20, instead of a fixed 4–6
+- **Date · by · source:** 2026-10-18 · Vaishnavi (with Claude) · Inferred
+- **Decision:** `rag.retrieve(top_k=5)` is the default (inside the guide's suggested 4–6), but
+  `AskRequest.top_k` (`app/schemas.py`) lets the caller pass 1–20, and `/ask` forwards it unchanged.
+- **Why:** A fixed 4–6 is a reasonable default, not a hard requirement — letting the operator widen or
+  narrow retrieval (e.g. a complex multi-step runbook vs. a single fact) is more useful than hard-coding it,
+  and the default still satisfies Phase 6.1 as written.
+- **Alternatives considered:** Clamping `top_k` server-side to 4–6 regardless of what the caller sends.
+- **Tradeoff accepted:** A caller can ask for up to 20 chunks, which costs more context/tokens per answer
+  than the guide anticipated; the `static/js/app.js` dropdown only ever offers sane values.
+- **Revisit if:** Large `top_k` values measurably hurt answer quality or latency.

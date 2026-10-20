@@ -38,7 +38,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 2 | DB schema | Niranjan | ✅ Done |
 | 3 | KB content + RAG ingestion | Vaishnavi | ✅ Done |
 | 4 | FastAPI skeleton + Vercel deploy | Niranjan | ✅ Done |
-| 5 | JWT auth | Niranjan | 🟡 Partial — 5.4 open |
+| 5 | JWT auth | Niranjan | ✅ Done |
 | 6 | RAG retrieval + `/ask` | Niranjan | 🟡 Code exists, 6.4/6.5 not verified |
 | 7 | Agent + tool-calling | Niranjan | 🟡 Code exists, not verified |
 | 8 | Mock CRM / tickets | Vaishnavi | 🟡 Code exists, not verified |
@@ -63,7 +63,7 @@ install cleanly; local `.env` has every variable in `.env.example`.
 
 **Phase 3 — KB content + RAG ingestion** ✅
 5 DevOps/SRE runbooks in `data/docs/`; paragraph-packing chunker (~500 chars); `scripts/ingest.py`
-ingested 5 docs / 78 chunks into Neon; re-running doesn't duplicate rows (`tests/test_ingest.py`).
+ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, was 78); re-running doesn't duplicate rows (`tests/test_ingest.py`).
 
 **Phase 4 — FastAPI skeleton + Vercel deploy** ✅
 - 4.1 `app/main.py` with FastAPI app and `GET /health` (reports DB + KB counts)
@@ -73,6 +73,21 @@ ingested 5 docs / 78 chunks into Neon; re-running doesn't duplicate rows (`tests
 - 4.5 Repo deploys through Vaishnavi's Vercel project **`knowops-ai-`**, Git-connected to
   `vaibhavii2810/KnowOps-AI-` (see Deployment)
 - 4.6–4.7 Env vars and the live `/health` check are on that same project
+
+**Phase 5 — JWT auth** ✅
+- 5.1 `APP_USERNAME`, `APP_PASSWORD`, `JWT_SECRET` in `.env` and Vercel (Preview + Production)
+- 5.2 `app/auth.py`: `POST /auth/login` checks env-var credentials, returns a signed JWT
+- 5.3 `get_current_user_optional` / `get_current_user_required` FastAPI dependencies verify the bearer token
+- 5.4 `Depends(get_current_user_required)` added to `/conversations*`, `/ask` (was optional, now required),
+  `/tickets*`, `/agent/chat`, `/agent/triage/{id}`. `GET /`, `/static/*`, `/docs`, `/redoc` stay open (the SPA
+  shell has no data and must load before anyone can log in); `/cron/reindex` keeps its own `CRON_SECRET` check
+  instead (service call from Vercel Cron, not an operator) — see D-022. `static/js/app.js` sends the JWT on
+  every now-protected call and gates those actions behind the login modal when logged out.
+- 5.5 `tests/test_auth_protection.py` (new) plus updates to `tests/test_crm.py` / `tests/test_api_v2_5.py`
+  (via a shared `auth_headers` fixture in `tests/conftest.py`) prove 401 with no token and 200 with a valid
+  one, locally (40/40 pytest) and live — checked directly against the `sprint-2` Vercel deployment
+  (commit `b03a462`): `/tickets`, `/conversations`, `/ask` all 401 without a token, login succeeds, `/tickets`
+  with the token returns 200.
 
 ## Phase log
 
@@ -84,6 +99,7 @@ Append one line per finished phase (newest last).
 | 2026-10-15 | 2 | Niranjan | Schema live on Neon, round-trip verified, extra `tickets` columns |
 | 2026-10-15 | 3 | Both | 5 runbooks, 500-char chunker, 78 chunks ingested idempotently |
 | 2026-10-15 | 4 | Both | Skeleton done; deployed via Vercel project `knowops-ai-` |
+| 2026-10-18 | 5 | Vaishnavi (with Claude) | 5.4 closed — every route but health/login now requires a JWT, verified locally (40/40 tests) and live on `sprint-2` |
 
 ## Deployment
 
@@ -108,10 +124,10 @@ Append one line per finished phase (newest last).
 | GET | `/health` | none (correct) | DB + KB health |
 | POST | `/auth/login` | none (correct) | Returns JWT |
 | GET | `/auth/me` | required | Current operator |
-| POST | `/ask` | optional ⚠️ | RAG answer with citations |
-| POST/GET | `/conversations`, `/conversations/{id}` | none ⚠️ | Chat history |
-| POST/GET/PATCH | `/tickets`, `/tickets/stats`, `/tickets/{id}` | none ⚠️ | Mock CRM |
-| POST | `/agent/chat`, `/agent/triage/{ticket_id}` | none ⚠️ | ReAct agent |
+| POST | `/ask` | required | RAG answer with citations |
+| POST/GET | `/conversations`, `/conversations/{id}` | required | Chat history |
+| POST/GET/PATCH | `/tickets`, `/tickets/stats`, `/tickets/{id}` | required | Mock CRM |
+| POST | `/agent/chat`, `/agent/triage/{ticket_id}` | required | ReAct agent |
 | POST | `/cron/reindex` | `CRON_SECRET` bearer | Re-index trigger |
 
 Interactive docs: `/docs` (Swagger UI).
@@ -142,9 +158,6 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 
 ## Known issues
 
-- **Phase 5.4:** `/tickets`, `/agent/*`, `/conversations` need no token; `/ask` auth is optional.
-  Every route except `/health` and `/auth/login` must require a valid JWT. `static/js/app.js` only sends the
-  token to `/auth/me` and `/ask`, so the frontend must change too.
 - **Phase 10 (config):** if an env var is missing, `app/config.py` silently falls back to `admin`/`admin` and
   `jwt_secret="dev-secret"` (D-007).
 - **Phase 7.1:** agent tools differ from the guide — no `create_ticket` or `escalate_to_human` tool; diagnostics

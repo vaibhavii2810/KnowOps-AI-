@@ -103,9 +103,15 @@ def split_by_headings(text: str) -> list[tuple[str, str]]:
         The preamble before the first heading is returned with heading "".
     """
     heading_pattern = re.compile(r"^(#{1,3})\s+(.+)$", re.MULTILINE)
+    fence_pattern = re.compile(r"^```.*?^```", re.MULTILINE | re.DOTALL)
     sections: list[tuple[str, str]] = []
 
-    matches = list(heading_pattern.finditer(text))
+    # `# comment` lines inside ``` fences are shell comments, not headings
+    fences = [(m.start(), m.end()) for m in fence_pattern.finditer(text)]
+    matches = [
+        m for m in heading_pattern.finditer(text)
+        if not any(start <= m.start() < end for start, end in fences)
+    ]
     if not matches:
         return [("", text.strip())]
 

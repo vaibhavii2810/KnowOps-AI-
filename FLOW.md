@@ -162,7 +162,7 @@ main()
        → source = path relative to repo root, POSIX style
        → upsert_document(source, title) → delete_existing_chunks(doc_id)   ← why re-runs don't duplicate
        → make_chunks(body)
-            → split_by_headings (#, ##, ###)
+            → split_by_headings (#, ##, ###; `#` lines inside ``` code fences are ignored — they are shell comments)
             → pack_paragraphs → split_units → split_text_with_overlap (only for single lines > 500 chars, 50 overlap)
             → drop pieces shorter than 80 chars
        → for each chunk: llm.embed_document → embed_text("RETRIEVAL_DOCUMENT") → [Gemini]
