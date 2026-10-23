@@ -39,7 +39,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 3 | KB content + RAG ingestion | Vaishnavi | ✅ Done |
 | 4 | FastAPI skeleton + Vercel deploy | Niranjan | ✅ Done |
 | 5 | JWT auth | Niranjan | ✅ Done |
-| 6 | RAG retrieval + `/ask` | Niranjan | 🟡 Code exists, 6.4/6.5 not verified |
+| 6 | RAG retrieval + `/ask` | Niranjan | ✅ Done |
 | 7 | Agent + tool-calling | Niranjan | 🟡 Code exists, not verified |
 | 8 | Mock CRM / tickets | Vaishnavi | 🟡 Code exists, not verified |
 | 9 | Automation (cron + n8n) | Vaishnavi | 🟡 Partial — see Known issues |
@@ -89,6 +89,19 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   (commit `b03a462`): `/tickets`, `/conversations`, `/ask` all 401 without a token, login succeeds, `/tickets`
   with the token returns 200.
 
+**Phase 6 — RAG retrieval + `/ask`** ✅
+- 6.1 `app/rag.py` `retrieve()`: embeds the question, cosine search (`<=>`) on `chunks`; default `top_k=5`,
+  caller-adjustable 1–20 (D-023)
+- 6.2 `app/llm.py` `SYSTEM_INSTRUCTION` + `chat_completion()`: context-only prompt, cite the source title,
+  fixed "I don't have enough information…" refusal
+- 6.3 `POST /ask` in `app/main.py` (JWT required): retrieve → Gemini → answer + `sources` (title, heading,
+  similarity) + `conversation_id`
+- 6.4 / 6.5 checked live on the `sprint-2` deployment: the failover question returns the full procedure citing
+  Disaster Recovery Runbook › 4.2; "best pizza topping" is refused with no sources
+- Bug found and fixed on the way: `scripts/ingest.py` `split_by_headings` treated `# comments` inside ``` fences
+  as headings, dropping the runbook commands (so `/ask` refused the failover question). Now ignores fenced
+  lines; KB re-ingested to 80 chunks; regression tests in `tests/test_ingest.py`.
+
 ## Phase log
 
 Append one line per finished phase (newest last).
@@ -100,6 +113,7 @@ Append one line per finished phase (newest last).
 | 2026-10-15 | 3 | Both | 5 runbooks, 500-char chunker, 78 chunks ingested idempotently |
 | 2026-10-15 | 4 | Both | Skeleton done; deployed via Vercel project `knowops-ai-` |
 | 2026-10-18 | 5 | Vaishnavi (with Claude) | 5.4 closed — every route but health/login now requires a JWT, verified locally (40/40 tests) and live on `sprint-2` |
+| 2026-10-20 | 6 | Vaishnavi (with Claude) | `/ask` verified live: cited in-scope answer, out-of-scope refusal; fixed chunker dropping code-fenced commands (80 chunks) |
 
 ## Deployment
 
@@ -109,6 +123,12 @@ Append one line per finished phase (newest last).
   bundles `static/` and `data/`. These exist on the `sprint-2` branch.
 - Env vars live in that project's dashboard (Preview + Production), never in git. `.env` is gitignored.
 - Hobby plan: Git deploys only build commits by the project owner's account.
+- **Two Neon databases exist:** the Vercel app's `DATABASE_URL` points at a different Neon database from the one
+  first used in a local `.env` (D-024). Re-ingest after any `data/docs/` or chunker change into **each** one you
+  care about: `DATABASE_URL='<url>' python scripts/ingest.py --reset --quiet` (the env var overrides `.env`).
+  A local `.env` pointing at the live database means `pytest` writes test tickets into it.
+- `GEMINI_API_KEY` must exist in Vercel for **Preview** as well as Production (a missing key shows as a 503
+  "No API key was provided" from `/ask`); variables only apply to new deployments.
 
 ## Branches
 

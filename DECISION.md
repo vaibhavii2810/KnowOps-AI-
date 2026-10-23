@@ -245,3 +245,14 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Tradeoff accepted:** A caller can ask for up to 20 chunks, which costs more context/tokens per answer
   than the guide anticipated; the `static/js/app.js` dropdown only ever offers sane values.
 - **Revisit if:** Large `top_k` values measurably hurt answer quality or latency.
+
+### D-024 · The Vercel app and a local `.env` can use separate Neon databases
+- **Date · by · source:** 2026-10-20 · Vaishnavi (with Claude) · User
+- **Decision:** Vercel's `DATABASE_URL` points at its own Neon database (separate from the one first used locally).
+  Each has its own tables, chunks and tickets and must be ingested separately.
+- **Why:** Found while verifying Phase 6: the live app showed 78 old chunks and 6 tickets while the local database
+  had 80 chunks and 59 test tickets. Keeping them apart stops test runs from filling the live database with junk.
+- **Alternatives considered:** One shared database (simpler, no drift, but tests write into live data).
+- **Tradeoff accepted:** Knowledge-base changes must be ingested into each database by hand, or the live app
+  serves stale answers (this is how the chunker bug stayed hidden on the live site).
+- **Revisit if:** Phase 9 makes `/cron/reindex` really re-ingest, or Phase 14 sets up a staging/prod split.
