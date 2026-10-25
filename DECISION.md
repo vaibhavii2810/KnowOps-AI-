@@ -207,6 +207,7 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Alternatives considered:** Always require the secret.
 - **Tradeoff accepted:** Preview deployments accept unauthenticated reindex calls.
 - **Revisit if:** Phase 9.2 / Phase 10.
+  **Revisited 2026-10-25 — see D-030: now enforced in every environment once the endpoint had real cost.**
 
 ### D-021 · Shared agent context, decision log, flow doc and quiz gate
 - **Date · by · source:** 2026-10-15 · Niranjan · User
@@ -368,3 +369,21 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   empty), confirmed live before falling back to the fast skip path on every run after.
 - **Revisit if:** `data/docs/` grows large enough that even a single changed file's re-embed risks the
   function timeout — then move ingestion off the request path (a queue, or a separate longer-running job).
+
+### D-030 · `CRON_SECRET` enforced in every environment, not just production
+- **Date · by · source:** 2026-10-25 · Vaishnavi (with Claude) · Build guide
+- **Decision:** `GET /cron/reindex` now rejects a missing or wrong `CRON_SECRET` whenever one is configured
+  (`settings.cron_secret` non-empty), dropping D-020's `VERCEL_ENV == "production"` gate entirely. A
+  contributor with no `CRON_SECRET` in their own local `.env` is unaffected, since the check only fires once
+  the secret is actually set.
+- **Why:** D-020 was an acceptable tradeoff when this endpoint only counted rows — an unauthenticated call cost
+  nothing. Phase 9.1 changed that: the endpoint now runs real ingestion (Gemini calls, database writes).
+  Verified live before the fix: an unauthenticated `GET /cron/reindex` against the `sprint-2` Preview
+  deployment succeeded and triggered the first full re-embed — exactly the "triggered by randoms" scenario
+  9.2 exists to prevent, demonstrated for real, not hypothetically.
+- **Alternatives considered:** Keeping the production-only gate and accepting the Preview exposure (rejected —
+  the whole point of 9.2 is that this can't happen); requiring the secret unconditionally, even with none
+  configured (rejected — would make local dev without a `.env` entry impossible to test, for no safety gain
+  since nothing is being protected if no secret exists to protect it with).
+- **Tradeoff accepted:** None found — this closes a real, now-demonstrated gap with no new downside.
+- **Revisit if:** Never, unless a future deployment target can't set environment variables per-environment.

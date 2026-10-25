@@ -23,7 +23,6 @@ Endpoints:
 
 from __future__ import annotations
 
-import os
 from datetime import timedelta
 from pathlib import Path
 from typing import Optional
@@ -598,15 +597,17 @@ def api_cron_reindex(
     """
     Re-runs ingestion for any new or changed files in data/docs/ (Phase 9.1).
     Unchanged files are skipped by content hash — no re-embedding, no Gemini calls.
-    Verifies CRON_SECRET if configured (Vercel Cron sends GET; D-020 — only
-    enforced when VERCEL_ENV=="production" so it's testable locally/in Preview).
+    Requires CRON_SECRET whenever one is configured, in every environment (Phase 9.2,
+    D-030 — superseding D-020's "production only" check now that this endpoint does
+    real, costly work instead of just counting rows). A contributor with no
+    CRON_SECRET set in their own local .env is unaffected — settings.cron_secret is
+    empty by default, so nothing is enforced until it's actually configured.
     """
     if settings.cron_secret and authorization != f"Bearer {settings.cron_secret}":
-        if os.getenv("VERCEL_ENV") == "production":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Unauthorized cron execution.",
-            )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized cron execution.",
+        )
 
     result = reindex_knowledge_base(force=False, verbose=False)
 

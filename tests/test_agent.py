@@ -17,6 +17,7 @@ from app.agent import (
     tool_run_system_diagnostics,
     tool_update_ticket,
 )
+from app.config import settings
 from app.crm import create_ticket, get_ticket
 from app.main import app
 
@@ -232,6 +233,20 @@ def test_run_agent_executes_tool_call_bundled_with_is_final(monkeypatch):
     assert updated["resolution_notes"] == "Fixed via regression test."
 
 
+def test_api_cron_reindex_requires_cron_secret_in_every_environment(client):
+    """
+    Phase 9.2 (D-030): GET /cron/reindex must reject a missing or wrong CRON_SECRET
+    whenever one is configured, in every environment — not just "production" (the old
+    D-020 behavior left Preview deployments open to anyone, which mattered once this
+    endpoint actually cost real Gemini calls and DB writes, Phase 9.1).
+    """
+    assert settings.cron_secret, "local .env must have CRON_SECRET set for this test to be meaningful"
+    assert client.get("/cron/reindex").status_code == 401  # no header
+    assert client.get(
+        "/cron/reindex", headers={"Authorization": "Bearer wrong-secret"}
+    ).status_code == 401
+
+
 def test_api_cron_reindex_endpoint(client):
     """
     GET /cron/reindex (Phase 9.1 — was POST, guide requires GET since that's what
@@ -239,7 +254,8 @@ def test_api_cron_reindex_endpoint(client):
     5 seed runbooks are already ingested and unchanged, this run should skip all of
     them by content hash rather than re-embed anything.
     """
-    response = client.get("/cron/reindex")
+    headers = {"Authorization": f"Bearer {settings.cron_secret}"}
+    response = client.get("/cron/reindex", headers=headers)
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "success"
@@ -249,4 +265,4 @@ def test_api_cron_reindex_endpoint(client):
     assert data["chunks_embedded"] == 0  # no Gemini calls needed — proves the skip-unchanged path works
 
     # A plain POST should no longer be accepted (method changed per the guide / Vercel Cron).
-    assert client.post("/cron/reindex").status_code == 405
+    assert client.post("/cron/reindex", headers=headers).status_code == 405
