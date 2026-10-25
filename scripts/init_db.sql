@@ -4,8 +4,12 @@ CREATE TABLE IF NOT EXISTS documents (
     id SERIAL PRIMARY KEY,
     source TEXT NOT NULL UNIQUE,
     title TEXT NOT NULL,
+    content_hash TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Idempotent migration for databases created before content_hash existed (Phase 9.1, D-029).
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS chunks (
     id SERIAL PRIMARY KEY,

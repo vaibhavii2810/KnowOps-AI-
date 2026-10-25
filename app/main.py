@@ -18,7 +18,7 @@ Endpoints:
     PATCH /tickets/{id}             → Update ticket status & resolution notes
     POST /agent/chat                → Autonomous ReAct agent investigation
     POST /agent/triage/{id}         → Automated incident ticket triage pipeline
-    POST /cron/reindex              → Scheduled knowledge base re-indexing
+    GET  /cron/reindex              → Scheduled knowledge base re-indexing (new/changed files only)
 """
 
 from __future__ import annotations
@@ -50,6 +50,7 @@ from app.crm import (
 from app.db import get_conn
 from app.llm import chat_completion
 from app.rag import retrieve_and_format
+from scripts.ingest import reindex_knowledge_base
 from app.schemas import (
     AgentChatRequest,
     AgentChatResponse,
@@ -585,37 +586,39 @@ def api_agent_triage(
 # Cron & Maintenance Endpoints (Phase 3.3)
 # ---------------------------------------------------------------------------
 
-@app.post(
+@app.get(
     "/cron/reindex",
     response_model=CronReindexResponse,
-    summary="Trigger scheduled knowledge-base re-indexing",
+    summary="Scheduled knowledge-base re-indexing",
     tags=["Cron"],
 )
 def api_cron_reindex(
     authorization: Optional[str] = Header(default=None),
 ) -> CronReindexResponse:
     """
-    Trigger scheduled knowledge base re-indexing.
-    Verifies CRON_SECRET if configured.
+    Re-runs ingestion for any new or changed files in data/docs/ (Phase 9.1).
+    Unchanged files are skipped by content hash — no re-embedding, no Gemini calls.
+    Verifies CRON_SECRET if configured (Vercel Cron sends GET; D-020 — only
+    enforced when VERCEL_ENV=="production" so it's testable locally/in Preview).
     """
     if settings.cron_secret and authorization != f"Bearer {settings.cron_secret}":
-        # Allow dev testing if running locally, otherwise require secret
         if os.getenv("VERCEL_ENV") == "production":
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Unauthorized cron execution.",
             )
 
-    docs_dir = Path(__file__).resolve().parent.parent / "data" / "docs"
-    md_files = list(docs_dir.glob("**/*.md")) if docs_dir.exists() else []
-
-    with get_conn() as conn:
-        doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-        chunk_count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    result = reindex_knowledge_base(force=False, verbose=False)
 
     return CronReindexResponse(
         status="success",
-        documents_indexed=doc_count,
-        chunks_created=chunk_count,
-        message=f"Verified {len(md_files)} runbook files. Knowledge base active with {chunk_count} chunks.",
+        documents_total=result["documents_total"],
+        documents_reindexed=result["documents_reindexed"],
+        documents_unchanged=result["documents_unchanged"],
+        chunks_embedded=result["chunks_embedded"],
+        message=(
+            f"{result['documents_reindexed']} of {result['documents_total']} runbook file(s) "
+            f"reindexed ({result['chunks_embedded']} chunks embedded); "
+            f"{result['documents_unchanged']} unchanged and skipped."
+        ),
     )

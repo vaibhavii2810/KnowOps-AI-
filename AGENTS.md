@@ -188,7 +188,7 @@ Append one line per finished phase (newest last).
 | POST/GET | `/conversations`, `/conversations/{id}` | required | Chat history |
 | POST/GET/PATCH | `/tickets`, `/tickets/stats`, `/tickets/{id}` | required | Mock CRM |
 | POST | `/agent/chat`, `/agent/triage/{ticket_id}` | required | ReAct agent |
-| POST | `/cron/reindex` | `CRON_SECRET` bearer | Re-index trigger |
+| GET | `/cron/reindex` | `CRON_SECRET` bearer | Re-index new/changed `data/docs/` files (Phase 9.1, D-029) |
 
 Interactive docs: `/docs` (Swagger UI).
 
@@ -224,9 +224,14 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   `run_system_diagnostics`/`execute_recovery_action` are still simulated for everything except the database
   diagnostic — no real infrastructure is inspected or changed.
 - **`/ask` history:** loads the *first* 8 messages of a conversation, not the latest 8.
-- **Phase 9.1:** `/cron/reindex` only counts rows — it doesn't re-run ingestion.
-- **Phase 9.3:** `vercel.json` cron calls `/cron/reindex`, but the route is `POST`; Vercel Cron sends `GET`,
-  so scheduled runs will get 405. The guide specifies `GET /cron/reindex`.
+- **Phase 9.1:** the `content_hash` migration (D-029) has run on **both** databases now. The Vercel-connected
+  one's existing rows still have `content_hash=''` (they predate the column), so the *first* live
+  `GET /cron/reindex` call after this deploys will correctly re-embed all 5 files once, then fall back to the
+  fast skip path — same as what happened locally. Not a bug, just expected on that one first call.
+- **Phase 9.1 (unconfirmed):** `app/main.py` now imports `scripts.ingest` at module load. This should be
+  picked up automatically by Vercel's Python import tracing (the same mechanism that already bundles
+  `app/agent.py` etc. without being listed in `vercel.json`'s `includeFiles`), but hasn't been confirmed
+  against an actual deployment yet — check a live `GET /cron/reindex` call after the next deploy.
 
 ## Working here
 

@@ -12,8 +12,8 @@ Notation: `→` calls · `[DB]` opens a Postgres connection via `app.db.get_conn
 | HTTP request on Vercel | `vercel.json` rewrites `/(.*)` → `/api/index` | `api/index.py` puts the repo root on `sys.path` and imports `app.main.app` (sprint-2 branch) |
 | Local dev | `uvicorn app.main:app --reload` | Same `app` object |
 | Browser | `GET /` | `serve_dashboard()` returns `static/index.html`, which loads `static/js/app.js` (§6) |
-| Vercel Cron | Daily `0 3 * * *` (03:00 UTC) → `/cron/reindex` | `api_cron_reindex()` (⚠️ cron sends GET, route is POST — see Known issues) |
-| Ingestion | `python scripts/ingest.py` | `main()` in `scripts/ingest.py` (§5) |
+| Vercel Cron | Daily `0 3 * * *` (03:00 UTC) → `GET /cron/reindex` | `api_cron_reindex()` → `scripts.ingest.reindex_knowledge_base()` (Phase 9.1, D-029) |
+| Ingestion | `python scripts/ingest.py` | `main()` in `scripts/ingest.py` → `reindex_knowledge_base()` (§5) |
 | DB setup | `scripts/init_db.sql`, run by hand in Neon | Creates the `vector` extension, 5 tables and the HNSW index |
 | Tests | `pytest` | `tests/*.py` |
 
@@ -143,15 +143,21 @@ api_agent_triage(ticket_id) → agent.triage_ticket_with_agent(ticket_id)
 → AgentTriageResponse         (any other error → 500)
 ```
 
-### `/cron/reindex`
+### `GET /cron/reindex` (Phase 9.1, D-029 — was POST and counted rows only; now GET and really re-ingests)
 ```
 api_cron_reindex(Authorization header)
   → if CRON_SECRET is set and header ≠ "Bearer <secret>": 401, but only when VERCEL_ENV == "production"
-  → glob data/docs/**/*.md (counted only)
-  → [DB] COUNT documents, chunks
+  → scripts.ingest.reindex_knowledge_base(force=False)
+       → glob data/docs/**/*.md
+       → [DB] ONE connection for the whole run
+       → for each file: ingest_file(path, conn, force=False)
+            → compute_content_hash(raw file text) → [DB] compare against documents.content_hash
+            → match → skip (no re-chunk, no [Gemini], no writes) → {"unchanged": True}
+            → no match (new file or changed) → upsert_document (new hash) → delete_existing_chunks →
+              make_chunks → per chunk: [Gemini] embed_document → insert_chunk → {"unchanged": False}
+       → {documents_total, documents_reindexed, documents_unchanged, chunks_embedded, chunks_skipped, summaries}
 → CronReindexResponse
 ```
-It does **not** call the ingestion code (Known issue, Phase 9.1).
 
 ### `GET /`
 ```
@@ -163,19 +169,36 @@ serve_dashboard() → static/index.html (inline fallback HTML if missing); asset
 ```
 main()
   → argparse: --file, --reset, --quiet
-  → collect data/docs/**/*.md (or the single --file)
-  → [DB] ONE connection for the whole run (--reset deletes all chunks + documents first)
-  → for each file: ingest_file(path, conn)
+  → --file given → ingest_file(path, conn, force=True)   (explicit single-file ingest, always re-embeds)
+  → otherwise     → reindex_knowledge_base(force=args.reset)   (--reset wipes documents+chunks first, forcing
+                     every file; a normal run has force=False — see the shared function below)
+  → print summary (documents reindexed vs. unchanged, chunks embedded)
+```
+
+`reindex_knowledge_base(force, verbose)` — shared by `main()` above and `GET /cron/reindex` (Phase 9.1, D-029):
+```
+reindex_knowledge_base(force, verbose)
+  → collect data/docs/**/*.md
+  → [DB] ONE connection for the whole run (force=True deletes all chunks + documents first)
+  → for each file: ingest_file(path, conn, verbose, force)
        → extract_frontmatter → extract_title_from_markdown (fallback: filename)
        → source = path relative to repo root, POSIX style
-       → upsert_document(source, title) → delete_existing_chunks(doc_id)   ← why re-runs don't duplicate
-       → make_chunks(body)
-            → split_by_headings (#, ##, ###; `#` lines inside ``` code fences are ignored — they are shell comments)
-            → pack_paragraphs → split_units → split_text_with_overlap (only for single lines > 500 chars, 50 overlap)
-            → drop pieces shorter than 80 chars
-       → for each chunk: llm.embed_document → embed_text("RETRIEVAL_DOCUMENT") → [Gemini]
-                         → insert_chunk → sleep 0.5 s (free-tier rate limit)
-  → print summary
+       → compute_content_hash(raw_text) → [DB] get_stored_document(source)
+       → hash matches an existing row and not force → SKIP: no chunking, no [Gemini], no writes
+           → return {..., "unchanged": True}
+       → otherwise:
+            → upsert_document(source, title, content_hash) → delete_existing_chunks(doc_id)
+                 ← content_hash is why an unchanged re-run is a no-op; the delete+reinsert is why a
+                   changed re-run doesn't duplicate rows
+            → make_chunks(body)
+                 → split_by_headings (#, ##, ###; `#` lines inside ``` code fences are ignored — shell comments)
+                 → pack_paragraphs → split_units → split_text_with_overlap (only for single lines > 500 chars,
+                   50 overlap)
+                 → drop pieces shorter than 80 chars
+            → for each chunk: llm.embed_document → embed_text("RETRIEVAL_DOCUMENT") → [Gemini]
+                              → insert_chunk → sleep 0.5 s (free-tier rate limit)
+            → return {..., "unchanged": False}
+  → aggregate: {documents_total, documents_reindexed, documents_unchanged, chunks_embedded, chunks_skipped}
 ```
 
 ## 6. Browser console — `static/js/app.js`
@@ -203,7 +226,8 @@ Every call above now sends `Authorization: Bearer <jwt>` via `authHeaders()`.
 
 ```
 api/index.py       → app.main
-app.main           → app.agent, app.auth, app.config, app.crm, app.db, app.llm, app.rag, app.schemas
+app.main           → app.agent, app.auth, app.config, app.crm, app.db, app.llm, app.rag, app.schemas,
+                     scripts.ingest (Phase 9.1, D-029 — so GET /cron/reindex can call reindex_knowledge_base())
 app.agent          → app.crm, app.db, app.llm, app.rag
 app.rag            → app.db, app.llm, app.schemas
 app.crm            → app.db

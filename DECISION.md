@@ -118,6 +118,7 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Alternatives considered:** Content hashing to skip unchanged files (more code).
 - **Tradeoff accepted:** Every run re-embeds every chunk, so it costs more Gemini calls and takes longer.
 - **Revisit if:** Phase 9 makes `/cron/reindex` re-ingest — then skip unchanged files.
+  **Revisited 2026-10-25 — see D-029: content-hash-based skip added, both for the CLI and `/cron/reindex`.**
 
 ### D-012 · Similarity threshold 0.55 for `/ask`, 0.50 for the agent
 - **Date · by · source:** 2026-10 · Vaishnavi · Inferred (from the comment in `app/rag.py`)
@@ -340,3 +341,30 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Tradeoff accepted:** None found.
 - **Revisit if:** A real incident needs both a ticket AND an escalation and the ordering actually matters
   operationally (today the prompt doesn't forbid calling `create_ticket` afterward in a later step).
+
+### D-029 · `GET /cron/reindex` actually re-ingests, skipping unchanged files by content hash
+- **Date · by · source:** 2026-10-25 · Vaishnavi (with Claude) · Build guide
+- **Decision:** `documents` gained a `content_hash` column (SHA-256 of the raw file, migrated on both the
+  local and the Vercel-connected databases — D-024). `scripts/ingest.py`'s `ingest_file()` now compares a
+  file's hash to what's stored before re-chunking/re-embedding it, and skips entirely (no DB writes, no
+  Gemini calls) when they match. A new `reindex_knowledge_base()` function wraps the whole-directory sweep and
+  is shared by both the CLI (`main()`) and the API. `/cron/reindex` changed from `POST` (counts rows only) to
+  `GET` (actually calls `reindex_knowledge_base()`), fixing both Known issues the guide names for 9.1 and 9.3
+  in one change, since they were really the same gap (the route never did real work, under the wrong method).
+- **Why:** This was D-011's own stated revisit trigger, and the guide's 9.1 wording ("re-runs ingestion for
+  any *new or changed* files") requires change detection, not a blind full re-embed every night. Re-embedding
+  all 80 chunks nightly would cost Gemini free-tier quota for no reason on nights nothing changed, and risks
+  the Vercel Hobby function's execution time limit. Verified live: editing one runbook and calling
+  `reindex_knowledge_base()` re-embedded only that file (16 chunks) while the other 4 were skipped; restoring
+  the file's original content correctly detected the change back; a second call with nothing changed made
+  zero Gemini calls (2.3s vs. 2+ minutes for a full re-embed).
+- **Alternatives considered:** File mtime instead of a content hash (unreliable — git checkouts and Vercel
+  deploys don't preserve mtimes); a separate "last reindexed" timestamp column compared against file mtime
+  (same problem); always doing the full `--reset` sweep nightly (the original behavior, explicitly the thing
+  D-011 flagged as a cost to revisit).
+- **Tradeoff accepted:** A file edited and reverted within the same day re-triggers a real re-embed (the hash
+  differs from what's stored, then differs again back) — correct but not free; not worth optimizing for. The
+  very first run after this migration necessarily re-embeds everything once (every existing row's hash starts
+  empty), confirmed live before falling back to the fast skip path on every run after.
+- **Revisit if:** `data/docs/` grows large enough that even a single changed file's re-embed risks the
+  function timeout — then move ingestion off the request path (a queue, or a separate longer-running job).

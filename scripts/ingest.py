@@ -1,30 +1,37 @@
 """
-scripts/ingest.py  –  Phase 2.2
+scripts/ingest.py  –  Phase 2.2 / 9.1
 Knowledge-base ingestion pipeline.
 
 Usage:
-    python scripts/ingest.py                    # ingest all docs in data/docs/
-    python scripts/ingest.py --file path/to.md  # ingest a single file
+    python scripts/ingest.py                    # ingest new/changed docs in data/docs/
+    python scripts/ingest.py --file path/to.md  # force-ingest a single file
     python scripts/ingest.py --reset            # wipe existing data then ingest all
 
 How it works:
     1. Walk data/docs/ for *.md files (or use --file)
     2. Extract YAML front-matter for title / document-id metadata
-    3. Split the document into semantic chunks on Markdown heading boundaries
-       (## and ### headings act as natural section delimiters)
-    4. Optionally further split large chunks at a max-token boundary (overlap window)
-    5. Call embed_document() for every chunk  →  768-d vector via Gemini
-    6. Upsert the document record and INSERT all chunks into Neon PostgreSQL
-    7. Print a clean progress summary
+    3. Skip a file whose SHA-256 content hash matches what's already stored for it
+       (Phase 9.1, D-029) — no re-chunk, no Gemini calls, no DB writes
+    4. Split the document into semantic chunks on Markdown heading boundaries
+       (## and ### headings act as natural section delimiters; `#` lines inside
+       ``` code fences are ignored — they're shell comments, not headings)
+    5. Optionally further split large chunks at a max-token boundary (overlap window)
+    6. Call embed_document() for every chunk  →  768-d vector via Gemini
+    7. Upsert the document record (with its new content hash) and INSERT all chunks
+    8. Print a clean progress summary
+
+reindex_knowledge_base() is the reusable entry point — used by main() below (the CLI)
+and by GET /cron/reindex (app/main.py).
 
 Schema (managed by scripts/init_db.sql):
-    documents(id, source, title, created_at)
+    documents(id, source, title, content_hash, created_at)
     chunks(id, document_id, chunk_index, heading, content, embedding, created_at)
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import re
 import sys
@@ -205,9 +212,26 @@ def make_chunks(text: str) -> list[tuple[str, str]]:
 # Database helpers
 # ---------------------------------------------------------------------------
 
-def upsert_document(conn, source: str, title: str) -> int:
+def compute_content_hash(raw_text: str) -> str:
     """
-    Insert a document record if it doesn't exist, or update title if it does.
+    SHA-256 of the raw file content (frontmatter included, so a title/metadata-only
+    edit still counts as a change). Used to detect new-or-changed files for
+    GET /cron/reindex (Phase 9.1, D-029) without re-embedding unchanged ones.
+    """
+    return hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+
+
+def get_stored_document(conn, source: str) -> tuple[int, str] | None:
+    """Return (id, content_hash) for a previously-ingested document, or None if new."""
+    row = conn.execute(
+        "SELECT id, content_hash FROM documents WHERE source = %s", (source,)
+    ).fetchone()
+    return (row[0], row[1]) if row else None
+
+
+def upsert_document(conn, source: str, title: str, content_hash: str) -> int:
+    """
+    Insert a document record if it doesn't exist, or update title + content_hash if it does.
 
     Returns the document's database id.
     """
@@ -217,14 +241,14 @@ def upsert_document(conn, source: str, title: str) -> int:
 
     if existing:
         conn.execute(
-            "UPDATE documents SET title = %s WHERE id = %s",
-            (title, existing[0]),
+            "UPDATE documents SET title = %s, content_hash = %s WHERE id = %s",
+            (title, content_hash, existing[0]),
         )
         return existing[0]
 
     row = conn.execute(
-        "INSERT INTO documents (source, title) VALUES (%s, %s) RETURNING id",
-        (source, title),
+        "INSERT INTO documents (source, title, content_hash) VALUES (%s, %s, %s) RETURNING id",
+        (source, title, content_hash),
     ).fetchone()
     return row[0]
 
@@ -256,25 +280,39 @@ def insert_chunk(
 # Per-file ingestion
 # ---------------------------------------------------------------------------
 
-def ingest_file(filepath: Path, conn, verbose: bool = True) -> dict:
+def ingest_file(filepath: Path, conn, verbose: bool = True, force: bool = False) -> dict:
     """
     Ingest a single Markdown file into the database.
 
-    Returns a summary dict with counts.
+    If the file's content hash matches what's already stored for it and `force`
+    is False, this is a no-op — no re-chunking, no Gemini calls, no DB writes
+    (Phase 9.1, D-029): nightly cron runs stay fast and free when nothing changed.
+
+    Returns a summary dict with counts (and "unchanged": True if skipped).
     """
     raw_text = filepath.read_text(encoding="utf-8")
+    content_hash = compute_content_hash(raw_text)
 
     # Derive metadata
     _, body = extract_frontmatter(raw_text)
     title = extract_title_from_markdown(body) or filepath.stem.replace("_", " ").title()
     source = filepath.relative_to(PROJECT_ROOT).as_posix()  # same key on Windows and Vercel
 
+    existing = get_stored_document(conn, source)
+    if existing and not force and existing[1] == content_hash:
+        if verbose:
+            print(f"\n⏭️  Unchanged, skipping: {source}")
+        return {
+            "source": source, "title": title, "doc_id": existing[0],
+            "total_chunks": 0, "inserted": 0, "skipped": 0, "unchanged": True,
+        }
+
     if verbose:
         print(f"\n📄 Ingesting: {source}")
         print(f"   Title   : {title}")
 
     # Upsert the document row
-    doc_id = upsert_document(conn, source, title)
+    doc_id = upsert_document(conn, source, title, content_hash)
     delete_existing_chunks(conn, doc_id)
 
     # Chunk the document
@@ -312,6 +350,53 @@ def ingest_file(filepath: Path, conn, verbose: bool = True) -> dict:
         "total_chunks": len(chunks),
         "inserted": inserted,
         "skipped": skipped,
+        "unchanged": False,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Reusable sweep — called by the CLI (main, below) and by GET /cron/reindex
+# (app/main.py, Phase 9.1)
+# ---------------------------------------------------------------------------
+
+def reindex_knowledge_base(force: bool = False, verbose: bool = True) -> dict:
+    """
+    Ingest every *.md file in data/docs/, skipping any whose content hash hasn't
+    changed since it was last ingested (unless force=True, which also wipes the
+    documents/chunks tables first — the --reset CLI flag).
+
+    Returns an aggregate summary dict: counts plus the per-file summaries, so a
+    caller (the cron endpoint or the CLI) can report exactly what happened.
+    """
+    files = sorted(DOCS_DIR.glob("**/*.md"))
+    files = [f for f in files if not f.name.startswith(".")]
+
+    summaries: list[dict] = []
+    with get_conn() as conn:
+        if force:
+            if verbose:
+                print("\n🗑️  --reset: wiping documents + chunks tables...")
+            conn.execute("DELETE FROM chunks")
+            conn.execute("DELETE FROM documents")
+
+        for filepath in files:
+            try:
+                summaries.append(ingest_file(filepath, conn, verbose=verbose, force=force))
+            except Exception as exc:
+                if verbose:
+                    print(f"\n❌ Failed to ingest {filepath}: {exc}")
+                summaries.append({
+                    "source": str(filepath), "inserted": 0, "skipped": 0,
+                    "total_chunks": 0, "unchanged": False, "error": str(exc),
+                })
+
+    return {
+        "documents_total": len(summaries),
+        "documents_reindexed": sum(1 for s in summaries if not s.get("unchanged")),
+        "documents_unchanged": sum(1 for s in summaries if s.get("unchanged")),
+        "chunks_embedded": sum(s.get("inserted", 0) for s in summaries),
+        "chunks_skipped": sum(s.get("skipped", 0) for s in summaries),
+        "summaries": summaries,
     }
 
 
@@ -340,64 +425,50 @@ def main() -> None:
         help="Suppress per-chunk progress output.",
     )
     args = parser.parse_args()
-
-    # Collect files to ingest
-    if args.file:
-        files = [args.file.resolve()]
-    else:
-        files = sorted(DOCS_DIR.glob("**/*.md"))
-        files = [f for f in files if not f.name.startswith(".")]
-
-    if not files:
-        print("❌ No Markdown files found. Add .md files to data/docs/ and retry.")
-        sys.exit(1)
+    verbose = not args.quiet
 
     print("=" * 60)
     print("  KnowOps AI — Knowledge Base Ingestion Pipeline")
-    print("  Phase 2.2")
+    print("  Phase 2.2 / 9.1")
     print("=" * 60)
-    print(f"  Documents to ingest : {len(files)}")
     print(f"  Docs directory      : {DOCS_DIR}")
     print(f"  Chunk size          : {CHUNK_SIZE:,} chars  |  overlap: {CHUNK_OVERLAP}")
     print(f"  Embedding model     : gemini-embedding-001 (768d)")
     print("=" * 60)
 
-    summaries: list[dict] = []
+    if args.file:
+        # Explicit single-file ingest — always force (ignore the content hash):
+        # the user named this exact file, so re-ingest it regardless.
+        filepath = args.file.resolve()
+        if not filepath.exists():
+            print(f"❌ File not found: {filepath}")
+            sys.exit(1)
+        with get_conn() as conn:
+            summary = ingest_file(filepath, conn, verbose=verbose, force=True)
+        print(f"\n✅ Ingested {summary['source']}: {summary['inserted']} chunks "
+              f"({summary['skipped']} failed).")
+        return
 
-    with get_conn() as conn:
-        if args.reset:
-            print("\n🗑️  --reset flag detected. Wiping documents + chunks tables...")
-            conn.execute("DELETE FROM chunks")
-            conn.execute("DELETE FROM documents")
-            print("   Done.\n")
-
-        for filepath in files:
-            try:
-                summary = ingest_file(filepath, conn, verbose=not args.quiet)
-                summaries.append(summary)
-            except Exception as exc:
-                print(f"\n❌ Failed to ingest {filepath}: {exc}")
-                summaries.append({"source": str(filepath), "inserted": 0, "skipped": 0, "total_chunks": 0})
-
-    # Final summary
-    total_inserted = sum(s.get("inserted", 0) for s in summaries)
-    total_skipped = sum(s.get("skipped", 0) for s in summaries)
-    total_docs = len(summaries)
+    result = reindex_knowledge_base(force=args.reset, verbose=verbose)
 
     print("\n" + "=" * 60)
     print("  Ingestion Complete!")
     print("=" * 60)
-    print(f"  Documents processed : {total_docs}")
-    print(f"  Chunks embedded     : {total_inserted}")
-    print(f"  Chunks skipped      : {total_skipped}")
+    print(f"  Documents total      : {result['documents_total']}")
+    print(f"  Documents reindexed  : {result['documents_reindexed']}")
+    print(f"  Documents unchanged  : {result['documents_unchanged']} (skipped — no content change)")
+    print(f"  Chunks embedded      : {result['chunks_embedded']}")
+    print(f"  Chunks skipped       : {result['chunks_skipped']}")
     print()
     print("  Per-document summary:")
-    for s in summaries:
-        status = "✅" if s.get("skipped", 0) == 0 else "⚠️ "
-        print(
-            f"  {status} {s.get('source', 'unknown'):50s}  "
-            f"{s.get('inserted', 0):3d} chunks"
-        )
+    for s in result["summaries"]:
+        if s.get("unchanged"):
+            status = "⏭️  unchanged"
+        elif s.get("skipped", 0) == 0:
+            status = "✅"
+        else:
+            status = "⚠️ "
+        print(f"  {status} {s.get('source', 'unknown'):50s}  {s.get('inserted', 0):3d} chunks")
     print("=" * 60)
     print("\n✅ Knowledge base ready. You can now run the API and test /ask.")
 

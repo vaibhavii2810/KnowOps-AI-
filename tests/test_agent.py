@@ -233,10 +233,20 @@ def test_run_agent_executes_tool_call_bundled_with_is_final(monkeypatch):
 
 
 def test_api_cron_reindex_endpoint(client):
-    """POST /cron/reindex should verify knowledge base files and return 200."""
-    response = client.post("/cron/reindex")
+    """
+    GET /cron/reindex (Phase 9.1 — was POST, guide requires GET since that's what
+    Vercel Cron sends) should actually re-ingest, not just count rows. Since the
+    5 seed runbooks are already ingested and unchanged, this run should skip all of
+    them by content hash rather than re-embed anything.
+    """
+    response = client.get("/cron/reindex")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "success"
-    assert data["documents_indexed"] >= 4
-    assert data["chunks_created"] >= 60
+    assert data["documents_total"] >= 5
+    assert data["documents_unchanged"] == data["documents_total"]  # nothing changed since last ingest
+    assert data["documents_reindexed"] == 0
+    assert data["chunks_embedded"] == 0  # no Gemini calls needed — proves the skip-unchanged path works
+
+    # A plain POST should no longer be accepted (method changed per the guide / Vercel Cron).
+    assert client.post("/cron/reindex").status_code == 405
