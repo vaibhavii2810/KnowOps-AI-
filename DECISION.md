@@ -143,8 +143,11 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   dispatches the tool itself; max 5 steps (4 for triage).
 - **Why:** Simple to follow and debug, and it returns a full thought/action/observation trace for the UI.
 - **Alternatives considered:** Gemini native function calling (schema-checked args, but more SDK-specific code).
-- **Tradeoff accepted:** Tool args aren't validated against a schema; one malformed JSON reply ends the loop.
+- **Tradeoff accepted:** Tool args aren't validated against a schema; a malformed JSON reply ends the loop
+  (3 retries as of D-026, then a non-blank fallback message — no longer silently blank).
 - **Revisit if:** Phase 7 testing shows wrong tool calls or broken loops.
+  **Revisited 2026-10-25 — see D-026: found and fixed a live bug where a malformed reply produced a
+  blank resolution instead of ending the loop with a message.**
 
 ### D-015 · Agent tools are partly simulated and differ from the guide
 - **Date · by · source:** 2026-10 · Vaishnavi · Inferred
@@ -157,6 +160,7 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Tradeoff accepted:** The guide's `create_ticket` and `escalate_to_human` tools are missing (Phase 7.1, and
   9.4 needs `escalate_to_human`). Simulated output can look real in a demo.
 - **Revisit if:** Phase 7 — the guide's tools need adding or the difference needs approving.
+  **Revisited 2026-10-25 — see D-025: `create_ticket` and `escalate_to_human` added, closing this gap.**
 
 ### D-016 · Mock CRM in Postgres, with extra ticket columns
 - **Date · by · source:** 2026-10-15 · Niranjan · Build guide + User
@@ -256,3 +260,83 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Tradeoff accepted:** Knowledge-base changes must be ingested into each database by hand, or the live app
   serves stale answers (this is how the chunker bug stayed hidden on the live site).
 - **Revisit if:** Phase 9 makes `/cron/reindex` really re-ingest, or Phase 14 sets up a staging/prod split.
+
+### D-025 · Added `create_ticket` and `escalate_to_human` agent tools (Phase 7.1)
+- **Date · by · source:** 2026-10-25 · Vaishnavi (with Claude) · Build guide
+- **Decision:** `app/agent.py` gains `tool_create_ticket` (wraps `crm.create_ticket`) and
+  `tool_escalate_to_human` (simulated — follows the On-Call Guide's escalation path: post to `#incidents`,
+  page the on-call EM via PagerDuty, call VP Engineering for P1; if given a `ticket_id` it sets that ticket's
+  status to `open` and appends an escalation note). Both are registered in `AVAILABLE_TOOLS` and documented
+  in `AGENT_SYSTEM_PROMPT`.
+- **Why:** Closes the gap D-015 flagged and Phase 7.1 names directly: the guide's done-when test for Phase 7
+  requires "log a ticket" and ticket-related prompts to trigger a matching tool, which no existing tool did.
+- **Alternatives considered:** Renaming `lookup_runbook`→`search_knowledge_base` and `get_ticket`→
+  `check_ticket_status` to match the guide's exact names too — skipped: it's a cosmetic rename touching tests,
+  `FLOW.md`, and the PDF generator script for no functional gain, since the guide's done-when criterion tests
+  behavior, not tool names.
+- **Tradeoff accepted:** Tool names still don't match the guide's `search_knowledge_base` /
+  `check_ticket_status` naming (D-015's remaining deviation). `escalate_to_human`'s "page the EM" / "call VP
+  Engineering" steps are simulated text, not a real PagerDuty call, consistent with the other recovery tools.
+- **Revisit if:** The guide's exact tool names are required (e.g. an external caller matches on them), or
+  escalation needs to actually page someone.
+
+### D-026 · Retry 3x on a malformed/empty Gemini response in the agent loop
+- **Date · by · source:** 2026-10-25 · Vaishnavi (with Claude) · Inferred (found live while testing Phase 7.2)
+- **Decision:** `agent.run_agent`'s per-step Gemini call now retries up to 3 times when `resp.text` is empty
+  (observed `finish_reason=MALFORMED_RESPONSE`), instead of silently parsing `resp.text or "{}"`. The post-loop
+  "did we get a final answer" check now tests `s.get("final_answer")` (truthy) instead of `"final_answer" in s`
+  (key presence).
+- **Why:** Found while live-testing a multi-tool task ("log a P1 ticket, then escalate it"): Gemini's JSON mode
+  intermittently returns `MALFORMED_RESPONSE` with no text at all — not an exception. The old code parsed that
+  into a blank thought/action/final_answer, which satisfied `"final_answer" in s` (the key existed, just empty)
+  so the synthesis fallback never ran, and `run_agent()` returned `resolution=""`. Reproducing the exact failing
+  prompt 3x in isolation showed the same prompt succeeds on a later call — it's transient, not a prompt-design
+  problem, so a short retry (matching the existing 429/503 retry pattern in `app/llm.py`) is the fix.
+- **Alternatives considered:** Switching to Gemini native function calling (bigger change, D-014's call to make
+  separately); giving up after one malformed reply with a blank answer (the original, broken behavior).
+- **Tradeoff accepted:** Worst case, 3x the Gemini calls for one step before falling back to the existing
+  generic "Completed triage based on available runbook knowledge" message — still possible to see in the trace
+  if Gemini is malformed on all 3 attempts (observed once live). `run_agent()` never returns a blank resolution
+  now, but it may still give up on a specific tool call the task asked for.
+- **Revisit if:** The malformed-response rate stays high enough that 3 retries routinely isn't enough, or the
+  extra Gemini calls meaningfully affect free-tier quota.
+
+### D-027 · Execute a tool call even when Gemini also sets is_final=true in the same reply
+- **Date · by · source:** 2026-10-25 · Vaishnavi (with Claude) · Inferred (found live while testing Phase 7.4)
+- **Decision:** `agent.run_agent`'s loop now executes any valid requested tool call before checking `is_final`.
+  Previously `if is_final or not action or action not in AVAILABLE_TOOLS: ... break` exited the step before the
+  tool-execution block, so a reply that set both `action` and `is_final: true` never ran the tool at all.
+- **Why:** Found live triaging a ticket: Gemini's step-4 reply was `{"action": "update_ticket", "args": {...
+  "status": "resolved" ...}, "is_final": true, "final_answer": "Incident #108 has been successfully...
+  resolved."}`. The old code saw `is_final=true`, broke immediately, and recorded that final_answer — but the
+  ticket's actual status in Postgres stayed `open` with no resolution notes, because `update_ticket` never ran.
+  The agent reported success with complete confidence while doing nothing. Reproduced 3x after the fix: all 3
+  triage runs now show the ticket genuinely `resolved` in the database, re-fetched independently of the API
+  response.
+- **Alternatives considered:** Prompting the model more strictly never to combine `action` and `is_final` in
+  one reply (unreliable — nothing stops a future reply from doing it anyway; the code must be correct
+  regardless of what the model sends). Rejecting/retrying a reply that combines both (wastes a step and a
+  Gemini call when the model's intent — run this tool, then I'm done — is actually clear and executable).
+- **Tradeoff accepted:** None found — this closes a correctness gap with no new downside; the final answer
+  now reflects a tool call that genuinely happened instead of one that didn't.
+- **Revisit if:** A future tool has side effects that shouldn't run on a step the model also calls final (none
+  of the current tools fit that — they're all meant to run exactly when requested).
+
+### D-028 · Escalation takes priority over ticketing in AGENT_SYSTEM_PROMPT
+- **Date · by · source:** 2026-10-25 · Vaishnavi (with Claude) · Inferred (found live while testing Phase 7.5)
+- **Decision:** `AGENT_SYSTEM_PROMPT`'s rules now say explicitly that `escalate_to_human` must be called first
+  — before `create_ticket`, diagnostics, or remediation — whenever the situation matches the On-Call Guide's
+  "escalate immediately" criteria, and that it doesn't need an existing ticket (`ticket_id=null` is valid).
+- **Why:** Testing each tool individually (Phase 7.5) found that a textbook "escalate immediately" prompt
+  ("confirmed unauthorized access to the production database... escalate immediately") made the agent call
+  `create_ticket` instead of `escalate_to_human`. The two rules added for D-025 (create_ticket for new
+  incidents; escalate_to_human for the on-call criteria) didn't say which one wins when both apply, and the
+  model defaulted to the rule listed first. Reproduced 3x before the fix (all 3 chose `create_ticket`), fixed
+  3x after (all 3 correctly chose `escalate_to_human` with `ticket_id: null`).
+- **Alternatives considered:** Leaving both tools as equally valid and accepting the model's choice (rejected —
+  the On-Call Guide's whole point of "don't wait" is defeated if the agent files a ticket first); having
+  escalate_to_human internally call create_ticket (unneeded complexity — `ticket_id=null` already covers "no
+  ticket exists yet" cleanly).
+- **Tradeoff accepted:** None found.
+- **Revisit if:** A real incident needs both a ticket AND an escalation and the ordering actually matters
+  operationally (today the prompt doesn't forbid calling `create_ticket` afterward in a later step).

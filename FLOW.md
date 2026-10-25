@@ -112,16 +112,24 @@ PATCH /tickets/{id}    → api_update_ticket()    → crm.update_ticket_status()
 api_agent_chat(AgentChatRequest) → agent.run_agent(prompt, max_steps)
   for step in 1..max_steps:
     → llm.get_client() → [Gemini] generate_content (JSON mode, AGENT_SYSTEM_PROMPT, temperature 0.1)
+      (retries up to 3x if resp.text is empty, e.g. finish_reason=MALFORMED_RESPONSE — D-026;
+       exhausted retries or any other exception → non-blank fallback final_answer, is_final=True)
     → json.loads → {thought, action, args, is_final, final_answer}
-    → stop if is_final, no action, or unknown action (a Gemini or JSON error also ends the loop)
+    → if no valid action (none, or unknown tool name) → stop here with final_answer
+    → else execute the tool FIRST (even if is_final is also true — D-027, so a tool call bundled
+      with is_final isn't silently dropped), then stop after it if is_final was set
     → else AVAILABLE_TOOLS[action](**args):
          lookup_runbook          → rag.retrieve(top_k=3, threshold=0.50)  → [Gemini] + [DB]
          get_ticket              → crm.get_ticket                         → [DB]
+         create_ticket           → crm.create_ticket                      → [DB] (Phase 7.1, D-025)
          update_ticket           → crm.update_ticket_status               → [DB]
+         escalate_to_human       → crm.update_ticket_status if ticket_id given → [DB]; steps_taken text is
+                                    simulated (On-Call Guide §6 path) — nothing is actually posted/paged (Phase 7.1, D-025)
          run_system_diagnostics  → "database": [DB] SELECT 1 + counts · other components: canned JSON (simulated)
          execute_recovery_action → canned JSON (simulated — nothing is executed)
     → thought / action / observation appended to the text transcript for the next step
-  if no step gave a final answer → [Gemini] one summary call
+  if no step gave a *non-blank* final answer (checks truthiness, not just key presence — D-026)
+    → [Gemini] one summary call
 → {task, total_steps, steps, resolution} → AgentChatResponse
 ```
 

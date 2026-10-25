@@ -40,7 +40,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 4 | FastAPI skeleton + Vercel deploy | Niranjan | ✅ Done |
 | 5 | JWT auth | Niranjan | ✅ Done |
 | 6 | RAG retrieval + `/ask` | Niranjan | ✅ Done |
-| 7 | Agent + tool-calling | Niranjan | 🟡 Code exists, not verified |
+| 7 | Agent + tool-calling | Niranjan | ✅ Done |
 | 8 | Mock CRM / tickets | Vaishnavi | 🟡 Code exists, not verified |
 | 9 | Automation (cron + n8n) | Vaishnavi | 🟡 Partial — see Known issues |
 | 10 | Error handling & security | Split 50/50 | ⬜ Not started |
@@ -102,6 +102,29 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   as headings, dropping the runbook commands (so `/ask` refused the failover question). Now ignores fenced
   lines; KB re-ingested to 80 chunks; regression tests in `tests/test_ingest.py`.
 
+**Phase 7 — Agent + tool-calling** ✅
+- 7.1 Added `create_ticket` and `escalate_to_human` tools (D-025), closing the gap D-015 flagged. All 7 tools
+  registered: `lookup_runbook`, `get_ticket`, `create_ticket`, `update_ticket`, `escalate_to_human`,
+  `run_system_diagnostics`, `execute_recovery_action`
+- 7.2 `run_agent()`'s loop verified live (send conversation+tools → Gemini → execute tool → feed result back →
+  repeat). Found and fixed a real bug: Gemini's JSON mode occasionally returns `finish_reason=MALFORMED_RESPONSE`
+  with no text, which the old code silently turned into a blank resolution; now retries 3x and the "got a final
+  answer" check tests truthiness, not key presence (D-026)
+- 7.3 Hard cap verified: `max_steps` bounds the `for` loop (API-level `ge=1, le=10`; `run_agent` default 5,
+  triage 4). Forced a multi-tool-hungry task with `max_steps=2` — confirmed it stops exactly there and still
+  synthesizes a non-blank answer
+- 7.4 `/agent/chat` + `/agent/triage/{id}` (the guide's own "or a new /agent/chat" option, not a deviation) — JWT
+  required, confirmed live. Found and fixed a second real bug: a Gemini reply bundling a tool call with
+  `is_final: true` in the same step skipped tool execution entirely while still reporting success (a live
+  triage call claimed a ticket was resolved when it wasn't, confirmed by re-fetching from Postgres). Now the
+  tool always executes before the loop honors `is_final` (D-027)
+- 7.5 All 7 tools tested individually with a targeted prompt, live. Found and fixed a prompt-priority gap: a
+  "confirmed security breach, escalate immediately" prompt called `create_ticket` instead of
+  `escalate_to_human`, because D-025's two new rules didn't say which wins. `AGENT_SYSTEM_PROMPT` now states
+  escalation takes priority over ticketing (D-028); reproduced 3x before the fix, fixed 3x after
+- Two deterministic regression tests added (`tests/test_agent.py`) covering the malformed-response and
+  bundled-is_final bugs, so neither depends on reproducing a live Gemini flake again
+
 ## Phase log
 
 Append one line per finished phase (newest last).
@@ -114,6 +137,7 @@ Append one line per finished phase (newest last).
 | 2026-10-15 | 4 | Both | Skeleton done; deployed via Vercel project `knowops-ai-` |
 | 2026-10-18 | 5 | Vaishnavi (with Claude) | 5.4 closed — every route but health/login now requires a JWT, verified locally (40/40 tests) and live on `sprint-2` |
 | 2026-10-20 | 6 | Vaishnavi (with Claude) | `/ask` verified live: cited in-scope answer, out-of-scope refusal; fixed chunker dropping code-fenced commands (80 chunks) |
+| 2026-10-25 | 7 | Vaishnavi (with Claude) | Added `create_ticket`/`escalate_to_human` tools; found and fixed 2 real agent-loop bugs (blank resolution on malformed Gemini reply, tool call silently skipped when bundled with is_final) and 1 prompt-priority gap (escalation vs. ticketing); all 7 tools verified live |
 
 ## Deployment
 
@@ -180,8 +204,9 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 
 - **Phase 10 (config):** if an env var is missing, `app/config.py` silently falls back to `admin`/`admin` and
   `jwt_secret="dev-secret"` (D-007).
-- **Phase 7.1:** agent tools differ from the guide — no `create_ticket` or `escalate_to_human` tool; diagnostics
-  and recovery actions are simulated (D-015).
+- **Phase 7.1 (partial, remainder of D-015):** `create_ticket`/`escalate_to_human` were added (D-025), but
+  `run_system_diagnostics`/`execute_recovery_action` are still simulated for everything except the database
+  diagnostic — no real infrastructure is inspected or changed.
 - **`/ask` history:** loads the *first* 8 messages of a conversation, not the latest 8.
 - **Phase 9.1:** `/cron/reindex` only counts rows — it doesn't re-run ingestion.
 - **Phase 9.3:** `vercel.json` cron calls `/cron/reindex`, but the route is `POST`; Vercel Cron sends `GET`,

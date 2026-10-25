@@ -3,7 +3,8 @@ app/agent.py  –  Phase 3.2
 Autonomous ReAct Agent & Operational Tool-Calling Engine for KnowOps AI.
 
 This module provides:
-  - Operational diagnostic & remediation tools (runbook lookup, CRM tickets, system diagnostics, recovery actions)
+  - Operational diagnostic & remediation tools (runbook lookup, CRM ticket create/get/update,
+    human escalation, system diagnostics, recovery actions) — build-guide Phase 7.1
   - Autonomous ReAct (Reasoning + Action) execution loop
   - Automated incident triage pipeline: triage_ticket_with_agent()
 """
@@ -58,6 +59,50 @@ def tool_update_ticket(ticket_id: int, status: str, resolution_notes: str) -> st
     if not updated:
         return f"Failed to update Ticket #{ticket_id}."
     return f"Ticket #{ticket_id} updated successfully: status='{status}'."
+
+
+def tool_create_ticket(subject: str, description: str, priority: str = "P2") -> str:
+    """
+    File a new incident ticket in the CRM (build-guide Phase 7.1: create_ticket).
+    """
+    ticket = create_ticket(subject=subject, description=description, priority=priority)
+    return (
+        f"Ticket #{ticket['id']} created: '{ticket['subject']}' "
+        f"(priority={ticket['priority']}, status={ticket['status']})."
+    )
+
+
+def tool_escalate_to_human(ticket_id: Optional[int], reason: str) -> str:
+    """
+    Escalate an incident to a human on-call engineer (build-guide Phase 7.1: escalate_to_human).
+    Simulated — follows the On-Call Guide's escalation path (D-015 pattern): post to #incidents,
+    page the on-call EM via PagerDuty, and for P1s call the VP Engineering directly. If a ticket_id
+    is given, its status is set to 'open' and an escalation note is appended (priority is unchanged —
+    crm.update_ticket_status doesn't support editing priority).
+    """
+    escalation = {
+        "action": "escalate_to_human",
+        "reason": reason,
+        "steps_taken": [
+            "Posted current status, severity, and attempted steps in #incidents",
+            "Paged the on-call Engineering Manager via PagerDuty",
+            "P1 — called VP Engineering directly",
+        ],
+        "result": "escalated",
+    }
+
+    if ticket_id is not None:
+        updated = update_ticket_status(
+            ticket_id,
+            status="open",
+            resolution_notes=f"Escalated to human on-call engineer: {reason}",
+        )
+        if not updated:
+            return json.dumps({**escalation, "ticket_update": f"Ticket #{ticket_id} not found."}, indent=2)
+        escalation["ticket_id"] = ticket_id
+        escalation["ticket_priority"] = updated["priority"]
+
+    return json.dumps(escalation, indent=2)
 
 
 def tool_run_system_diagnostics(component: str) -> str:
@@ -194,7 +239,9 @@ def tool_execute_recovery_action(action: str, target: str) -> str:
 AVAILABLE_TOOLS: dict[str, Callable[..., Any]] = {
     "lookup_runbook": tool_lookup_runbook,
     "get_ticket": tool_get_ticket,
+    "create_ticket": tool_create_ticket,
     "update_ticket": tool_update_ticket,
+    "escalate_to_human": tool_escalate_to_human,
     "run_system_diagnostics": tool_run_system_diagnostics,
     "execute_recovery_action": tool_execute_recovery_action,
 }
@@ -206,12 +253,21 @@ Your mission is to investigate IT incidents, diagnose root causes using verified
 You have access to the following operational tools:
 1. lookup_runbook(query: str): Search runbooks for troubleshooting procedures, error codes, and failover steps.
 2. get_ticket(ticket_id: int): Retrieve ticket details (subject, description, priority, status).
-3. update_ticket(ticket_id: int, status: str, resolution_notes: str): Transition ticket to 'in_progress', 'resolved', or 'closed'.
-4. run_system_diagnostics(component: str): Inspect live health for 'database', 'kubernetes_pods', 'api_gateway', or 'jwt_auth'.
-5. execute_recovery_action(action: str, target: str): Run safe remediation actions ('scale_deployment', 'restart_worker_pod', 'promote_database_replica', 'rollback_deployment').
+3. create_ticket(subject: str, description: str, priority: str): File a new incident ticket when none exists yet.
+4. update_ticket(ticket_id: int, status: str, resolution_notes: str): Transition ticket to 'in_progress', 'resolved', or 'closed'.
+5. escalate_to_human(ticket_id: int | None, reason: str): Page the on-call human engineer when the incident is beyond safe automated remediation (full outage, data loss, security breach, or imminent SLA breach).
+6. run_system_diagnostics(component: str): Inspect live health for 'database', 'kubernetes_pods', 'api_gateway', or 'jwt_auth'.
+7. execute_recovery_action(action: str, target: str): Run safe remediation actions ('scale_deployment', 'restart_worker_pod', 'promote_database_replica', 'rollback_deployment').
 
 CRITICAL RULES:
 - Always base technical diagnosis on verified runbooks retrieved via lookup_runbook.
+- ESCALATION TAKES PRIORITY OVER TICKETING. If the situation matches the On-Call Guide's "escalate
+  immediately" criteria (full platform outage, data loss, security breach, or imminent SLA breach), call
+  escalate_to_human FIRST — before create_ticket, before diagnostics, before any remediation attempt.
+  escalate_to_human does not need an existing ticket: pass ticket_id=null if none exists yet.
+- Otherwise, use create_ticket when the user describes a new incident that has no ticket yet.
+- Use escalate_to_human instead of execute_recovery_action whenever the situation matches the "escalate
+  immediately" criteria above, even if a ticket already exists.
 - Cite the source runbooks and specific sections in your final resolution.
 - Provide clear, professional, and actionable SRE summaries.
 """
@@ -240,7 +296,9 @@ def run_agent(task_prompt: str, max_steps: int = 5) -> dict:
 Available Tools:
 - lookup_runbook: query: string (e.g. {"tool": "lookup_runbook", "args": {"query": "how to rollback kubernetes deployment"}})
 - get_ticket: ticket_id: integer (e.g. {"tool": "get_ticket", "args": {"ticket_id": 1}})
+- create_ticket: subject: string, description: string, priority: string (e.g. {"tool": "create_ticket", "args": {"subject": "API 500s on /ask", "description": "Gemini returning 503s intermittently", "priority": "P2"}})
 - update_ticket: ticket_id: integer, status: string, resolution_notes: string
+- escalate_to_human: ticket_id: integer or null, reason: string (e.g. {"tool": "escalate_to_human", "args": {"ticket_id": 1, "reason": "Full platform outage, all endpoints returning 5xx"}})
 - run_system_diagnostics: component: string (e.g. {"tool": "run_system_diagnostics", "args": {"component": "database"}})
 - execute_recovery_action: action: string, target: string (e.g. {"tool": "execute_recovery_action", "args": {"action": "rollback_deployment", "target": "deployment/knowops-api"}})
 
@@ -264,16 +322,27 @@ When you have gathered enough information and resolved or completed the task, se
         )
 
         try:
-            resp = client.models.generate_content(
-                model=settings.gemini_chat_model,
-                contents=prompt,
-                config={
-                    "system_instruction": AGENT_SYSTEM_PROMPT,
-                    "temperature": 0.1,
-                    "response_mime_type": "application/json",
-                },
-            )
-            raw_text = resp.text or "{}"
+            raw_text = None
+            last_finish_reason = "unknown"
+            # Gemini's JSON mode occasionally returns finish_reason=MALFORMED_RESPONSE with no
+            # text at all (not an exception) — observed to be transient, so retry a couple of
+            # times before giving up, same as the 429/503 retries in app/llm.py.
+            for attempt in range(3):
+                resp = client.models.generate_content(
+                    model=settings.gemini_chat_model,
+                    contents=prompt,
+                    config={
+                        "system_instruction": AGENT_SYSTEM_PROMPT,
+                        "temperature": 0.1,
+                        "response_mime_type": "application/json",
+                    },
+                )
+                raw_text = resp.text
+                if raw_text:
+                    break
+                last_finish_reason = resp.candidates[0].finish_reason if resp.candidates else "unknown"
+            if not raw_text:
+                raise ValueError(f"Gemini returned no response text after 3 attempts (finish_reason={last_finish_reason})")
             step_data = json.loads(raw_text)
         except Exception as exc:
             # Fallback if JSON parsing or model generation encounters temporary error
@@ -297,12 +366,17 @@ When you have gathered enough information and resolved or completed the task, se
             "observation": None,
         }
 
-        if is_final or not action or action not in AVAILABLE_TOOLS:
+        has_valid_tool_call = bool(action) and action in AVAILABLE_TOOLS
+
+        if not has_valid_tool_call:
             step_record["final_answer"] = final_answer or thought
             trace.append(step_record)
             break
 
-        # Execute Tool
+        # Execute Tool. Run it even when Gemini also set is_final=true in the same reply —
+        # otherwise a tool call bundled with is_final is silently dropped while the model still
+        # reports success (observed live: update_ticket requested + is_final=true in one step
+        # meant the ticket was never actually updated, see D-027).
         tool_fn = AVAILABLE_TOOLS[action]
         try:
             if isinstance(args, dict):
@@ -315,6 +389,12 @@ When you have gathered enough information and resolved or completed the task, se
             observation = f"Tool execution error: {e}"
 
         step_record["observation"] = observation
+
+        if is_final:
+            step_record["final_answer"] = final_answer or thought
+            trace.append(step_record)
+            break
+
         trace.append(step_record)
 
         # Append to context for next step
@@ -324,8 +404,10 @@ When you have gathered enough information and resolved or completed the task, se
             f"Observation {step_num}: {observation}\n"
         )
 
-    # If loop ended without final answer, synthesize one
-    if not any("final_answer" in s for s in trace):
+    # If loop ended without a non-empty final answer, synthesize one.
+    # (Checking `"final_answer" in s` instead of `s.get("final_answer")` would miss a step whose
+    # final_answer is present but blank — e.g. a malformed Gemini response — and silently return "".)
+    if not any(s.get("final_answer") for s in trace):
         summary_prompt = (
             f"{conversation_history}\n\n"
             "Provide the final SRE incident resolution report based on all observations."
