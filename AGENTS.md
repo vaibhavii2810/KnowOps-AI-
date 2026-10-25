@@ -41,7 +41,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 5 | JWT auth | Niranjan | ✅ Done |
 | 6 | RAG retrieval + `/ask` | Niranjan | ✅ Done |
 | 7 | Agent + tool-calling | Niranjan | ✅ Done |
-| 8 | Mock CRM / tickets | Vaishnavi | 🟡 Code exists, not verified |
+| 8 | Mock CRM / tickets | Vaishnavi | ✅ Done |
 | 9 | Automation (cron + n8n) | Vaishnavi | 🟡 Partial — see Known issues |
 | 10 | Error handling & security | Split 50/50 | ⬜ Not started |
 | 11 | Testing & QA | Vaishnavi | 🟡 Partial — tests exist, no CI (11.5) |
@@ -125,6 +125,21 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
 - Two deterministic regression tests added (`tests/test_agent.py`) covering the malformed-response and
   bundled-is_final bugs, so neither depends on reproducing a live Gemini flake again
 
+**Phase 8 — Mock CRM / tickets** ✅
+- 8.1 `app/crm.py` verified directly against Postgres: `create_ticket()` genuinely inserts a row (confirmed
+  with a raw SQL query, not just the function's own return value); the lookup function is named `get_ticket()`
+  rather than the guide's `check_ticket_status()` — same naming gap already weighed and declined in D-025, no
+  new decision needed
+- 8.2 `POST /tickets` / `GET /tickets/{id}` verified end-to-end over HTTP: 401 without a token, 200 with one,
+  create → fetch round trip returns the same ticket, 404 for a nonexistent id, 422 on a missing required field
+- 8.3 Natural-language end-to-end test (no tool named in the prompt), through the real `/agent/chat` HTTP
+  endpoint: "my requests to /ask keep timing out, log a ticket" (EdTech example adapted to this project's
+  DevOps/SRE domain per D-009) → agent called `create_ticket` → row confirmed independently via raw SQL
+  (id, subject, status all correct). Ticket *lookup* by natural language was already proven the same way in
+  Phase 7.5 ("what is the status of ticket #137?" → `get_ticket`), so both halves of the done-when criterion
+  are covered
+- 8.4 *(stretch, optional per the guide — not attempted)*: swap the mock CRM for HubSpot's free tier
+
 ## Phase log
 
 Append one line per finished phase (newest last).
@@ -138,6 +153,7 @@ Append one line per finished phase (newest last).
 | 2026-10-18 | 5 | Vaishnavi (with Claude) | 5.4 closed — every route but health/login now requires a JWT, verified locally (40/40 tests) and live on `sprint-2` |
 | 2026-10-20 | 6 | Vaishnavi (with Claude) | `/ask` verified live: cited in-scope answer, out-of-scope refusal; fixed chunker dropping code-fenced commands (80 chunks) |
 | 2026-10-25 | 7 | Vaishnavi (with Claude) | Added `create_ticket`/`escalate_to_human` tools; found and fixed 2 real agent-loop bugs (blank resolution on malformed Gemini reply, tool call silently skipped when bundled with is_final) and 1 prompt-priority gap (escalation vs. ticketing); all 7 tools verified live |
+| 2026-10-25 | 8 | Vaishnavi (with Claude) | CRM verified end-to-end: create_ticket/get_ticket against raw Postgres, /tickets endpoints over HTTP, natural-language ticket creation through /agent/chat — no code changes needed, 8.4 skipped (optional) |
 
 ## Deployment
 
