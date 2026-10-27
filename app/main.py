@@ -27,7 +27,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -62,9 +62,11 @@ from app.schemas import (
     CronReindexResponse,
     HealthResponse,
     LoginRequest,
+    Priority,
     MessageRecord,
     TicketCreateRequest,
     TicketResponse,
+    TicketStatus,
     TicketUpdateRequest,
     TokenResponse,
     UserInfo,
@@ -209,7 +211,7 @@ def create_conversation(
     tags=["Conversations"],
 )
 def list_conversations_endpoint(
-    limit: int = 20,
+    limit: int = Query(default=20, ge=1, le=100, description="Max sessions to return (1–100)."),
     current_user: dict = Depends(get_current_user_required),
 ) -> list[dict]:
     """Retrieve the most recent conversation sessions."""
@@ -306,7 +308,7 @@ def health() -> HealthResponse:
     kb_stats: dict = {"documents": 0, "chunks": 0}
 
     try:
-        with get_conn() as conn:
+        with get_conn(retry=False) as conn:  # fail fast: this endpoint exists to report an outage
             doc_count   = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
             chunk_count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
             kb_stats = {"documents": doc_count, "chunks": chunk_count}
@@ -450,9 +452,9 @@ def api_create_ticket(
     tags=["CRM"],
 )
 def api_list_tickets(
-    status: Optional[str] = None,
-    priority: Optional[str] = None,
-    limit: int = 50,
+    status: Optional[TicketStatus] = Query(default=None, description="Filter: open, in_progress, resolved, closed."),
+    priority: Optional[Priority] = Query(default=None, description="Filter: P1, P2, P3, P4."),
+    limit: int = Query(default=50, ge=1, le=200, description="Max tickets to return (1–200)."),
     current_user: dict = Depends(get_current_user_required),
 ) -> list[TicketResponse]:
     """Retrieve incident tickets filtered by status and priority."""

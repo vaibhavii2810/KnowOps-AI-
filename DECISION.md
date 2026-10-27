@@ -413,3 +413,63 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   the workflow's Slack message template expects.
 - **Revisit if:** n8n is actually run and connected for real — confirm the imported workflow fires correctly
   against a live n8n instance, not just the HTTP-listener simulation.
+
+### D-032 · One shared retry/backoff helper for Gemini and Postgres (`app/retry.py`)
+- **Date · by · source:** 2026-10-27 · Vaishnavi (with Claude) · Build guide
+- **Decision:** `app/retry.py` provides `retry_call(fn, is_transient=..., label=...)`: up to 4 attempts,
+  exponential backoff (~1s, 2s, 4s, capped at 8s) with 0.5–1.0× jitter. Every Gemini call site (`embed_text`,
+  `chat_completion`, and both agent calls) goes through it with `is_transient_gemini_error` — 429, 408, any 5xx,
+  and network timeouts/connection errors retry; other 4xx (bad key, malformed request) fail fast. `get_conn()`
+  retries only the **connect** step, on `psycopg.OperationalError` except wrong-password/authorization errors.
+  `get_conn(retry=False)` skips the retry; `GET /health` and the agent's database diagnostic use it, because
+  their job is to *report* an outage — see the tradeoff below.
+  Errors that exhaust retries re-raise unchanged, so every existing `except` block and HTTP status mapping keeps
+  working as before.
+- **Why:** The audit for Phase 10.1 found uneven coverage: `app/llm.py` had two copy-pasted loops that only
+  recognised 429/503 (by string-matching the error text, and confirmed against the committed code: a plain 500
+  was raised after one attempt); `app/agent.py`'s two Gemini calls had no retry for real API errors at all
+  (a live 429 during Phase 7.5 testing went straight to the fallback message); Postgres had none. One
+  implementation with an explicit "is this worth retrying?" predicate removes the duplication and the string
+  matching, and lets permanent failures fail fast instead of spending the serverless function's time budget.
+- **Alternatives considered:** The `tenacity` library (a new dependency for ~30 lines of logic); retrying every
+  SQL statement (rejected — see tradeoff); leaving the inline loops and just widening their status list
+  (keeps the duplication and the agent gap).
+- **Tradeoff accepted:** DB retries cover connection establishment only, not statements. The connection
+  is autocommit, so an INSERT whose response was lost may already be committed; re-running it would create a
+  duplicate ticket or message. A transient failure *mid-query* therefore still surfaces as an error instead of
+  being retried. Also: a daily-quota 429 (free tier) won't recover on retry, so it costs ~7s of backoff before
+  failing — acceptable because per-minute 429s are the common case and do recover. Worst-case added latency per
+  failing call is ≈ 1+2+4 = 7s. Measured, not assumed: with the DB down, `/health` first took ~6.7s of
+  backoff to answer 503 (a monitor with a 5s timeout would see a hang, not a 503), which is why the two
+  health probes opt out. HTTP status codes and error text for every route are unchanged — enforced by
+  `tests/test_retry.py` (exhausted retries still map to the same 503s; permanent errors still fail fast).
+- **Revisit if:** Mid-query DB failures show up in logs (Phase 12) — then add idempotency keys and retry
+  statements — or if the 7s worst case runs into the function timeout.
+
+### D-033 · Strict request validation, plus fixes for the crashes it surfaced (Phase 10.2)
+- **Date · by · source:** 2026-10-27 · Vaishnavi (with Claude) · Build guide
+- **Decision:** `app/schemas.py` gained shared input types: free text is whitespace-stripped *before* its length
+  check and rejects NUL bytes; `priority` and ticket `status` are case-insensitive `Literal` enums;
+  `conversation_id` is bounded to a valid int4. The two list routes bound `limit` (`/tickets` 1–200,
+  `/conversations` 1–100) and validate the `status`/`priority` filters. `verify_operator_credentials` now compares
+  UTF-8 bytes. Contract changes: invalid ticket status on `PATCH` is **422 (was 400)**; invalid priority on
+  `POST /tickets` is **422 (was silently coerced to P2)**; unknown `?status=`/`?priority=` filters are **422 (was an
+  empty 200)**; `?limit=` out of range is 422.
+- **Why:** The phase's done-when is "a bad request never crashes the API", so rather than only confirming Pydantic
+  models exist I fuzzed all routes (76 hostile requests, Gemini stubbed). **6 returned HTTP 500**: NUL bytes in
+  ticket subject/description/notes and in the `status` filter (Postgres cannot store NUL), and a negative `limit`
+  on both list routes. A further probe found **login with any non-ASCII character was a 500** (`secrets.compare_digest`
+  raises `TypeError` on non-ASCII `str`) — an unauthenticated crash on a public endpoint. Silent failures too:
+  a whitespace-only subject created a blank ticket, `priority: "banana"` was quietly stored as P2, and a
+  whitespace-only `/ask` question would have spent a Gemini call. The permanent test file
+  (`tests/test_input_validation.py`, 57 cases) fails 31 of 57 against the previous code and passes against this.
+- **Alternatives considered:** A catch-all handler mapping `psycopg.DataError` to 422 (rejected — it would also hide
+  genuine server bugs as client errors); validating only the bodies, as the guide's wording literally says
+  (rejected — the crashes were in query params and in auth); bounding path ids (skipped — they don't crash, a
+  bad id is already a 404); stripping login passwords (rejected — spaces can be legitimate there).
+- **Tradeoff accepted:** The 400→422 and silent-coercion→422 changes are a breaking change for any client that sent
+  bad values; checked that the web console only sends `P1`–`P4` and `limit=15`/`50`, and nothing else in the repo calls
+  these endpoints. The agent's tools call `app/crm.py` directly, not HTTP, so they still coerce an invalid priority
+  to P2 — not changed here. Enum matching is case-insensitive on purpose so `p1` and `Resolved` keep working.
+- **Revisit if:** Another client needs the old lenient behaviour, or a new free-text field is added (it must use
+  the shared `_clean_text` type or it reintroduces the NUL crash).

@@ -3,7 +3,7 @@
 What runs first, what calls what, and in which order. **Any change that adds, removes or renames an
 entry point, route, module or call chain must update this file in the same change** (rule in `AGENTS.md`).
 
-Notation: `→` calls · `[DB]` opens a Postgres connection via `app.db.get_conn()` · `[Gemini]` calls the Gemini API.
+Notation: `→` calls · `[DB]` opens a Postgres connection via `app.db.get_conn()` (the *connect* step retries transient failures, except health probes which fail fast; statements never retry — D-032) · `[Gemini]` calls the Gemini API (every call retries transient failures via `app.retry.retry_call` — D-032).
 
 ## 1. Entry points
 
@@ -42,7 +42,9 @@ created on first use by `llm.get_client()` (`lru_cache` → one client per proce
 `CORSMiddleware` → route match → dependencies (`get_current_user_required` on every route below except
 `/health`, `/auth/login`, `GET /`, `/static/*`, `/docs`, `/redoc`, `/cron/reindex` — Phase 5.4, D-022 →
 `security_bearer` reads `Authorization: Bearer <jwt>`, missing/invalid/expired → 401) → request body
-validated against `app/schemas.py` (422 if invalid) → route handler → response serialised through its
+validated against `app/schemas.py` and the routes' `Query(...)` bounds (422 if invalid — text is whitespace-stripped
+before its length check and NUL bytes are refused; priority/status are case-insensitive enums; `limit` is bounded;
+Phase 10.2, D-033) → route handler → response serialised through its
 `response_model`.
 
 ## 4. Route call chains
@@ -50,14 +52,14 @@ validated against `app/schemas.py` (422 if invalid) → route handler → respon
 ### `GET /health`
 ```
 health()
-  → [DB] COUNT(*) documents, COUNT(*) chunks
+  → [DB] get_conn(retry=False) — fails fast, no connect retries (D-032) — COUNT(*) documents, COUNT(*) chunks
   → HealthResponse            (503 if the DB call fails)
 ```
 
 ### `POST /auth/login`
 ```
 login(LoginRequest)
-  → auth.verify_operator_credentials(username, password)   compare_digest vs settings.app_username / app_password
+  → auth.verify_operator_credentials(username, password)   compare_digest (as UTF-8 bytes — non-ASCII input is a 401, not a crash) vs settings.app_username / app_password
   → auth.create_access_token({"sub", "role"}, 60 min)      jwt.encode HS256 + exp / iat / iss="knowops-ai"
   → TokenResponse             (401 if credentials are wrong)
 ```
@@ -77,14 +79,15 @@ ask(AskRequest, Depends(auth.get_current_user_required))   ← Phase 5.4: now re
        → rag.retrieve(query, top_k, threshold=0.55)
             → llm.embed_query → llm.embed_text(task_type="RETRIEVAL_QUERY")
                  → llm.get_client() → [Gemini] embed_content, 768 dims
-                   (retries 429/503 up to 3×, waiting 2s / 4s / 8s)
+                   (retry_call: up to 4 tries on 429 / 408 / any 5xx / network timeouts, exponential backoff
+                    with jitter ≈ 1s / 2s / 4s — other 4xx fail fast; Phase 10.1, D-032)
             → [DB] cosine search: 1 - (embedding <=> query) >= 0.55, nearest first, LIMIT top_k (HNSW index)
             → list[ChunkResult]
        → rag.format_context_for_llm(chunks) → "Source: <title> › <heading>\n\n<content>" per chunk
      (503 if retrieval fails)
   3. llm.chat_completion(question, context_strings, history)
        → grounded prompt = context block + question, after the history turns
-       → [Gemini] generate_content (SYSTEM_INSTRUCTION, temperature 0.2, max 1024 tokens, retries 429/503 ×2)
+       → [Gemini] generate_content (SYSTEM_INSTRUCTION, temperature 0.2, max 1024 tokens; same retry_call policy as above, D-032)
      (503 if generation fails)
   4. [DB] INSERT the user + model messages (a failure here is printed, not raised)
   5. AskResponse(answer, sources=chunks, question, conversation_id)
@@ -93,17 +96,18 @@ ask(AskRequest, Depends(auth.get_current_user_required))   ← Phase 5.4: now re
 ### Conversations (all `Depends(auth.get_current_user_required)` — Phase 5.4)
 ```
 POST /conversations         → create_conversation()          → [DB] INSERT conversations
-GET  /conversations         → list_conversations_endpoint()  → [DB] conversations LEFT JOIN messages (counts)
+GET  /conversations         → list_conversations_endpoint()  → [DB] conversations LEFT JOIN messages (counts) (?limit= 1–100)
 GET  /conversations/{id}    → get_conversation_endpoint()    → [DB] conversation + messages (404 if missing)
 ```
 
 ### Tickets (mock CRM) (all `Depends(auth.get_current_user_required)` — Phase 5.4)
 ```
-POST  /tickets         → api_create_ticket()    → crm.create_ticket()        → [DB] INSERT (priority forced into P1–P4, default P2)
+POST  /tickets         → api_create_ticket()    → crm.create_ticket()        → [DB] INSERT (priority is validated P1–P4 → 422 otherwise, default P2)
 GET   /tickets         → api_list_tickets()     → crm.list_tickets()         → [DB] SELECT, P1 first, newest first
+                         (?status= and ?priority= validated → 422 for unknown values; ?limit= 1–200)
 GET   /tickets/stats   → api_get_ticket_stats() → crm.get_crm_stats()        → [DB] 5 COUNT queries
 GET   /tickets/{id}    → api_get_ticket()       → crm.get_ticket()           → [DB] (404 if None)
-PATCH /tickets/{id}    → api_update_ticket()    → crm.update_ticket_status() → [DB] UPDATE (bad status → 400, missing → 404)
+PATCH /tickets/{id}    → api_update_ticket()    → crm.update_ticket_status() → [DB] UPDATE (bad status → 422 at validation, was 400; missing → 404)
 ```
 `/tickets/stats` is registered before `/tickets/{ticket_id}` — keep that order or "stats" is parsed as an id.
 
@@ -112,7 +116,8 @@ PATCH /tickets/{id}    → api_update_ticket()    → crm.update_ticket_status()
 api_agent_chat(AgentChatRequest) → agent.run_agent(prompt, max_steps)
   for step in 1..max_steps:
     → llm.get_client() → [Gemini] generate_content (JSON mode, AGENT_SYSTEM_PROMPT, temperature 0.1)
-      (retries up to 3x if resp.text is empty, e.g. finish_reason=MALFORMED_RESPONSE — D-026;
+      (each call goes through retry_call for 429/5xx/timeouts, D-032; separately retries up to 3x if
+       resp.text is empty, e.g. finish_reason=MALFORMED_RESPONSE — D-026;
        exhausted retries or any other exception → non-blank fallback final_answer, is_final=True)
     → json.loads → {thought, action, args, is_final, final_answer}
     → if no valid action (none, or unknown tool name) → stop here with final_answer
@@ -128,7 +133,7 @@ api_agent_chat(AgentChatRequest) → agent.run_agent(prompt, max_steps)
                                     → notify_n8n_escalation() → [n8n webhook] POST if N8N_ESCALATION_WEBHOOK_URL
                                     is set (best-effort — failure logged, never raised) → n8n/workflow.json's
                                     webhook node → HTTP Request node → Slack (Phase 9.4, D-031)
-         run_system_diagnostics  → "database": [DB] SELECT 1 + counts · other components: canned JSON (simulated)
+         run_system_diagnostics  → "database": [DB] (get_conn(retry=False), D-032) SELECT 1 + counts · other components: canned JSON (simulated)
          execute_recovery_action → canned JSON (simulated — nothing is executed)
     → thought / action / observation appended to the text transcript for the next step
   if no step gave a *non-blank* final answer (checks truthiness, not just key presence — D-026)
@@ -231,12 +236,13 @@ Every call above now sends `Authorization: Bearer <jwt>` via `authHeaders()`.
 api/index.py       → app.main
 app.main           → app.agent, app.auth, app.config, app.crm, app.db, app.llm, app.rag, app.schemas,
                      scripts.ingest (Phase 9.1, D-029 — so GET /cron/reindex can call reindex_knowledge_base())
-app.agent          → app.crm, app.db, app.llm, app.rag
+app.agent          → app.crm, app.db, app.llm, app.rag, app.retry
 app.rag            → app.db, app.llm, app.schemas
 app.crm            → app.db
 app.auth           → app.config
-app.llm            → app.config
-app.db             → app.config
+app.llm            → app.config, app.retry
+app.db             → app.config, app.retry
+app.retry          → (none — httpx, psycopg, google.genai.errors only)
 scripts/ingest.py  → app.db, app.llm
 ```
 

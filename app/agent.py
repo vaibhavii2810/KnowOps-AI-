@@ -21,6 +21,7 @@ from app.crm import get_ticket, update_ticket_status, create_ticket, list_ticket
 from app.db import get_conn
 from app.llm import get_client, settings
 from app.rag import retrieve, format_context_for_llm
+from app.retry import is_transient_gemini_error, retry_call
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +136,7 @@ def tool_run_system_diagnostics(component: str) -> str:
 
     if comp in ("database", "postgres", "db"):
         try:
-            with get_conn() as conn:
+            with get_conn(retry=False) as conn:  # a diagnostic must report an outage, not mask it
                 t0 = time.perf_counter()
                 conn.execute("SELECT 1").fetchone()
                 latency_ms = (time.perf_counter() - t0) * 1000
@@ -347,16 +348,21 @@ When you have gathered enough information and resolved or completed the task, se
             last_finish_reason = "unknown"
             # Gemini's JSON mode occasionally returns finish_reason=MALFORMED_RESPONSE with no
             # text at all (not an exception) — observed to be transient, so retry a couple of
-            # times before giving up, same as the 429/503 retries in app/llm.py.
+            # times before giving up. Separately, retry_call() handles real errors (429/5xx/timeouts,
+            # D-032) — previously this call had no retry for those at all.
             for attempt in range(3):
-                resp = client.models.generate_content(
-                    model=settings.gemini_chat_model,
-                    contents=prompt,
-                    config={
-                        "system_instruction": AGENT_SYSTEM_PROMPT,
-                        "temperature": 0.1,
-                        "response_mime_type": "application/json",
-                    },
+                resp = retry_call(
+                    lambda: client.models.generate_content(
+                        model=settings.gemini_chat_model,
+                        contents=prompt,
+                        config={
+                            "system_instruction": AGENT_SYSTEM_PROMPT,
+                            "temperature": 0.1,
+                            "response_mime_type": "application/json",
+                        },
+                    ),
+                    is_transient=is_transient_gemini_error,
+                    label="gemini agent step",
                 )
                 raw_text = resp.text
                 if raw_text:
@@ -434,10 +440,14 @@ When you have gathered enough information and resolved or completed the task, se
             "Provide the final SRE incident resolution report based on all observations."
         )
         try:
-            final_resp = client.models.generate_content(
-                model=settings.gemini_chat_model,
-                contents=summary_prompt,
-                config={"system_instruction": AGENT_SYSTEM_PROMPT, "temperature": 0.2},
+            final_resp = retry_call(
+                lambda: client.models.generate_content(
+                    model=settings.gemini_chat_model,
+                    contents=summary_prompt,
+                    config={"system_instruction": AGENT_SYSTEM_PROMPT, "temperature": 0.2},
+                ),
+                is_transient=is_transient_gemini_error,
+                label="gemini agent summary",
             )
             final_text = final_resp.text or "Incident investigation concluded."
         except Exception as e:

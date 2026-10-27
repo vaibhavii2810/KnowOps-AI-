@@ -65,8 +65,10 @@ def verify_operator_credentials(username: str, password: str) -> bool:
     Verify operator credentials against configured administrative settings.
     Uses constant-time comparison to prevent timing attacks.
     """
-    valid_user = secrets.compare_digest(username, settings.app_username)
-    valid_pass = secrets.compare_digest(password, settings.app_password)
+    # Compare as UTF-8 bytes: secrets.compare_digest raises TypeError on non-ASCII str, which
+    # turned any login attempt containing e.g. "é" or an emoji into an HTTP 500 (Phase 10.2, D-033).
+    valid_user = secrets.compare_digest(username.encode("utf-8"), settings.app_username.encode("utf-8"))
+    valid_pass = secrets.compare_digest(password.encode("utf-8"), settings.app_password.encode("utf-8"))
     return valid_user and valid_pass
 
 

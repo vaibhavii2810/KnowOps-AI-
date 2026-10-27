@@ -43,7 +43,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 7 | Agent + tool-calling | Niranjan | ✅ Done |
 | 8 | Mock CRM / tickets | Vaishnavi | ✅ Done |
 | 9 | Automation (cron + n8n) | Vaishnavi | 🟡 Partial — all 5 chunks code-complete & live; only the dashboard-confirmed cron run (part of the guide's "Done when") is outstanding |
-| 10 | Error handling & security | Split 50/50 | ⬜ Not started |
+| 10 | Error handling & security | Split 50/50 | 🟡 In progress — 10.1–10.2 done (D-032, D-033); 10.3–10.5 open |
 | 11 | Testing & QA | Vaishnavi | 🟡 Partial — tests exist, no CI (11.5) |
 | 12 | Logging & monitoring | Vaishnavi | ⬜ Not started |
 | 13 | AI eval harness | Vaishnavi | 🟡 Partial — `tests/eval_rag.py` exists |
@@ -165,6 +165,23 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
 - 9.5 `n8n/workflow.json` is exported and in the repo, satisfying that half of the guide's done-when directly.
 - 7 new tests (3 for the webhook behavior, matching the pattern already used for 9.1/9.2's live-bug fixes).
 
+**Phase 10 — Error handling & security** 🟡 in progress
+- 10.1 Done. New `app/retry.py` (`retry_call` + transient-error predicates) now wraps all 4 Gemini call sites
+  (`embed_text`, `chat_completion`, agent step, agent summary) and the Postgres connect step in `get_conn()`
+  (D-032). Audit found: `app/llm.py` only retried 429/503 via string matching (a plain 500 was never retried —
+  verified against the committed code), the agent's Gemini calls had no retry for API errors, Postgres had none.
+  Statements are deliberately not retried (autocommit + non-idempotent INSERTs). `/health` and the agent's
+  DB diagnostic use `get_conn(retry=False)` so they report an outage immediately (measured: ~6.7s hang
+  otherwise). 28 tests in `tests/test_retry.py` (instant — sleep is patched), including ones proving HTTP
+  status codes/error text are unchanged; 80/80 pass.
+- 10.2 Done. Fuzzed all routes with 76 hostile requests: **6 returned HTTP 500** (NUL bytes in ticket text and
+  the status filter; negative `limit` on both list routes) and **login with any non-ASCII character was a 500**
+  (`secrets.compare_digest` raises on non-ASCII `str`). Fixed all of them and tightened validation: whitespace-only
+  text, NUL bytes, unknown priority/status and out-of-range `limit` are now clear 422s (D-033). Contract changes:
+  invalid `PATCH` status is 422 (was 400); invalid priority on create is 422 (was silently P2); unknown list filters
+  are 422. 57 tests in `tests/test_input_validation.py` (31 fail against the old code); 137/137 pass.
+- 10.3–10.5 not started.
+
 ## Phase log
 
 Append one line per finished phase (newest last).
@@ -234,7 +251,7 @@ to `sprint-2`'s tip the same day, so Production is a real, working deployment fo
 AGENTS.md   this file — status + rules      DECISION.md  why things are the way they are
 FLOW.md     how execution moves through the code
 CODE_TOUR.md  plain-English, phase-by-phase walkthrough of the code (for teammates new to it)
-app/        main.py (routes) · config.py · db.py · auth.py · rag.py · llm.py · agent.py · crm.py · schemas.py
+app/        main.py (routes) · config.py · db.py · auth.py · rag.py · llm.py · agent.py · crm.py · schemas.py · retry.py
 api/        index.py — Vercel entrypoint (sprint-2)
 scripts/    init_db.sql · ingest.py · generate_phase_*_pdf.py (report generators)
 data/docs/  runbook knowledge base (markdown)

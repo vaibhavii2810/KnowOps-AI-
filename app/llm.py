@@ -3,7 +3,6 @@ app/llm.py  –  Phase 2.1
 Gemini client initialisation, embedding generation, and chat completion helpers.
 """
 
-import time
 from functools import lru_cache
 from typing import Optional
 
@@ -11,6 +10,7 @@ from google import genai
 from google.genai import types
 
 from app.config import settings
+from app.retry import is_transient_gemini_error, retry_call
 
 
 # ---------------------------------------------------------------------------
@@ -41,24 +41,19 @@ def embed_text(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list[float]:
         A list of floats with length settings.embed_dim (768 by default).
     """
     client = get_client()
-    for attempt in range(4):
-        try:
-            response = client.models.embed_content(
-                model=settings.gemini_embed_model,
-                contents=text,
-                config=types.EmbedContentConfig(
-                    task_type=task_type,
-                    output_dimensionality=settings.embed_dim,  # truncate to 768 for pgvector HNSW
-                ),
-            )
-            return response.embeddings[0].values
-        except Exception as exc:
-            err_code = getattr(exc, 'code', getattr(exc, 'status_code', None))
-            if attempt < 3 and (err_code in (429, 503) or '503' in str(exc) or '429' in str(exc)):
-                wait = 2 ** (attempt + 1)
-                time.sleep(wait)
-                continue
-            raise
+    response = retry_call(
+        lambda: client.models.embed_content(
+            model=settings.gemini_embed_model,
+            contents=text,
+            config=types.EmbedContentConfig(
+                task_type=task_type,
+                output_dimensionality=settings.embed_dim,  # truncate to 768 for pgvector HNSW
+            ),
+        ),
+        is_transient=is_transient_gemini_error,
+        label="gemini embed",
+    )
+    return response.embeddings[0].values
 
 
 def embed_query(text: str) -> list[float]:
@@ -128,23 +123,17 @@ def chat_completion(
         types.Content(role="user", parts=[types.Part(text=grounded_user_msg)])
     )
 
-    for attempt in range(3):
-        try:
-            response = client.models.generate_content(
-                model=settings.gemini_chat_model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    temperature=0.2,        # low temperature → factual, consistent
-                    max_output_tokens=1024,
-                ),
-            )
-            return response.text or ""
-        except Exception as exc:
-            # Retry on transient 503 / 429 errors with exponential backoff
-            err_code = getattr(exc, 'code', getattr(exc, 'status_code', None))
-            if attempt < 2 and (err_code in (429, 503) or '503' in str(exc) or '429' in str(exc)):
-                wait = 2 ** (attempt + 1)
-                time.sleep(wait)
-                continue
-            raise
+    response = retry_call(
+        lambda: client.models.generate_content(
+            model=settings.gemini_chat_model,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.2,        # low temperature → factual, consistent
+                max_output_tokens=1024,
+            ),
+        ),
+        is_transient=is_transient_gemini_error,
+        label="gemini chat",
+    )
+    return response.text or ""

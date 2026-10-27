@@ -8,8 +8,52 @@ and define clean, versioned response shapes for every endpoint.
 
 from __future__ import annotations
 
-from typing import Optional
-from pydantic import BaseModel, Field
+from typing import Annotated, Literal, Optional
+from pydantic import AfterValidator, BaseModel, BeforeValidator, Field, StringConstraints
+
+
+# ---------------------------------------------------------------------------
+# Shared input types (Phase 10.2, D-033)
+# ---------------------------------------------------------------------------
+
+def _reject_nul(value: str) -> str:
+    # Postgres text columns cannot hold NUL (0x00); without this a client could crash the API
+    # (HTTP 500) by sending "\u0000" in any field that ends up in the database.
+    if "\x00" in value:
+        raise ValueError("must not contain NUL (0x00) characters")
+    return value
+
+
+def _clean_text(min_length: int, max_length: int):
+    """Free text: surrounding whitespace is stripped *before* the length check (so "   " is
+    rejected rather than counted as 3 characters), and NUL bytes are refused."""
+    return Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=min_length, max_length=max_length),
+        AfterValidator(_reject_nul),
+    ]
+
+
+def _upper(value):
+    return value.strip().upper() if isinstance(value, str) else value
+
+
+def _lower(value):
+    return value.strip().lower() if isinstance(value, str) else value
+
+
+# Case-insensitive on input ("p1", "Resolved" still work), but anything outside the set is a 422.
+Priority = Annotated[Literal["P1", "P2", "P3", "P4"], BeforeValidator(_upper)]
+TicketStatus = Annotated[Literal["open", "in_progress", "resolved", "closed"], BeforeValidator(_lower)]
+
+# Largest value a Postgres SERIAL (int4) id can take; anything above can never match a row.
+MAX_DB_ID = 2_147_483_647
+
+QuestionText = _clean_text(3, 2000)
+TicketSubjectText = _clean_text(3, 200)
+TicketDescriptionText = _clean_text(5, 5000)
+ResolutionNotesText = _clean_text(0, 5000)
+AgentPromptText = _clean_text(3, 2000)
 
 
 # ---------------------------------------------------------------------------
@@ -91,15 +135,15 @@ class ConversationCreateResponse(BaseModel):
 class AskRequest(BaseModel):
     """Payload for POST /ask — a user submitting a question to the knowledge base."""
 
-    question: str = Field(
+    question: QuestionText = Field(
         ...,
-        min_length=3,
-        max_length=2000,
         description="The natural-language question to answer from the knowledge base.",
         examples=["How do I perform a database failover?"],
     )
     conversation_id: Optional[int] = Field(
         default=None,
+        ge=1,
+        le=MAX_DB_ID,
         description="Optional conversation ID for multi-turn memory. "
                     "Pass None (or omit) for a fresh single-turn query.",
     )
@@ -160,21 +204,17 @@ class HealthResponse(BaseModel):
 class TicketCreateRequest(BaseModel):
     """Payload for POST /tickets."""
 
-    subject: str = Field(
+    subject: TicketSubjectText = Field(
         ...,
-        min_length=3,
-        max_length=200,
         description="Brief incident subject line.",
         examples=["Primary Database Unreachable: Failover Required"],
     )
-    description: str = Field(
+    description: TicketDescriptionText = Field(
         ...,
-        min_length=5,
-        max_length=5000,
         description="Detailed incident symptoms or stack trace.",
         examples=["Database connection pool exhausted. Ingress reporting 502 Bad Gateway."],
     )
-    priority: str = Field(
+    priority: Priority = Field(
         default="P2",
         description="Incident priority level: P1, P2, P3, or P4.",
         examples=["P1"],
@@ -184,12 +224,12 @@ class TicketCreateRequest(BaseModel):
 class TicketUpdateRequest(BaseModel):
     """Payload for PATCH /tickets/{id}."""
 
-    status: str = Field(
+    status: TicketStatus = Field(
         ...,
         description="New ticket status: open, in_progress, resolved, closed.",
         examples=["resolved"],
     )
-    resolution_notes: Optional[str] = Field(
+    resolution_notes: Optional[ResolutionNotesText] = Field(
         default=None,
         description="Notes or steps taken by operator/agent to resolve.",
         examples=["Promoted db-replica-01.internal to primary. Scaled pods."],
@@ -226,10 +266,8 @@ class CRMStatsResponse(BaseModel):
 class AgentChatRequest(BaseModel):
     """Payload for POST /agent/chat."""
 
-    prompt: str = Field(
+    prompt: AgentPromptText = Field(
         ...,
-        min_length=3,
-        max_length=2000,
         description="Autonomous instruction for the SRE agent.",
         examples=["Investigate why the worker pod is crashing and propose a fix."],
     )
