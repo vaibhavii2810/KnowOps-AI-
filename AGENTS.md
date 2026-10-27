@@ -202,6 +202,7 @@ Interactive docs: `/docs` (Swagger UI).
 ```
 AGENTS.md   this file — status + rules      DECISION.md  why things are the way they are
 FLOW.md     how execution moves through the code
+CODE_TOUR.md  plain-English, phase-by-phase walkthrough of the code (for teammates new to it)
 app/        main.py (routes) · config.py · db.py · auth.py · rag.py · llm.py · agent.py · crm.py · schemas.py
 api/        index.py — Vercel entrypoint (sprint-2)
 scripts/    init_db.sql · ingest.py · generate_phase_*_pdf.py (report generators)
