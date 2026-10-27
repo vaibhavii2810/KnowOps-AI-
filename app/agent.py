@@ -15,6 +15,8 @@ import json
 import time
 from typing import Any, Callable, Optional
 
+import httpx
+
 from app.crm import get_ticket, update_ticket_status, create_ticket, list_tickets
 from app.db import get_conn
 from app.llm import get_client, settings
@@ -72,13 +74,29 @@ def tool_create_ticket(subject: str, description: str, priority: str = "P2") -> 
     )
 
 
+def notify_n8n_escalation(payload: dict) -> None:
+    """
+    POST an escalation event to the n8n webhook configured in N8N_ESCALATION_WEBHOOK_URL
+    (build-guide Phase 9.4 — n8n posts to Discord/Slack when escalate_to_human fires).
+    Best-effort: n8n may not be running (it's a local `npx n8n` instance per the guide), so a
+    failure here is logged and swallowed rather than breaking the escalation tool itself.
+    """
+    if not settings.n8n_escalation_webhook_url:
+        return
+    try:
+        httpx.post(settings.n8n_escalation_webhook_url, json=payload, timeout=5.0)
+    except Exception as exc:
+        print(f"[Warning] Failed to notify n8n escalation webhook: {exc}")
+
+
 def tool_escalate_to_human(ticket_id: Optional[int], reason: str) -> str:
     """
     Escalate an incident to a human on-call engineer (build-guide Phase 7.1: escalate_to_human).
     Simulated — follows the On-Call Guide's escalation path (D-015 pattern): post to #incidents,
     page the on-call EM via PagerDuty, and for P1s call the VP Engineering directly. If a ticket_id
     is given, its status is set to 'open' and an escalation note is appended (priority is unchanged —
-    crm.update_ticket_status doesn't support editing priority).
+    crm.update_ticket_status doesn't support editing priority). Also notifies the n8n webhook, if
+    configured, so a connected workflow can post to Discord/Slack (Phase 9.4, D-031).
     """
     escalation = {
         "action": "escalate_to_human",
@@ -98,10 +116,13 @@ def tool_escalate_to_human(ticket_id: Optional[int], reason: str) -> str:
             resolution_notes=f"Escalated to human on-call engineer: {reason}",
         )
         if not updated:
-            return json.dumps({**escalation, "ticket_update": f"Ticket #{ticket_id} not found."}, indent=2)
+            escalation["ticket_update"] = f"Ticket #{ticket_id} not found."
+            notify_n8n_escalation(escalation)
+            return json.dumps(escalation, indent=2)
         escalation["ticket_id"] = ticket_id
         escalation["ticket_priority"] = updated["priority"]
 
+    notify_n8n_escalation(escalation)
     return json.dumps(escalation, indent=2)
 
 

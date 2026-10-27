@@ -42,7 +42,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 6 | RAG retrieval + `/ask` | Niranjan | ✅ Done |
 | 7 | Agent + tool-calling | Niranjan | ✅ Done |
 | 8 | Mock CRM / tickets | Vaishnavi | ✅ Done |
-| 9 | Automation (cron + n8n) | Vaishnavi | 🟡 Partial — see Known issues |
+| 9 | Automation (cron + n8n) | Vaishnavi | 🟡 Partial — all 5 chunks code-complete & live; only the dashboard-confirmed cron run (part of the guide's "Done when") is outstanding |
 | 10 | Error handling & security | Split 50/50 | ⬜ Not started |
 | 11 | Testing & QA | Vaishnavi | 🟡 Partial — tests exist, no CI (11.5) |
 | 12 | Logging & monitoring | Vaishnavi | ⬜ Not started |
@@ -140,6 +140,31 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   are covered
 - 8.4 *(stretch, optional per the guide — not attempted)*: swap the mock CRM for HubSpot's free tier
 
+**Phase 9 — Automation (cron + n8n)** 🟡 code-complete, one item outstanding
+- 9.1 `GET /cron/reindex` (was `POST`, counted rows only) now actually re-ingests new/changed `data/docs/`
+  files via `scripts.ingest.reindex_knowledge_base()`, skipping unchanged ones by content hash (D-029).
+  Verified live on both Preview and Production: editing one runbook re-embedded only that file; a no-op run
+  took 2.3s with zero Gemini calls.
+- 9.2 `CRON_SECRET` is now enforced in every environment, not just production (D-030) — found and fixed a
+  real gap: an unauthenticated call against the live Preview deployment succeeded and triggered a real
+  re-embed before the fix.
+- 9.3 `vercel.json`'s daily cron (`0 3 * * *` → `/cron/reindex`) is syntactically correct and, as of
+  2026-10-27, actually deployed to Production for the first time (`main` was fast-forwarded to `sprint-2`).
+  Manually confirmed the endpoint behaves exactly as Vercel Cron's own invocation would (`GET`, `Authorization:
+  Bearer $CRON_SECRET` — Vercel auto-attaches this header for a project env var literally named
+  `CRON_SECRET`, confirmed via Vercel's own docs). **Not yet confirmed:** an actual automatic run in Vercel's
+  Cron dashboard — Production only went live today, so the next scheduled 03:00 UTC fire hasn't happened yet.
+  Check `vercel.com/vaii2/knowops-ai-` → Cron Jobs tab tomorrow, or run `vercel crons run /cron/reindex` from
+  the CLI to trigger it immediately.
+- 9.4 Added `n8n/workflow.json` (new, separate from the existing `incident_triage_workflow.json`): a webhook
+  node at `escalate-to-human` → an HTTP Request node posting to Slack. `tool_escalate_to_human` in
+  `app/agent.py` now POSTs to `N8N_ESCALATION_WEBHOOK_URL` when configured (best-effort — n8n being down
+  never breaks the escalation tool itself) (D-031). Verified end-to-end against a real local HTTP listener
+  (not n8n itself, which wasn't actually run) — the payload shape matches what the workflow's Slack template
+  expects.
+- 9.5 `n8n/workflow.json` is exported and in the repo, satisfying that half of the guide's done-when directly.
+- 7 new tests (3 for the webhook behavior, matching the pattern already used for 9.1/9.2's live-bug fixes).
+
 ## Phase log
 
 Append one line per finished phase (newest last).
@@ -154,6 +179,7 @@ Append one line per finished phase (newest last).
 | 2026-10-20 | 6 | Vaishnavi (with Claude) | `/ask` verified live: cited in-scope answer, out-of-scope refusal; fixed chunker dropping code-fenced commands (80 chunks) |
 | 2026-10-25 | 7 | Vaishnavi (with Claude) | Added `create_ticket`/`escalate_to_human` tools; found and fixed 2 real agent-loop bugs (blank resolution on malformed Gemini reply, tool call silently skipped when bundled with is_final) and 1 prompt-priority gap (escalation vs. ticketing); all 7 tools verified live |
 | 2026-10-25 | 8 | Vaishnavi (with Claude) | CRM verified end-to-end: create_ticket/get_ticket against raw Postgres, /tickets endpoints over HTTP, natural-language ticket creation through /agent/chat — no code changes needed, 8.4 skipped (optional) |
+| 2026-10-27 | 9 | Vaishnavi (with Claude) | Fixed CRON_SECRET bypass (9.2) found live; added n8n escalation webhook + workflow.json (9.4/9.5); fast-forwarded main to Production for the first real deploy, filled 7 missing Vercel env vars across both environments; dashboard-confirmed cron run still pending |
 
 ## Deployment
 
@@ -172,9 +198,11 @@ Append one line per finished phase (newest last).
 
 ## Branches
 
-- `main` — scaffold removed; no app code yet.
+- `main` — **Production branch (2026-10-27).** Fast-forwarded to match `sprint-2`'s tip so the real app could
+  go live; was the bare scaffold before that. Keep it fast-forwarded from `sprint-2` as work lands, or Vercel
+  Production silently falls behind.
 - `sprint-1-(base)` — Phases 1–4 code.
-- `sprint-2` — same plus the Vercel entrypoint (`api/index.py`, `vercel.json` rewrites). Active branch.
+- `sprint-2` — Active branch; everything through Phase 9 lives here first, then gets pushed to `main`.
 
 ## API
 
@@ -195,7 +223,10 @@ Interactive docs: `/docs` (Swagger UI).
 ## Environment variables
 
 `DATABASE_URL` (Neon pooled) · `GEMINI_API_KEY` · `GEMINI_CHAT_MODEL` · `GEMINI_EMBED_MODEL` · `EMBED_DIM` (768) ·
-`JWT_SECRET` · `APP_USERNAME` / `APP_PASSWORD` · `CRON_SECRET`. Template: `.env.example`.
+`JWT_SECRET` · `APP_USERNAME` / `APP_PASSWORD` · `CRON_SECRET` · `N8N_ESCALATION_WEBHOOK_URL` (optional — Phase
+9.4, D-031; `escalate_to_human` skips the webhook call entirely when unset). Template: `.env.example`.
+All are now set on both Preview and Production in the Vercel project (2026-10-27) — `main` was fast-forwarded
+to `sprint-2`'s tip the same day, so Production is a real, working deployment for the first time.
 
 ## Repo layout
 
@@ -208,7 +239,8 @@ api/        index.py — Vercel entrypoint (sprint-2)
 scripts/    init_db.sql · ingest.py · generate_phase_*_pdf.py (report generators)
 data/docs/  runbook knowledge base (markdown)
 static/     web console (index.html, css, js)
-n8n/        incident_triage_workflow.json
+n8n/        incident_triage_workflow.json (alert → ticket → triage → Slack) ·
+            workflow.json (escalate_to_human → Slack, Phase 9.4/9.5, D-031)
 tests/      pytest suite + eval_rag.py
 ```
 
@@ -225,14 +257,11 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   `run_system_diagnostics`/`execute_recovery_action` are still simulated for everything except the database
   diagnostic — no real infrastructure is inspected or changed.
 - **`/ask` history:** loads the *first* 8 messages of a conversation, not the latest 8.
-- **Phase 9.1:** the `content_hash` migration (D-029) has run on **both** databases now. The Vercel-connected
-  one's existing rows still have `content_hash=''` (they predate the column), so the *first* live
-  `GET /cron/reindex` call after this deploys will correctly re-embed all 5 files once, then fall back to the
-  fast skip path — same as what happened locally. Not a bug, just expected on that one first call.
-- **Phase 9.1 (unconfirmed):** `app/main.py` now imports `scripts.ingest` at module load. This should be
-  picked up automatically by Vercel's Python import tracing (the same mechanism that already bundles
-  `app/agent.py` etc. without being listed in `vercel.json`'s `includeFiles`), but hasn't been confirmed
-  against an actual deployment yet — check a live `GET /cron/reindex` call after the next deploy.
+- **Phase 9.3:** the Vercel Cron Jobs dashboard hasn't yet shown an automatic scheduled run of
+  `GET /cron/reindex` — Production only went live 2026-10-27, so the next 03:00 UTC fire hasn't happened yet.
+  Check the dashboard tomorrow, or run `vercel crons run /cron/reindex` to trigger it immediately.
+- **Phase 9.4:** `n8n/workflow.json`'s Slack URL is a placeholder (`.../mock/webhook/...`); the backend→webhook
+  mechanism is verified (D-031) but nobody has actually run `npx n8n` and imported the workflow for real yet.
 
 ## Working here
 

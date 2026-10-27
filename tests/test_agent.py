@@ -127,6 +127,59 @@ def test_agent_tool_escalate_to_human():
     assert "not found" in missing_result["ticket_update"]
 
 
+def test_escalate_to_human_notifies_n8n_webhook_when_configured(monkeypatch):
+    """
+    Phase 9.4 (D-031): escalate_to_human should POST to N8N_ESCALATION_WEBHOOK_URL when one is
+    configured, with enough in the payload for the n8n workflow to build a Discord/Slack message
+    (reason, steps_taken, and the ticket id/priority when a ticket is attached).
+    """
+    calls = []
+
+    def fake_post(url, json, timeout):
+        calls.append((url, json, timeout))
+        class FakeResponse:
+            status_code = 200
+        return FakeResponse()
+
+    monkeypatch.setattr("app.agent.settings.n8n_escalation_webhook_url", "http://localhost:5678/webhook/escalate-to-human")
+    monkeypatch.setattr("app.agent.httpx.post", fake_post)
+
+    ticket = create_ticket(subject="Data loss suspected", description="Backup job failed silently.", priority="P1")
+    tool_escalate_to_human(ticket["id"], "Suspected data loss — backup job failed")
+
+    assert len(calls) == 1
+    url, payload, timeout = calls[0]
+    assert url == "http://localhost:5678/webhook/escalate-to-human"
+    assert payload["reason"] == "Suspected data loss — backup job failed"
+    assert payload["ticket_id"] == ticket["id"]
+    assert payload["ticket_priority"] == "P1"
+    assert "steps_taken" in payload
+
+
+def test_escalate_to_human_skips_webhook_when_unconfigured(monkeypatch):
+    """No N8N_ESCALATION_WEBHOOK_URL set -> no HTTP call at all (local dev without n8n running)."""
+    calls = []
+    monkeypatch.setattr("app.agent.settings.n8n_escalation_webhook_url", "")
+    monkeypatch.setattr("app.agent.httpx.post", lambda *a, **kw: calls.append((a, kw)))
+
+    result = json.loads(tool_escalate_to_human(None, "test, no webhook configured"))
+
+    assert calls == []
+    assert result["result"] == "escalated"
+
+
+def test_escalate_to_human_survives_webhook_failure(monkeypatch):
+    """n8n being unreachable must not break the escalation tool itself (best-effort notify)."""
+    def failing_post(*args, **kwargs):
+        raise ConnectionError("n8n is not running")
+
+    monkeypatch.setattr("app.agent.settings.n8n_escalation_webhook_url", "http://localhost:5678/webhook/escalate-to-human")
+    monkeypatch.setattr("app.agent.httpx.post", failing_post)
+
+    result = json.loads(tool_escalate_to_human(None, "test, webhook unreachable"))
+    assert result["result"] == "escalated"  # tool still succeeds despite the webhook failing
+
+
 class _FakeCandidate:
     def __init__(self, finish_reason):
         self.finish_reason = finish_reason

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     app_username: str = "admin"
     app_password: str = "admin"
     cron_secret: str = ""
+    n8n_escalation_webhook_url: str = ""
 
     class Config:
         env_file = ".env"

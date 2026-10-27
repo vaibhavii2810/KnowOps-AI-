@@ -387,3 +387,29 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   since nothing is being protected if no secret exists to protect it with).
 - **Tradeoff accepted:** None found — this closes a real, now-demonstrated gap with no new downside.
 - **Revisit if:** Never, unless a future deployment target can't set environment variables per-environment.
+
+### D-031 · `escalate_to_human` posts to an n8n webhook, which notifies Discord/Slack
+- **Date · by · source:** 2026-10-27 · Vaishnavi (with Claude) · Build guide
+- **Decision:** `tool_escalate_to_human` now POSTs its escalation payload (reason, steps taken, ticket
+  id/priority if any) to `N8N_ESCALATION_WEBHOOK_URL` when that env var is set. `n8n/workflow.json` (new —
+  separate from the existing `n8n/incident_triage_workflow.json`) is a webhook node at path
+  `escalate-to-human` wired to an HTTP Request node posting a formatted message to a Slack webhook URL.
+  The call is best-effort: a missing/unreachable webhook is logged and swallowed, never raised, so the agent
+  tool itself always succeeds regardless of whether n8n happens to be running.
+- **Why:** This is the literal Phase 9.4 requirement — a webhook that fires specifically when
+  `escalate_to_human` runs, not the unrelated alert-ingestion workflow that already existed. Made best-effort
+  because the guide has n8n running locally via `npx n8n` (free, no Docker); it won't be running in most
+  deployed environments, and a missing on-call notification channel shouldn't ever break the escalation path
+  it's supposed to support.
+- **Alternatives considered:** Reusing `n8n/incident_triage_workflow.json` and adding a branch for this case
+  (rejected — that workflow is a different trigger, alert-in rather than escalation-out, and the guide asks
+  for one workflow with this specific trigger); making the webhook call required/blocking (rejected — would
+  mean a down n8n instance silently breaks `escalate_to_human`, the opposite of what an escalation path should
+  do under failure).
+- **Tradeoff accepted:** The Slack URL in `n8n/workflow.json` is a placeholder (`.../mock/webhook/...`), same
+  convention as the existing workflow file — whoever runs this for real swaps it for an actual Slack/Discord
+  webhook URL. Verified the mechanism end-to-end with a real local HTTP listener (not n8n itself): the
+  backend's POST arrives with the exact JSON shape (`reason`, `steps_taken`, `ticket_id`, `ticket_priority`)
+  the workflow's Slack message template expects.
+- **Revisit if:** n8n is actually run and connected for real — confirm the imported workflow fires correctly
+  against a live n8n instance, not just the HTTP-listener simulation.

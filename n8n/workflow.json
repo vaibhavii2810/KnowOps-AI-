@@ -1,0 +1,54 @@
+{
+  "name": "KnowOps AI — Escalation Notifier",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "escalate-to-human",
+        "options": {}
+      },
+      "id": "node-webhook-trigger",
+      "name": "Escalation Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/mock/webhook/knowops-escalations",
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "=🚨 *Human Escalation Triggered by KnowOps Agent*\n*Reason:* {{ $json.body.reason }}\n*Ticket:* {{ $json.body.ticket_id ? '#' + $json.body.ticket_id + ' (' + $json.body.ticket_priority + ')' : 'No ticket attached' }}\n*Steps already taken by the agent:*\n{{ $json.body.steps_taken.map(s => '• ' + s).join('\\n') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-notify-slack",
+      "name": "Notify On-Call Channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [460, 300]
+    }
+  ],
+  "connections": {
+    "Escalation Webhook": {
+      "main": [
+        [
+          {
+            "node": "Notify On-Call Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {}
+}

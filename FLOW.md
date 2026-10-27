@@ -125,6 +125,9 @@ api_agent_chat(AgentChatRequest) → agent.run_agent(prompt, max_steps)
          update_ticket           → crm.update_ticket_status               → [DB]
          escalate_to_human       → crm.update_ticket_status if ticket_id given → [DB]; steps_taken text is
                                     simulated (On-Call Guide §6 path) — nothing is actually posted/paged (Phase 7.1, D-025)
+                                    → notify_n8n_escalation() → [n8n webhook] POST if N8N_ESCALATION_WEBHOOK_URL
+                                    is set (best-effort — failure logged, never raised) → n8n/workflow.json's
+                                    webhook node → HTTP Request node → Slack (Phase 9.4, D-031)
          run_system_diagnostics  → "database": [DB] SELECT 1 + counts · other components: canned JSON (simulated)
          execute_recovery_action → canned JSON (simulated — nothing is executed)
     → thought / action / observation appended to the text transcript for the next step
