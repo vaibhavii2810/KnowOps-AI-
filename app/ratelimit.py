@@ -1,0 +1,163 @@
+"""
+app/ratelimit.py  –  Phase 10.5
+Per-user rate limiting for the expensive endpoints (D-036).
+
+A fixed-window counter kept in Postgres rather than in process memory: the API runs as serverless
+instances that restart often and run side by side, so an in-memory counter would reset on every cold
+start and each instance would count separately — the real limit would be N times the configured one.
+The database is already shared by every instance.
+
+Latency: the app's get_conn() costs ~1.2s per call against the remote Neon database (a plain connect is
+~0.4s; the rest is pgvector type registration, which the limiter does not need), so the limiter keeps
+one plain connection open per process and reuses it (~70ms per check), reconnecting once if it has gone
+stale — serverless instances freeze and Neon drops idle connections.
+
+Fail-open: this protects cost and quota, it is not an access control. If the counter cannot be read
+or written (database blip, table not creatable) the request is allowed and a warning is logged, so a
+limiter fault can never take /ask down by itself.
+"""
+
+from __future__ import annotations
+
+import math
+import random
+import threading
+import time
+from dataclasses import dataclass
+from typing import Callable, Optional
+
+import psycopg
+from fastapi import Depends, HTTPException, Response, status
+
+from app.auth import get_current_user_required
+from app.config import settings
+
+WINDOW_SECONDS = 60
+
+# bucket name -> name of the Settings field holding its per-minute limit (0 disables the bucket)
+BUCKET_LIMIT_SETTING = {
+    "ask": "rate_limit_ask_per_minute",
+    "agent": "rate_limit_agent_per_minute",
+}
+
+CREATE_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS rate_limits (
+        user_key     TEXT    NOT NULL,
+        bucket       TEXT    NOT NULL,
+        window_start BIGINT  NOT NULL,
+        hits         INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (user_key, bucket, window_start)
+    )
+"""
+
+_table_ready = False
+_conn: Optional[psycopg.Connection] = None
+_conn_lock = threading.Lock()
+
+
+@dataclass(frozen=True)
+class RateLimitResult:
+    allowed: bool
+    limit: int
+    remaining: int
+    retry_after: int  # seconds until the current window ends
+
+
+def _upsert_hit(user_key: str, bucket: str, window_start: int, now: float) -> int:
+    """Count one hit and return the new total, on the shared connection (one reconnect if it was stale)."""
+    global _conn, _table_ready
+    with _conn_lock:
+        for attempt in (1, 2):
+            try:
+                if _conn is None or _conn.closed:
+                    _conn = psycopg.connect(settings.database_url, autocommit=True, connect_timeout=5)
+                    _table_ready = False
+                if not _table_ready:
+                    # first use on this connection: create the table, so production needs no manual migration
+                    _conn.execute(CREATE_TABLE_SQL)
+                    _table_ready = True
+                hits = _conn.execute(
+                    """
+                    INSERT INTO rate_limits (user_key, bucket, window_start, hits)
+                    VALUES (%s, %s, %s, 1)
+                    ON CONFLICT (user_key, bucket, window_start)
+                    DO UPDATE SET hits = rate_limits.hits + 1
+                    RETURNING hits
+                    """,
+                    (user_key, bucket, window_start),
+                ).fetchone()[0]
+                if random.random() < 0.01:  # opportunistic cleanup of windows older than a day
+                    _conn.execute("DELETE FROM rate_limits WHERE window_start < %s", (int(now) - 86400,))
+                return hits
+            except psycopg.OperationalError:
+                try:
+                    if _conn is not None:
+                        _conn.close()
+                except Exception:
+                    pass
+                _conn = None
+                if attempt == 2:
+                    raise
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def check_rate_limit(
+    user_key: str,
+    bucket: str,
+    limit: int,
+    now: Optional[float] = None,
+    window_seconds: int = WINDOW_SECONDS,
+) -> RateLimitResult:
+    """Count one request for (user, bucket) in the current window and say whether it is allowed."""
+    now = time.time() if now is None else now
+    window_start = int(now // window_seconds) * window_seconds
+    retry_after = max(1, math.ceil(window_start + window_seconds - now))
+
+    try:
+        hits = _upsert_hit(user_key, bucket, window_start, now)
+    except Exception as exc:
+        print(f"[Warning] Rate limiter unavailable, allowing the request: {type(exc).__name__}: {str(exc)[:120]}")
+        return RateLimitResult(allowed=True, limit=limit, remaining=limit, retry_after=retry_after)
+
+    return RateLimitResult(
+        allowed=hits <= limit,
+        limit=limit,
+        remaining=max(0, limit - hits),
+        retry_after=retry_after,
+    )
+
+
+def rate_limited(bucket: str) -> Callable[..., dict]:
+    """
+    FastAPI dependency: authenticate (401 comes first), then count the request against the caller's
+    `bucket`. Over the limit -> 429 with a Retry-After header. Returns the JWT payload, so it is a
+    drop-in replacement for Depends(get_current_user_required).
+    """
+    setting_name = BUCKET_LIMIT_SETTING[bucket]
+
+    def dependency(
+        response: Response,
+        user: dict = Depends(get_current_user_required),
+    ) -> dict:
+        limit = int(getattr(settings, setting_name))
+        if limit <= 0:  # 0 disables this bucket
+            return user
+
+        result = check_rate_limit(str(user.get("sub", "unknown")), bucket, limit)
+        headers = {
+            "X-RateLimit-Limit": str(result.limit),
+            "X-RateLimit-Remaining": str(result.remaining),
+        }
+        if not result.allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    f"Rate limit exceeded: {result.limit} requests per minute for this endpoint. "
+                    f"Try again in {result.retry_after} seconds."
+                ),
+                headers={**headers, "Retry-After": str(result.retry_after)},
+            )
+        response.headers.update(headers)
+        return user
+
+    return dependency

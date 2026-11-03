@@ -49,6 +49,7 @@ from app.crm import (
 from app.db import get_conn
 from app.llm import chat_completion
 from app.rag import retrieve_and_format
+from app.ratelimit import rate_limited
 from scripts.ingest import reindex_knowledge_base
 from app.schemas import (
     AgentChatRequest,
@@ -338,7 +339,7 @@ def health() -> HealthResponse:
 )
 def ask(
     request: AskRequest,
-    current_user: dict = Depends(get_current_user_required),
+    current_user: dict = Depends(rate_limited("ask")),
 ) -> AskResponse:
     """
     End-to-end RAG Q&A endpoint with multi-turn memory support.
@@ -537,7 +538,7 @@ def api_update_ticket(
 )
 def api_agent_chat(
     request: AgentChatRequest,
-    current_user: dict = Depends(get_current_user_required),
+    current_user: dict = Depends(rate_limited("agent")),
 ) -> AgentChatResponse:
     """
     Execute autonomous ReAct agent loop with tool-calling capabilities.
@@ -560,7 +561,7 @@ def api_agent_chat(
 )
 def api_agent_triage(
     ticket_id: int,
-    current_user: dict = Depends(get_current_user_required),
+    current_user: dict = Depends(rate_limited("agent")),
 ) -> AgentTriageResponse:
     """
     Run automated triage on an active incident ticket:

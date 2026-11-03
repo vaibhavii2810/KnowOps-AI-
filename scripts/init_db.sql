@@ -47,3 +47,12 @@ CREATE TABLE IF NOT EXISTS messages (
     content TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Per-user rate-limit counters (Phase 10.5, D-036). app/ratelimit.py also creates this on first use.
+CREATE TABLE IF NOT EXISTS rate_limits (
+    user_key     TEXT    NOT NULL,
+    bucket       TEXT    NOT NULL,
+    window_start BIGINT  NOT NULL,
+    hits         INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_key, bucket, window_start)
+);

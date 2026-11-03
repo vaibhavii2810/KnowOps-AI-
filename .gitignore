@@ -5,3 +5,13 @@ venv/
 .env
 .pytest_cache/
 *.egg-info/
+
+# Secrets: any .env variant (e.g. `vercel env pull` writes .env.local / .env.production) except the template
+.env.*
+!.env.example
+*.pem
+*.key
+.vercel/
+
+# macOS
+.DS_Store

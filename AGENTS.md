@@ -43,7 +43,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 7 | Agent + tool-calling | Niranjan | ✅ Done |
 | 8 | Mock CRM / tickets | Vaishnavi | ✅ Done |
 | 9 | Automation (cron + n8n) | Vaishnavi | 🟡 Partial — all 5 chunks code-complete & live; only the dashboard-confirmed cron run (part of the guide's "Done when") is outstanding |
-| 10 | Error handling & security | Split 50/50 | 🟡 In progress — 10.1–10.2 done (D-032, D-033); 10.3–10.5 open |
+| 10 | Error handling & security | Split 50/50 | ✅ Done |
 | 11 | Testing & QA | Vaishnavi | 🟡 Partial — tests exist, no CI (11.5) |
 | 12 | Logging & monitoring | Vaishnavi | ⬜ Not started |
 | 13 | AI eval harness | Vaishnavi | 🟡 Partial — `tests/eval_rag.py` exists |
@@ -165,7 +165,7 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
 - 9.5 `n8n/workflow.json` is exported and in the repo, satisfying that half of the guide's done-when directly.
 - 7 new tests (3 for the webhook behavior, matching the pattern already used for 9.1/9.2's live-bug fixes).
 
-**Phase 10 — Error handling & security** 🟡 in progress
+**Phase 10 — Error handling & security** ✅
 - 10.1 Done. New `app/retry.py` (`retry_call` + transient-error predicates) now wraps all 4 Gemini call sites
   (`embed_text`, `chat_completion`, agent step, agent summary) and the Postgres connect step in `get_conn()`
   (D-032). Audit found: `app/llm.py` only retried 429/503 via string matching (a plain 500 was never retried —
@@ -180,7 +180,35 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   text, NUL bytes, unknown priority/status and out-of-range `limit` are now clear 422s (D-033). Contract changes:
   invalid `PATCH` status is 422 (was 400); invalid priority on create is 422 (was silently P2); unknown list filters
   are 422. 57 tests in `tests/test_input_validation.py` (31 fail against the old code); 137/137 pass.
-- 10.3–10.5 not started.
+- 10.3 Done. Measured first: of 5 attack cases against live Gemini, **E (a poisoned `lookup_runbook` result) hijacked
+  the agent into calling `execute_recovery_action` 1 time in 3** (intermittent; the other cases held; some runs were
+  inconclusive because of Gemini 429s). New `app/guardrails.py` (D-034): untrusted text is fenced as `<untrusted_data>`
+  with forged closing tags stripped; a narrow detector for instruction-like text drops flagged runbook chunks before
+  the model sees them and *taints* an agent run (poisoned ticket or tool output), which then cannot execute
+  `create_ticket`/`update_ticket`/`execute_recovery_action` (`escalate_to_human` stays allowed). Found and fixed a
+  flaw in my own first version: the model wrote "ticket resolved" in the same step as the blocked call, so the
+  operator was told something false — blocked steps are no longer final and a code-generated security notice is
+  appended. 33 tests in `tests/test_prompt_injection.py` (scripted hijacked model, no quota); 170/170 pass.
+  Detector is a heuristic — see D-034 for what it does not catch.
+- 10.4 Done. `.env` is gitignored and was never committed on any branch. Scanned all 23 commits on every ref
+  (13,726 added lines): none of the 7 real secret values from `.env` (Gemini key, JWT/cron secrets, admin password, both
+  Neon passwords) appears anywhere, no known key format matches (the 4 loose hits were code like `api_key=settings…`,
+  and the DB-URL hits were `.env.example`'s `user:password@host`), and the 8 PDFs (decompressed) are clean. Hardened:
+  `.gitignore` now covers `.env.*` (so `vercel env pull` output can't be committed), `*.pem`, `*.key`, `.vercel/`,
+  `.DS_Store`. 13 standing tests in `tests/test_secrets_hygiene.py` (0.3s; simulated leaks make them fail); 183/183 pass.
+  The repo is public — see D-035 for what the scan does not cover.
+- 10.5 Done. New `app/ratelimit.py` (D-036): per-user fixed-window counter in Postgres, 10 req/min on `/ask` and 5/min
+  on the agent endpoints (`/agent/chat` and `/agent/triage` share one bucket — triage runs the same loop), configurable
+  via `RATE_LIMIT_ASK_PER_MINUTE` / `RATE_LIMIT_AGENT_PER_MINUTE` (0 disables). Over the limit → 429 + `Retry-After`;
+  `X-RateLimit-*` headers on every limited response; 401 still comes first and uses nothing. Stored in the database,
+  not memory, because serverless instances restart and run side by side. Fail-open if the counter is unreachable.
+  Measured and fixed a latency problem in my first version: `get_conn()` costs ~1.2s against the remote Neon DB
+  (≈0.8s is `register_vector`), so the limiter keeps one plain connection open — ~56 ms per check, with one automatic
+  reconnect when it goes stale. Self-creates its table (no manual prod migration). 16 tests in `tests/test_rate_limit.py`
+  (frozen clock; removing the route wiring or introducing an off-by-one fails them); 199/199 pass.
+- **Phase 10 done-when check:** the 45 permanent hostile requests (and the 76-request fuzz before them) return no 5xx,
+  with the limiter on; the 5 injection cases are blocked by the guardrails even for a fully hijacked model
+  (D-034). Residual risk is recorded there: the detector is a heuristic.
 
 ## Phase log
 
@@ -197,6 +225,7 @@ Append one line per finished phase (newest last).
 | 2026-10-25 | 7 | Vaishnavi (with Claude) | Added `create_ticket`/`escalate_to_human` tools; found and fixed 2 real agent-loop bugs (blank resolution on malformed Gemini reply, tool call silently skipped when bundled with is_final) and 1 prompt-priority gap (escalation vs. ticketing); all 7 tools verified live |
 | 2026-10-25 | 8 | Vaishnavi (with Claude) | CRM verified end-to-end: create_ticket/get_ticket against raw Postgres, /tickets endpoints over HTTP, natural-language ticket creation through /agent/chat — no code changes needed, 8.4 skipped (optional) |
 | 2026-10-27 | 9 | Vaishnavi (with Claude) | Fixed CRON_SECRET bypass (9.2) found live; added n8n escalation webhook + workflow.json (9.4/9.5); fast-forwarded main to Production for the first real deploy, filled 7 missing Vercel env vars across both environments; dashboard-confirmed cron run still pending |
+| 2026-11-03 | 10 | Vaishnavi (with Claude) | Retry/backoff for Gemini+DB (10.1); fuzzed all routes — 6 HTTP 500s + a non-ASCII login crash found and fixed (10.2); prompt-injection guardrails after measuring a 1-in-3 hijack (10.3); secrets/history scan clean + hygiene tests (10.4); DB-backed per-user rate limits (10.5) |
 
 ## Deployment
 
@@ -219,7 +248,8 @@ Append one line per finished phase (newest last).
   go live; was the bare scaffold before that. Keep it fast-forwarded from `sprint-2` as work lands, or Vercel
   Production silently falls behind.
 - `sprint-1-(base)` — Phases 1–4 code.
-- `sprint-2` — Active branch; everything through Phase 9 lives here first, then gets pushed to `main`.
+- `sprint-2` — Active branch; everything through Phase 10 lives here first, then gets pushed to `main`.
+  **`main` is behind `sprint-2` (2026-11-03): Production does not yet have Phase 10** — promotion was put on hold.
 
 ## API
 
@@ -229,10 +259,10 @@ Append one line per finished phase (newest last).
 | GET | `/health` | none (correct) | DB + KB health |
 | POST | `/auth/login` | none (correct) | Returns JWT |
 | GET | `/auth/me` | required | Current operator |
-| POST | `/ask` | required | RAG answer with citations |
+| POST | `/ask` | required, 10/min per user (429) | RAG answer with citations |
 | POST/GET | `/conversations`, `/conversations/{id}` | required | Chat history |
 | POST/GET/PATCH | `/tickets`, `/tickets/stats`, `/tickets/{id}` | required | Mock CRM |
-| POST | `/agent/chat`, `/agent/triage/{ticket_id}` | required | ReAct agent |
+| POST | `/agent/chat`, `/agent/triage/{ticket_id}` | required, 5/min per user, shared (429) | ReAct agent |
 | GET | `/cron/reindex` | `CRON_SECRET` bearer | Re-index new/changed `data/docs/` files (Phase 9.1, D-029) |
 
 Interactive docs: `/docs` (Swagger UI).
@@ -241,7 +271,8 @@ Interactive docs: `/docs` (Swagger UI).
 
 `DATABASE_URL` (Neon pooled) · `GEMINI_API_KEY` · `GEMINI_CHAT_MODEL` · `GEMINI_EMBED_MODEL` · `EMBED_DIM` (768) ·
 `JWT_SECRET` · `APP_USERNAME` / `APP_PASSWORD` · `CRON_SECRET` · `N8N_ESCALATION_WEBHOOK_URL` (optional — Phase
-9.4, D-031; `escalate_to_human` skips the webhook call entirely when unset). Template: `.env.example`.
+9.4, D-031; `escalate_to_human` skips the webhook call entirely when unset) · `RATE_LIMIT_ASK_PER_MINUTE` (10) /
+`RATE_LIMIT_AGENT_PER_MINUTE` (5) (optional — Phase 10.5, D-036; 0 disables). Template: `.env.example`.
 All are now set on both Preview and Production in the Vercel project (2026-10-27) — `main` was fast-forwarded
 to `sprint-2`'s tip the same day, so Production is a real, working deployment for the first time.
 
@@ -251,7 +282,7 @@ to `sprint-2`'s tip the same day, so Production is a real, working deployment fo
 AGENTS.md   this file — status + rules      DECISION.md  why things are the way they are
 FLOW.md     how execution moves through the code
 CODE_TOUR.md  plain-English, phase-by-phase walkthrough of the code (for teammates new to it)
-app/        main.py (routes) · config.py · db.py · auth.py · rag.py · llm.py · agent.py · crm.py · schemas.py · retry.py
+app/        main.py (routes) · config.py · db.py · auth.py · rag.py · llm.py · agent.py · crm.py · schemas.py · retry.py · guardrails.py
 api/        index.py — Vercel entrypoint (sprint-2)
 scripts/    init_db.sql · ingest.py · generate_phase_*_pdf.py (report generators)
 data/docs/  runbook knowledge base (markdown)
@@ -268,8 +299,15 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 
 ## Known issues
 
-- **Phase 10 (config):** if an env var is missing, `app/config.py` silently falls back to `admin`/`admin` and
-  `jwt_secret="dev-secret"` (D-007).
+- **Weak admin login (security, open):** Vercel's `APP_PASSWORD` is still `admin` and `/auth/login` has no rate limit,
+  so the public site can be brute-forced. A strong password was generated into the local `.env` only; setting it on
+  Vercel was blocked by the permission system and then skipped. Also, if an env var is missing `app/config.py`
+  silently falls back to `admin`/`admin` and `jwt_secret="dev-secret"` (D-007).
+- **`get_conn()` latency:** each call costs ~1.2s against the remote Neon DB, ~0.8s of it `register_vector`, which only
+  `scripts/ingest.py` needs (found while measuring 10.5). `/ask` pays it 3×. A `vectors=False` default would cut ~2.4s
+  from `/ask`; not done.
+- **n8n triage workflow has no auth:** `n8n/incident_triage_workflow.json` calls `POST /tickets` and
+  `/agent/triage/{id}` without an `Authorization` header, so since Phase 5.4 it would get 401s.
 - **Phase 7.1 (partial, remainder of D-015):** `create_ticket`/`escalate_to_human` were added (D-025), but
   `run_system_diagnostics`/`execute_recovery_action` are still simulated for everything except the database
   diagnostic — no real infrastructure is inspected or changed.

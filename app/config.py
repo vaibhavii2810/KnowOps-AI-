@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     app_password: str = "admin"
     cron_secret: str = ""
     n8n_escalation_webhook_url: str = ""
+    rate_limit_ask_per_minute: int = 10
+    rate_limit_agent_per_minute: int = 5
 
     class Config:
         env_file = ".env"

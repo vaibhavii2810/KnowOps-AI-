@@ -41,7 +41,9 @@ created on first use by `llm.get_client()` (`lru_cache` → one client per proce
 
 `CORSMiddleware` → route match → dependencies (`get_current_user_required` on every route below except
 `/health`, `/auth/login`, `GET /`, `/static/*`, `/docs`, `/redoc`, `/cron/reindex` — Phase 5.4, D-022 →
-`security_bearer` reads `Authorization: Bearer <jwt>`, missing/invalid/expired → 401) → request body
+`security_bearer` reads `Authorization: Bearer <jwt>`, missing/invalid/expired → 401; on `/ask`, `/agent/chat` and
+`/agent/triage/{id}` the dependency is `ratelimit.rate_limited(bucket)`, which authenticates first and then counts the
+request — over the per-minute limit → 429 + `Retry-After`; Phase 10.5, D-036) → request body
 validated against `app/schemas.py` and the routes' `Query(...)` bounds (422 if invalid — text is whitespace-stripped
 before its length check and NUL bytes are refused; priority/status are case-insensitive enums; `limit` is bounded;
 Phase 10.2, D-033) → route handler → response serialised through its
@@ -73,7 +75,7 @@ Depends(auth.get_current_user_required)
 
 ### `POST /ask` — the main RAG path
 ```
-ask(AskRequest, Depends(auth.get_current_user_required))   ← Phase 5.4: now required, was optional
+ask(AskRequest, Depends(ratelimit.rate_limited("ask")))   ← JWT required (Phase 5.4) + 10/min per user (Phase 10.5)
   1. [DB] create a conversation, or load its history (first 8 messages, oldest first)
   2. rag.retrieve_and_format(question, top_k)
        → rag.retrieve(query, top_k, threshold=0.55)
@@ -86,7 +88,8 @@ ask(AskRequest, Depends(auth.get_current_user_required))   ← Phase 5.4: now re
        → rag.format_context_for_llm(chunks) → "Source: <title> › <heading>\n\n<content>" per chunk
      (503 if retrieval fails)
   3. llm.chat_completion(question, context_strings, history)
-       → grounded prompt = context block + question, after the history turns
+       → chunks carrying embedded instructions are DROPPED (guardrails.find_injection); the rest are fenced as
+         <untrusted_data> → grounded prompt = context block + question, after the history turns (Phase 10.3, D-034)
        → [Gemini] generate_content (SYSTEM_INSTRUCTION, temperature 0.2, max 1024 tokens; same retry_call policy as above, D-032)
      (503 if generation fails)
   4. [DB] INSERT the user + model messages (a failure here is printed, not raised)
@@ -111,7 +114,7 @@ PATCH /tickets/{id}    → api_update_ticket()    → crm.update_ticket_status()
 ```
 `/tickets/stats` is registered before `/tickets/{ticket_id}` — keep that order or "stats" is parsed as an id.
 
-### `POST /agent/chat` — ReAct loop (`Depends(auth.get_current_user_required)` — Phase 5.4)
+### `POST /agent/chat` — ReAct loop (`Depends(ratelimit.rate_limited("agent"))` — JWT required, 5/min per user, shared with triage)
 ```
 api_agent_chat(AgentChatRequest) → agent.run_agent(prompt, max_steps)
   for step in 1..max_steps:
@@ -121,8 +124,13 @@ api_agent_chat(AgentChatRequest) → agent.run_agent(prompt, max_steps)
        exhausted retries or any other exception → non-blank fallback final_answer, is_final=True)
     → json.loads → {thought, action, args, is_final, final_answer}
     → if no valid action (none, or unknown tool name) → stop here with final_answer
+    → else, if the run is *tainted* and the tool is state-changing (create_ticket / update_ticket /
+      execute_recovery_action) → NOT executed: observation = "BLOCKED: …", step marked blocked, and the step is
+      never treated as final (the model wrote its answer before seeing the block — it gets to answer again)
+      (Phase 10.3, D-034)
     → else execute the tool FIRST (even if is_final is also true — D-027, so a tool call bundled
-      with is_final isn't silently dropped), then stop after it if is_final was set
+      with is_final isn't silently dropped), then stop after it if is_final was set; if the output carries
+      embedded instructions (guardrails.find_injection) the run becomes tainted from then on
     → else AVAILABLE_TOOLS[action](**args):
          lookup_runbook          → rag.retrieve(top_k=3, threshold=0.50)  → [Gemini] + [DB]
          get_ticket              → crm.get_ticket                         → [DB]
@@ -135,18 +143,22 @@ api_agent_chat(AgentChatRequest) → agent.run_agent(prompt, max_steps)
                                     webhook node → HTTP Request node → Slack (Phase 9.4, D-031)
          run_system_diagnostics  → "database": [DB] (get_conn(retry=False), D-032) SELECT 1 + counts · other components: canned JSON (simulated)
          execute_recovery_action → canned JSON (simulated — nothing is executed)
-    → thought / action / observation appended to the text transcript for the next step
+    → thought / action / observation appended to the text transcript for the next step; the observation is
+      wrapped by guardrails.fence() as <untrusted_data> (forged closing tags are stripped)
   if no step gave a *non-blank* final answer (checks truthiness, not just key presence — D-026)
     → [Gemini] one summary call
+  if the run was tainted → a code-generated "[Security notice]" listing blocked actions is appended to the
+    resolution, whatever the model said
 → {task, total_steps, steps, resolution} → AgentChatResponse
 ```
 
-### `POST /agent/triage/{ticket_id}` (`Depends(auth.get_current_user_required)` — Phase 5.4)
+### `POST /agent/triage/{ticket_id}` (`Depends(ratelimit.rate_limited("agent"))` — same bucket as /agent/chat: it runs the same loop)
 ```
 api_agent_triage(ticket_id) → agent.triage_ticket_with_agent(ticket_id)
   → crm.get_ticket            (missing → ValueError → 404)
-  → builds a goal prompt from the ticket
-  → agent.run_agent(prompt, max_steps=4)     (same loop as above)
+  → builds a goal prompt from the ticket, with subject/description fenced as untrusted data; if they carry
+    embedded instructions the run starts tainted (guardrails.find_injection — Phase 10.3, D-034)
+  → agent.run_agent(prompt, max_steps=4, taint_reason=…)     (same loop as above)
   → crm.get_ticket again (state after the agent's updates)
 → AgentTriageResponse         (any other error → 500)
 ```
@@ -234,15 +246,17 @@ Every call above now sends `Authorization: Bearer <jwt>` via `authHeaders()`.
 
 ```
 api/index.py       → app.main
-app.main           → app.agent, app.auth, app.config, app.crm, app.db, app.llm, app.rag, app.schemas,
+app.main           → app.agent, app.auth, app.config, app.crm, app.db, app.llm, app.rag, app.ratelimit, app.schemas,
                      scripts.ingest (Phase 9.1, D-029 — so GET /cron/reindex can call reindex_knowledge_base())
-app.agent          → app.crm, app.db, app.llm, app.rag, app.retry
+app.agent          → app.crm, app.db, app.guardrails, app.llm, app.rag, app.retry
 app.rag            → app.db, app.llm, app.schemas
 app.crm            → app.db
 app.auth           → app.config
-app.llm            → app.config, app.retry
+app.llm            → app.config, app.guardrails, app.retry
 app.db             → app.config, app.retry
 app.retry          → (none — httpx, psycopg, google.genai.errors only)
+app.guardrails     → (none — stdlib only)
+app.ratelimit      → app.auth, app.config (+ psycopg directly: ONE reused plain connection, no pgvector setup — D-036)
 scripts/ingest.py  → app.db, app.llm
 ```
 
@@ -255,3 +269,4 @@ scripts/ingest.py  → app.db, app.llm
 | `tickets` | `crm.py` (via `/tickets*` and agent tools) | `crm.py` |
 | `conversations` | `/ask`, `POST /conversations` | `/ask`, `GET /conversations*` |
 | `messages` | `/ask` | `/ask` (history), `GET /conversations*` |
+| `rate_limits` | `app.ratelimit` (upsert per request on `/ask`, `/agent/*`; self-creates the table) | `app.ratelimit` |

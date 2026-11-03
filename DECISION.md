@@ -473,3 +473,98 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   to P2 — not changed here. Enum matching is case-insensitive on purpose so `p1` and `Resolved` keep working.
 - **Revisit if:** Another client needs the old lenient behaviour, or a new free-text field is added (it must use
   the shared `_clean_text` type or it reintroduces the NUL crash).
+
+### D-034 · Prompt-injection guardrails: fence untrusted text, drop poisoned chunks, block state-changing tools on tainted runs (Phase 10.3)
+- **Date · by · source:** 2026-11-03 · Vaishnavi (with Claude) · Build guide
+- **Decision:** New `app/guardrails.py`. (1) `fence()` wraps untrusted text — runbook chunks, ticket content, tool
+  output — in `<untrusted_data>` tags and `neutralize()` strips any look-alike tag so the text cannot close the fence;
+  both system prompts now say fenced text is data, never instructions. (2) `find_injection()` is a deterministic
+  detector (5 narrow patterns: override-instructions, reveal-prompt, alert-style fake authority, persona switch,
+  "assistant, you must…"). A flagged **knowledge-base chunk is dropped** before it reaches Gemini. A flagged **ticket
+  or tool output marks the agent run tainted**, after which `create_ticket`, `update_ticket` and
+  `execute_recovery_action` are not executed (`STATE_CHANGING_TOOLS`); `escalate_to_human` stays available because
+  paging a human is the right response to a suspected attack. (3) A blocked step is never treated as final, and a
+  code-generated `[Security notice]` is appended to any tainted run's resolution.
+- **Why:** The guide asks for 3–5 injection cases and that the agent not comply. I measured instead of assuming: against
+  live Gemini, 5 cases (direct prompt-reveal, poisoned KB chunk, persona switch, injected ticket, poisoned tool output);
+  **case E hijacked the agent 1 of 3 times** (a poisoned runbook result made it call `execute_recovery_action` on a
+  plain "how do I roll back" question). It is intermittent and model-dependent, so tests that call the real model can
+  neither prove the fix nor stay stable (and Gemini's free-tier 429s made several runs inconclusive). The defences
+  therefore enforce the property in code, and the tests use a scripted **hijacked** model that obeys every injected
+  instruction and show the state-changing tool still does not run. Also found, in the first version of this very fix:
+  the model wrote "the ticket status has been updated to 'resolved'" in the same step as the blocked `update_ticket`,
+  before it saw the block — the operator would have been told a blocked action succeeded. Hence the non-final rule and
+  the code-generated notice. A flagged-ticket run now answers honestly ("the update could not be completed").
+- **Alternatives considered:** Fencing + prompt rule alone (relies on the model obeying it — the thing that failed
+  1/3 on case E); blocking *all* tools on a tainted run (rejected: `escalate_to_human` is the safe response and
+  read-only tools are harmless); a second LLM call to classify injections (extra quota, latency and its own failure
+  modes — the free tier already returns 429s); broad regexes (rejected: my first `fake-authority` pattern flagged
+  "the system override switch is on the PDU panel", and a false positive here silently blocks real remediation —
+  patterns now target text addressed to the AI, and `tests/test_prompt_injection.py` asserts that none of the seed
+  runbooks, whole or chunked, is flagged).
+- **Tradeoff accepted:** The detector is a heuristic, not a proof. A reworded, translated or encoded attack gets past
+  it, and then fencing plus the prompt rule are the only defence (the case that failed 1/3). A flagged ticket can no
+  longer be auto-resolved by triage — it needs a human, by design. `escalate_to_human` can still be triggered by
+  injected text (nuisance, not damage). A dropped chunk still appears in `/ask`'s `sources` list although the model
+  never saw it. A direct attack typed by the authenticated operator into their own `/ask` is only defended at the
+  model level (two live tests, which skip on 429 rather than pass). Tools still run with model-supplied arguments.
+- **Revisit if:** A real attack gets past the detector (add its pattern and a test); a new state-changing tool is
+  added (it must join `STATE_CHANGING_TOOLS`); the simulated recovery actions become real; or the agent is exposed to
+  anyone who is not the single trusted operator.
+
+### D-035 · Standing secrets-hygiene tests, and a broader `.gitignore` (Phase 10.4)
+- **Date · by · source:** 2026-11-03 · Vaishnavi (with Claude) · Build guide
+- **Decision:** `.gitignore` now also ignores `.env.*` (except `.env.example`), `*.pem`, `*.key`, `.vercel/` and
+  `.DS_Store`. `tests/test_secrets_hygiene.py` asserts, on every test run: `.env` and its variants are ignored and only
+  `.env.example` is tracked; no `.env*` file was ever committed on any branch; `.env.example` holds only placeholders; no
+  common secret format (Google/Gemini-style/Neon keys, JWTs, AWS/GitHub/Slack/OpenAI-style tokens, private keys, DB URLs
+  with a real password) appears in any tracked file — PDFs included, by decompressing their streams — or in any line ever
+  added on any ref; and, where a local `.env` exists, none of its secret values appears anywhere in history (the test
+  reports only the variable name).
+- **Why:** The phase asks to confirm `.env` is ignored and check history for committed keys. The check came back clean
+  (23 commits, all refs, 7 secret values, 8 PDFs), but a one-off scan goes stale at the next commit, and the repo is
+  **public**, so one slipped key would be exposed immediately. The `.gitignore` gaps were real: `vercel env pull` writes
+  `.env.local`/`.env.production` (which a bare `.env` rule does not match), and the Vercel CLI writes `.vercel/`.
+- **Alternatives considered:** gitleaks/trufflehog (new dependency or binary for a ~14k-line repo; the regex set here
+  covers the providers this project uses, and a pre-commit tool can be added later); a git pre-commit hook (`.git/hooks`
+  is not versioned, so teammates would not get it — the CI run planned for Phase 11.5 will enforce these tests
+  instead); a loose `password = …` regex (it flags ordinary code — the first run's 4 hits were all `api_key=settings.…`).
+- **Tradeoff accepted:** Format-based scanning cannot catch a secret with no recognisable shape (e.g. a short human-chosen
+  password), and the value-based test only knows the values in the local `.env`. The scan covers local refs and
+  `origin/*`; it does not cover unreachable objects, other clones/forks, or GitHub pull-request refs. If a history test
+  ever fails, the fix is to **rotate the key** — a later commit that deletes it leaves it readable, and the test stays red
+  until history is rewritten. Secrets printed in an assistant/chat transcript are not git leaks and are not detected.
+- **Revisit if:** a provider is added whose keys have a new format (add it to `SECRET_FORMATS` with a scanner self-test
+  case), or CI exists and a real secret scanner is worth adding to it. Worth enabling on the repo itself: GitHub →
+  Settings → Code security → Secret scanning and Push protection (free for public repos).
+
+### D-036 · Rate limits kept in Postgres, on one reused connection, failing open (Phase 10.5)
+- **Date · by · source:** 2026-11-03 · Vaishnavi (with Claude) · Build guide
+- **Decision:** `app/ratelimit.py` counts requests per user (the JWT `sub`) and bucket in a `rate_limits` table — a
+  fixed one-minute window, upserted with `ON CONFLICT … DO UPDATE SET hits = hits + 1 RETURNING hits`. Defaults: `/ask`
+  10/min; `/agent/chat` and `/agent/triage/{id}` 5/min **sharing one bucket** (`RATE_LIMIT_ASK_PER_MINUTE`,
+  `RATE_LIMIT_AGENT_PER_MINUTE`; `0` disables). Authentication runs first, so an unauthenticated caller gets 401 and uses
+  nothing; over the limit is 429 with `Retry-After`, and `X-RateLimit-Limit/Remaining` ride on every limited response.
+  The limiter keeps **one plain psycopg connection** open per process, reconnects once if it has gone stale, and creates
+  its own table on first use. If the counter cannot be reached the request is **allowed** and a warning is logged.
+- **Why:** The guide says "a simple per-user counter is enough". It lives in Postgres, not memory, because the API runs as
+  serverless instances that restart and run side by side: an in-memory counter resets on every cold start and each
+  instance counts separately, so the real limit would be N times the configured one — and a stolen token is exactly the
+  case where someone fires concurrent requests to spin up instances. `/agent/triage` is in the agent bucket because it runs
+  the same ReAct loop; limiting only `/agent/chat` would leave a free way round it. Measured, not assumed: my first
+  version used `get_conn()` and added **~1.2s to every limited request** (a fresh connection to the remote Neon DB, of
+  which ~0.8s is pgvector registration the limiter never needs). A reused plain connection costs **~56 ms** after a
+  one-time ~540 ms connect. Fail-open because this protects cost and quota, it is not access control: a counter fault
+  must not take `/ask` down by itself.
+- **Alternatives considered:** In-memory counters (zero latency and no schema, but per-instance and reset on cold
+  start); `slowapi` or another library (new dependency, and its default storage is in-memory); a Redis/Upstash counter
+  (another service and account); a fresh `get_conn()` per check (rejected on the measured latency); a connection pool
+  (needs `psycopg_pool`, and one connection behind a lock is enough at this traffic).
+- **Tradeoff accepted:** A fixed window allows up to 2× the limit across a minute boundary. One shared connection
+  serialises limiter queries behind a lock (~56 ms each — fine for one operator, a bottleneck at real concurrency). The
+  defaults are guesses to tune against the real Gemini quota (Phase 12 monitoring will show it). Failing open means that
+  during a database outage the limit is off — acceptable, since `/ask` needs the database too. **Not covered:**
+  `/auth/login` is still unlimited, so the public login can be brute-forced; with the Vercel password still `admin` that
+  is the bigger exposure (see Known issues).
+- **Revisit if:** Traffic grows beyond one operator (switch to a pool or a proper store); the default limits trip during
+  normal use or fail to protect the Gemini quota; or a limiter is wanted on `/auth/login` (same table, keyed by client IP).
