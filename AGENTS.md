@@ -301,13 +301,13 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 
 ## Known issues
 
-- **Weak admin login (security, open until the password is changed):** `/auth/login` is now limited to 5 attempts/min and
-  30/hour per client IP (D-037), which stops bulk guessing — but Vercel's `APP_PASSWORD` is still `admin`, the first
-  guess anyone makes. A strong password is in the local `.env` only; the assistant was blocked from reading it or
-  writing it to Vercel (permission system, twice), so it must be set by hand: Vercel → knowops-ai- → Settings →
-  Environment Variables → `APP_PASSWORD` → Edit (Production + Preview), then redeploy. Also, if an env var is missing
-  `app/config.py` silently falls back to `admin`/`admin` and `jwt_secret="dev-secret"` (D-007). The per-IP limit does
-  not stop a distributed attack from many addresses, and trusts the client-IP headers only because Vercel sets them.
+- **Admin login hardening (password fixed 2026-11-03; residual risks):** Vercel's `APP_PASSWORD` was changed by hand to
+  the strong one from the local `.env` and checked live: `admin`/`admin` → 401, the new password → 200 and its token works
+  on `/auth/me`. (First attempt had a trailing newline from `pbcopy` — the site only accepted the password with `\n`
+  appended; fix by copying with `... | cut -d= -f2- | tr -d '\n' | pbcopy`.) Still open: `APP_USERNAME` is `admin`
+  (a free guess; optional to change). If an env var is ever missing, `app/config.py` silently falls back to
+  `admin`/`admin` and `jwt_secret="dev-secret"` (D-007). The per-IP login limit (5/min, 30/hour, D-037) does not stop a
+  distributed attack from many addresses, and trusts the client-IP headers only because Vercel sets them.
 - **`get_conn()` latency:** each call costs ~1.2s against the remote Neon DB, ~0.8s of it `register_vector`, which only
   `scripts/ingest.py` needs (found while measuring 10.5). `/ask` pays it 3×. A `vectors=False` default would cut ~2.4s
   from `/ask`; not done.
