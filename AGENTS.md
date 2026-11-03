@@ -248,8 +248,9 @@ Append one line per finished phase (newest last).
   go live; was the bare scaffold before that. Keep it fast-forwarded from `sprint-2` as work lands, or Vercel
   Production silently falls behind.
 - `sprint-1-(base)` — Phases 1–4 code.
-- `sprint-2` — Active branch; everything through Phase 10 lives here first, then gets pushed to `main`.
-  **`main` is behind `sprint-2` (2026-11-03): Production does not yet have Phase 10** — promotion was put on hold.
+- `sprint-2` — Active branch; everything through Phase 10 lives here first, then gets fast-forwarded to `main`.
+  Production was promoted to Phase 10 on 2026-11-03 (`2d0fe88`) and checked live: validation 422s, non-ASCII login
+  401 (was a 500), rate-limit 429 + `Retry-After` on `/ask` and the agent endpoints, cron still protected.
 
 ## API
 
