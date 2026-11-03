@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     n8n_escalation_webhook_url: str = ""
     rate_limit_ask_per_minute: int = 10
     rate_limit_agent_per_minute: int = 5
+    rate_limit_login_per_minute: int = 5
+    rate_limit_login_per_hour: int = 30
 
     class Config:
         env_file = ".env"

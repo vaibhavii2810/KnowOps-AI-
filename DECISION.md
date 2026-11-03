@@ -568,3 +568,27 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   is the bigger exposure (see Known issues).
 - **Revisit if:** Traffic grows beyond one operator (switch to a pool or a proper store); the default limits trip during
   normal use or fail to protect the Gemini quota; or a limiter is wanted on `/auth/login` (same table, keyed by client IP).
+
+### D-037 · Login rate limit, per client IP, two windows, no per-username lockout (follow-up to Phase 10.5)
+- **Date · by · source:** 2026-11-03 · Vaishnavi (with Claude) · User (D-036 left `/auth/login` as the biggest open exposure)
+- **Decision:** `POST /auth/login` gets `login_rate_limited`: **5 attempts per minute and 30 per hour per client IP**
+  (`RATE_LIMIT_LOGIN_PER_MINUTE`, `RATE_LIMIT_LOGIN_PER_HOUR`; 0 disables), on the same Postgres counter table as D-036.
+  Every attempt counts — right or wrong, and malformed bodies too — and the check runs **before** the credentials are
+  looked at, so a blocked caller gets 429 even with the correct password. The IP comes from `x-vercel-forwarded-for`,
+  then `x-forwarded-for`, `x-real-ip`, then the socket.
+- **Why:** With `/ask` and the agent limited, the unauthenticated login was the one endpoint left where a guess costs an
+  attacker nothing, on a public site whose Vercel password is still the default `admin`. The per-IP key is trustworthy
+  *on Vercel*: its docs say `x-forwarded-for` is overwritten and external IPs are not forwarded, specifically to prevent
+  spoofing. Two windows because they catch different things: 5/min stops a burst, 30/hour stops slow guessing that
+  stays under the per-minute limit (a test shows the hourly cap blocking when the per-minute limit is off). Answering 429
+  before checking credentials removes the oracle where the right password would still succeed after the limit.
+- **Alternatives considered:** A per-**username** lockout (rejected: with one operator it lets an attacker lock the real
+  user out just by sending bad logins — a denial of service on login); counting only failed attempts (rejected: needs
+  a peek-then-increment step and gives an attacker the same number of free tries either way); progressive delays (state
+  and latency for little gain at this size); a CAPTCHA (a new service and UI).
+- **Tradeoff accepted:** It does **not** stop a distributed attack from many IP addresses, and it does **not** make `admin`
+  a safe password — it only makes guessing slow. The headers are trusted because Vercel sets them; run behind another
+  proxy (or locally) and a client can send them itself, so the limit is only as strong as the proxy in front. A shared
+  office/NAT address shares one allowance. A legitimate user fumbling the password 5 times in a minute waits up to 60 s.
+- **Revisit if:** The app is hosted somewhere that does not overwrite these headers; a second operator is added; or logs
+  (Phase 12) show distributed guessing.

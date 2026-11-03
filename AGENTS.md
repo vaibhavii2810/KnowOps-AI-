@@ -258,7 +258,7 @@ Append one line per finished phase (newest last).
 |---|---|---|---|
 | GET | `/` | none | Web operations console (`static/`) |
 | GET | `/health` | none (correct) | DB + KB health |
-| POST | `/auth/login` | none (correct) | Returns JWT |
+| POST | `/auth/login` | none (correct); 5/min + 30/hour per IP (429) | Returns JWT |
 | GET | `/auth/me` | required | Current operator |
 | POST | `/ask` | required, 10/min per user (429) | RAG answer with citations |
 | POST/GET | `/conversations`, `/conversations/{id}` | required | Chat history |
@@ -273,7 +273,8 @@ Interactive docs: `/docs` (Swagger UI).
 `DATABASE_URL` (Neon pooled) · `GEMINI_API_KEY` · `GEMINI_CHAT_MODEL` · `GEMINI_EMBED_MODEL` · `EMBED_DIM` (768) ·
 `JWT_SECRET` · `APP_USERNAME` / `APP_PASSWORD` · `CRON_SECRET` · `N8N_ESCALATION_WEBHOOK_URL` (optional — Phase
 9.4, D-031; `escalate_to_human` skips the webhook call entirely when unset) · `RATE_LIMIT_ASK_PER_MINUTE` (10) /
-`RATE_LIMIT_AGENT_PER_MINUTE` (5) (optional — Phase 10.5, D-036; 0 disables). Template: `.env.example`.
+`RATE_LIMIT_AGENT_PER_MINUTE` (5) (optional — Phase 10.5, D-036; 0 disables) · `RATE_LIMIT_LOGIN_PER_MINUTE` (5) /
+`RATE_LIMIT_LOGIN_PER_HOUR` (30) (optional — D-037; per client IP). Template: `.env.example`.
 All are now set on both Preview and Production in the Vercel project (2026-10-27) — `main` was fast-forwarded
 to `sprint-2`'s tip the same day, so Production is a real, working deployment for the first time.
 
@@ -300,10 +301,13 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 
 ## Known issues
 
-- **Weak admin login (security, open):** Vercel's `APP_PASSWORD` is still `admin` and `/auth/login` has no rate limit,
-  so the public site can be brute-forced. A strong password was generated into the local `.env` only; setting it on
-  Vercel was blocked by the permission system and then skipped. Also, if an env var is missing `app/config.py`
-  silently falls back to `admin`/`admin` and `jwt_secret="dev-secret"` (D-007).
+- **Weak admin login (security, open until the password is changed):** `/auth/login` is now limited to 5 attempts/min and
+  30/hour per client IP (D-037), which stops bulk guessing — but Vercel's `APP_PASSWORD` is still `admin`, the first
+  guess anyone makes. A strong password is in the local `.env` only; the assistant was blocked from reading it or
+  writing it to Vercel (permission system, twice), so it must be set by hand: Vercel → knowops-ai- → Settings →
+  Environment Variables → `APP_PASSWORD` → Edit (Production + Preview), then redeploy. Also, if an env var is missing
+  `app/config.py` silently falls back to `admin`/`admin` and `jwt_secret="dev-secret"` (D-007). The per-IP limit does
+  not stop a distributed attack from many addresses, and trusts the client-IP headers only because Vercel sets them.
 - **`get_conn()` latency:** each call costs ~1.2s against the remote Neon DB, ~0.8s of it `register_vector`, which only
   `scripts/ingest.py` needs (found while measuring 10.5). `/ask` pays it 3×. A `vectors=False` default would cut ~2.4s
   from `/ask`; not done.

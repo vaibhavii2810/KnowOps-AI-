@@ -19,3 +19,5 @@ def rate_limits_off_by_default(monkeypatch):
     makes as the same user. tests/test_rate_limit.py switches it back on for the tests that need it."""
     monkeypatch.setattr(settings, "rate_limit_ask_per_minute", 0)
     monkeypatch.setattr(settings, "rate_limit_agent_per_minute", 0)
+    monkeypatch.setattr(settings, "rate_limit_login_per_minute", 0)
+    monkeypatch.setattr(settings, "rate_limit_login_per_hour", 0)

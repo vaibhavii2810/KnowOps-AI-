@@ -49,7 +49,7 @@ from app.crm import (
 from app.db import get_conn
 from app.llm import chat_completion
 from app.rag import retrieve_and_format
-from app.ratelimit import rate_limited
+from app.ratelimit import login_rate_limited, rate_limited
 from scripts.ingest import reindex_knowledge_base
 from app.schemas import (
     AgentChatRequest,
@@ -135,7 +135,10 @@ def serve_dashboard():
     summary="Operator login (JWT)",
     tags=["Authentication"],
 )
-def login(request: LoginRequest) -> TokenResponse:
+def login(
+    request: LoginRequest,
+    _rate_limit: None = Depends(login_rate_limited),
+) -> TokenResponse:
     """
     Authenticate an operator and issue a signed JWT access token.
     Default credentials for development: admin / admin.

@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 import psycopg
-from fastapi import Depends, HTTPException, Response, status
+from fastapi import Depends, HTTPException, Request, Response, status
 
 from app.auth import get_current_user_required
 from app.config import settings
@@ -125,6 +125,48 @@ def check_rate_limit(
         remaining=max(0, limit - hits),
         retry_after=retry_after,
     )
+
+
+def client_ip(request: Request) -> str:
+    """
+    The caller's IP. On Vercel `x-forwarded-for` / `x-vercel-forwarded-for` / `x-real-ip` are overwritten by the
+    platform, which does not forward client-supplied values, so they cannot be spoofed there. Anywhere else
+    (a local run, another host) a client can send these headers itself, so a per-IP limit is only as strong as
+    the proxy in front of the app.
+    """
+    for header in ("x-vercel-forwarded-for", "x-forwarded-for", "x-real-ip"):
+        value = request.headers.get(header)
+        if value:
+            return value.split(",")[0].strip()[:64]
+    return request.client.host if request.client else "unknown"
+
+
+# (bucket, Settings field, window seconds): a short window against bursts, an hourly cap against slow guessing
+LOGIN_LIMITS = (
+    ("login", "rate_limit_login_per_minute", 60),
+    ("login-hourly", "rate_limit_login_per_hour", 3600),
+)
+
+
+def login_rate_limited(request: Request) -> None:
+    """
+    FastAPI dependency for POST /auth/login (Phase 10.5 follow-up, D-037). Counts every attempt per client IP —
+    right or wrong, and before the credentials are checked, so a blocked caller learns nothing about whether
+    a guess was correct. There is no per-username lockout on purpose: with a single operator it would let an
+    attacker lock the real user out by sending bad logins.
+    """
+    ip = client_ip(request)
+    for bucket, setting_name, window in LOGIN_LIMITS:
+        limit = int(getattr(settings, setting_name))
+        if limit <= 0:
+            continue
+        result = check_rate_limit(ip, bucket, limit, window_seconds=window)
+        if not result.allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Too many login attempts. Try again in {result.retry_after} seconds.",
+                headers={"Retry-After": str(result.retry_after)},
+            )
 
 
 def rate_limited(bucket: str) -> Callable[..., dict]:

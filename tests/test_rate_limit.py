@@ -18,7 +18,7 @@ from app import ratelimit
 from app.auth import create_access_token
 from app.config import settings
 from app.db import get_conn
-from app.ratelimit import check_rate_limit
+from app.ratelimit import check_rate_limit, client_ip
 
 
 @pytest.fixture
@@ -244,3 +244,89 @@ def test_other_routes_are_not_rate_limited(client, user, monkeypatch):
     for _ in range(5):
         assert client.get("/tickets/stats", headers=headers).status_code == 200
     assert client.get("/health").status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Login: per-client-IP limits (D-037)
+# ---------------------------------------------------------------------------
+
+def _request(headers, client=("9.9.9.9", 1234)):
+    from starlette.requests import Request
+    return Request({
+        "type": "http", "client": client,
+        "headers": [(k.encode(), v.encode()) for k, v in headers.items()],
+    })
+
+
+def _login(client, ip, password="not-the-password", username="admin"):
+    return client.post(
+        "/auth/login", json={"username": username, "password": password}, headers={"X-Forwarded-For": ip}
+    )
+
+
+def test_client_ip_prefers_the_vercel_header_then_the_first_forwarded_entry_then_the_socket():
+    assert client_ip(_request({"x-vercel-forwarded-for": "1.1.1.1", "x-forwarded-for": "2.2.2.2"})) == "1.1.1.1"
+    assert client_ip(_request({"x-forwarded-for": "3.3.3.3, 4.4.4.4"})) == "3.3.3.3"
+    assert client_ip(_request({"x-real-ip": "5.5.5.5"})) == "5.5.5.5"
+    assert client_ip(_request({})) == "9.9.9.9"
+    assert client_ip(_request({}, client=None)) == "unknown"
+
+
+def test_login_attempts_are_limited_per_ip(client, user, monkeypatch):
+    monkeypatch.setattr(settings, "rate_limit_login_per_minute", 3)
+    codes = [_login(client, user).status_code for _ in range(4)]
+    assert codes == [401, 401, 401, 429]
+    blocked = _login(client, user)
+    assert "Too many login attempts" in blocked.json()["detail"]
+    assert 1 <= int(blocked.headers["Retry-After"]) <= 60
+
+
+def test_correct_credentials_get_nothing_extra_once_blocked(client, user, monkeypatch):
+    """If the right password still worked after the limit, response speed would tell an attacker when a guess hit."""
+    monkeypatch.setattr(settings, "rate_limit_login_per_minute", 3)
+    for _ in range(3):
+        _login(client, user)
+    assert _login(client, user, password=settings.app_password).status_code == 429
+
+
+def test_a_normal_login_within_the_limit_still_works(client, user, monkeypatch):
+    monkeypatch.setattr(settings, "rate_limit_login_per_minute", 3)
+    response = _login(client, user, password=settings.app_password, username=settings.app_username)
+    assert response.status_code == 200
+    assert response.json()["access_token"]
+
+
+def test_each_ip_has_its_own_login_allowance(client, user, monkeypatch):
+    monkeypatch.setattr(settings, "rate_limit_login_per_minute", 2)
+    for _ in range(2):
+        _login(client, user)
+    assert _login(client, user).status_code == 429
+    assert _login(client, user + "-b", password=settings.app_password, username=settings.app_username).status_code == 200
+
+
+def test_malformed_login_bodies_count_too(client, user, monkeypatch):
+    monkeypatch.setattr(settings, "rate_limit_login_per_minute", 2)
+    headers = {"X-Forwarded-For": user}
+    codes = [client.post("/auth/login", json={"username": 1}, headers=headers).status_code for _ in range(3)]
+    assert codes == [422, 422, 429]
+
+
+def test_the_hourly_cap_stops_slow_guessing_that_stays_under_the_per_minute_limit(client, user, monkeypatch, window_start):
+    monkeypatch.setattr(settings, "rate_limit_login_per_minute", 0)
+    monkeypatch.setattr(settings, "rate_limit_login_per_hour", 2)
+    codes = [_login(client, user).status_code for _ in range(3)]
+    assert codes == [401, 401, 429]
+    now = window_start + 10                      # the frozen clock from the `client` fixture
+    hour_end = (int(now // 3600) + 1) * 3600
+    assert _login(client, user).headers["Retry-After"] == str(hour_end - now)
+
+
+def test_login_limits_can_be_switched_off(client, user):
+    assert [_login(client, user).status_code for _ in range(8)] == [401] * 8   # conftest defaults both to 0
+
+
+def test_other_auth_routes_are_not_login_limited(client, user, monkeypatch):
+    monkeypatch.setattr(settings, "rate_limit_login_per_minute", 1)
+    headers = {**headers_for(user), "X-Forwarded-For": user}
+    for _ in range(4):
+        assert client.get("/auth/me", headers=headers).status_code == 200
