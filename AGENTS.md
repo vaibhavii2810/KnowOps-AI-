@@ -44,7 +44,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 8 | Mock CRM / tickets | Vaishnavi | ✅ Done |
 | 9 | Automation (cron + n8n) | Vaishnavi | ✅ Done — all 5 chunks live; scheduled cron run confirmed in the Vercel dashboard (reported by Vaishnavi, 2026-11-03) |
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
-| 11 | Testing & QA | Vaishnavi | 🟡 Partial — 11.1 done (offline Gemini/DB fakes + network guard, D-038); live tests still to move (11.2–11.4), no CI (11.5) |
+| 11 | Testing & QA | Vaishnavi | 🟡 Partial — 11.1–11.2 done (offline fakes + guard, D-038; `live` marker, auth/RAG-ranking/dispatch unit tests, D-039); 47 default-run tests still reach Postgres (11.4), no CI (11.5) |
 | 12 | Logging & monitoring | Vaishnavi | ⬜ Not started |
 | 13 | AI eval harness | Vaishnavi | 🟡 Partial — `tests/eval_rag.py` exists |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
@@ -209,7 +209,7 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   with the limiter on; the 5 injection cases are blocked by the guardrails even for a fully hijacked model
   (D-034). Residual risk is recorded there: the detector is a heuristic.
 
-**Phase 11 — Testing & QA** 🟡 in progress (11.1 done)
+**Phase 11 — Testing & QA** 🟡 in progress (11.1–11.2 done)
 - 11.1 Done. `tests/conftest.py` now has `fake_gemini`, `fake_db` and `no_network` (D-038). The fakes replace
   `genai.Client` and `psycopg.connect` at the root, so `get_client()` in `app/llm.py` *and* `app/agent.py`,
   `get_conn()` and the rate limiter all get them without per-module patching. `no_network` blocks non-loopback sockets
@@ -218,9 +218,30 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   the rate limiter on the fakes, plus the guard. Two mutation checks: patching only `llm.get_client` (the old style)
   let the agent reach Google's API and the guard caught it; a swallowed real connect left uncleared fails at teardown.
   220/220 pass.
-- Still to do: 11.2/11.4 move the live tests (`test_rag.py`, parts of `test_api_v2_5.py`, `test_crm.py`, the
-  2 live-model injection tests) onto the fakes or behind an opt-in marker and add the empty-KB case; 11.3 a mocked
-  `/ask` round trip; 11.5 GitHub Actions.
+- 11.2 Done. New `pytest.ini`: tests needing the real DB/Gemini are marked `live` and excluded from plain `pytest`;
+  run them with `pytest -m live` (D-039). **Auth** (`tests/test_auth.py`, now under `no_network`): the expired-token test
+  asserts the exact 401/detail/`WWW-Authenticate` (it accepted any exception mentioning "401" or "expired"); added
+  tampered payload, another secret, `alg: none`, HS512 with the right secret, wrong/missing issuer, garbage tokens, and
+  401s on `/auth/me` for missing/`Basic`/malformed headers and an expired token. **RAG ranking** (`tests/test_rag.py`):
+  the fake DB answers `retrieve()`'s query with the same cosine/threshold/ORDER BY/LIMIT math over chunks at known
+  similarities (1.0, ~0.91, ~0.60, 0); tests check order, threshold, `top_k`, the vector/params sent, and pin the SQL's
+  ranking clauses; the 3 live quality checks are now `live`. **Agent dispatch** (new `tests/test_agent_dispatch.py`,
+  20 tests): all 7 tools dispatched with their exact args via spies (plus a check that the case list matches
+  `AVAILABLE_TOOLS`), observation fed back fenced, list/scalar args, unknown/missing action, tool error → observation,
+  wrong keyword → observation, bundled `is_final` (offline D-027 twin), `max_steps` cap + one summary call, history
+  carried forward. `tests/test_agent.py`: ticket/cron tests that write to the real DB are `live`; `lookup_runbook`,
+  the DB diagnostic and the n8n webhook test moved onto `fake_db` (the webhook test had been creating a real ticket;
+  2.2s → instant). 5 mutation checks (issuer check removed, ranking `DESC`, threshold/`top_k` swapped, positional
+  dispatch removed, `max_steps` off-by-one) each fail the new tests. Default run: 254 passed, 9 live deselected;
+  `pytest -m live`: 9/9 pass.
+- Found and fixed on the way: 11.1's `tests/test_fixtures.py` used a made-up database URL with a short fake password,
+  which the 10.4 secrets scanner (rightly) flags; switched to the `.env.example` placeholder form and amended the unpushed 11.1 commit
+  (now `e755b83`) so the false positive never enters history.
+- Still to do: 11.3 a mocked `/ask` round trip; 11.4 edge cases (empty KB) and move the 47 default-run tests that
+  still reach Postgres onto the fakes or `live` — `test_rate_limit` 24, `test_crm` 9, `test_input_validation` 5,
+  `test_retry` 3, `test_api_v2_5` 2, `test_auth_protection` 2 (also network), `test_ingest` 1, `test_prompt_injection`
+  1 (Gemini); 11.5 GitHub Actions (also: `test_api_cron_reindex_requires_cron_secret_in_every_environment` asserts
+  `CRON_SECRET` is set in `.env`, which CI won't have).
 
 ## Phase log
 
@@ -336,8 +357,8 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 ## Working here
 
 - `python -m venv .venv` → `pip install -r requirements.txt` → `uvicorn app.main:app --reload`
-- Tests: `pytest`. New tests should use the `fake_gemini` / `fake_db` fixtures (offline, D-038), not the real
-  database or Gemini.
+- Tests: `pytest` (offline set; tests marked `live` are skipped). `pytest -m live` runs the ones that need the real
+  Neon DB and Gemini (D-039). New tests should use the `fake_gemini` / `fake_db` fixtures (offline, D-038).
 - Never commit `.env` or real keys.
 
 ## Rules for every code change

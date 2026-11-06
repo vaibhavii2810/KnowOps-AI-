@@ -621,3 +621,28 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   failing. Loopback and Unix sockets stay allowed. Existing live tests are untouched until 11.2/11.4 move them over.
 - **Revisit if:** The app starts using cursors, transactions or dict rows; a real-SQL bug slips past the fakes (then add
   a Postgres service-container job); or a new external service is added (give it a fake too).
+
+### D-039 · Tests that need real services are marked `live` and excluded from plain `pytest` (Phase 11.2)
+- **Date · by · source:** 2026-11-06 · Vaishnavi (with Claude) · Build guide (Phase 11 "Done when": `pytest` passes
+  with no real API calls) + Agent (the opt-in marker was recommended and not objected to)
+- **Decision:** New `pytest.ini` registers a `live` marker and sets `addopts = -m "not live"`. Tests that only make
+  sense against the real Neon database or Gemini — retrieval *quality* (failover → DR runbook, k8s rollback → K8s guide),
+  live `/health` counts, the real ticket tools, the live D-027 regression and the real `/cron/reindex` — are marked
+  `live` and run with `pytest -m live` (a later `-m` replaces the default). Each got an offline counterpart where one
+  makes sense: RAG ranking against a fake that does the same cosine/threshold/LIMIT math plus a test pinning the SQL's
+  ranking clauses; `tool_lookup_runbook` and the database diagnostic on `fake_db`; dispatch of all 7 tools with spies
+  (`tests/test_agent_dispatch.py`); an offline twin of the D-027 bundled-`is_final` test.
+- **Why:** The guide's "Done when" is about plain `pytest`, so the default must be the offline set; making the live set
+  opt-in (rather than deleting it) keeps the real end-to-end checks available before a deploy. Live checks of retrieval
+  quality are evaluation, not unit tests — they belong with Phase 13. Excluding by default also stops the default run
+  from writing test tickets into whatever database `.env` points at (often the live one, see Deployment).
+- **Alternatives considered:** Delete the live tests (loses the only real end-to-end checks); an env var such as
+  `RUN_LIVE=1` with `skipif` (works, but a marker is the pytest-native way and shows up in `-m` selection and
+  `--markers`); leave everything in the default run and only filter in CI (then plain `pytest` breaks the guide's
+  criterion and keeps hitting the live DB locally).
+- **Tradeoff accepted:** Live tests now run only when someone asks for them, so a real-service regression is caught
+  later (before a deploy, if `pytest -m live` is part of the routine — Phase 14 smoke test). The offline ranking test
+  can't catch a wrong SQL operator by behaviour, only by the SQL-shape test. As of 11.2, 47 unmarked tests in 8 files
+  still reach Postgres (and 3 reach the network) in the default run — they move in 11.4 before CI (11.5).
+- **Revisit if:** CI gets a real Postgres service container (some `live` tests could then run there), or the live set
+  grows big enough to need its own scheduled job.

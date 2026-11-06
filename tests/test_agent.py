@@ -27,6 +27,7 @@ def client():
     return TestClient(app)
 
 
+@pytest.mark.live
 def test_agent_tool_lookup_runbook():
     """tool_lookup_runbook() should return matched excerpts from operational runbooks."""
     result = tool_lookup_runbook("How do I perform a database failover?")
@@ -34,12 +35,30 @@ def test_agent_tool_lookup_runbook():
     assert "Verification" in result or "Failover" in result or "Primary" in result
 
 
-def test_agent_tool_run_system_diagnostics():
+def test_agent_tool_lookup_runbook_formats_retrieved_chunks(fake_gemini, fake_db):
+    """Offline (Phase 11.2): top 3 at similarity >= 0.50, each labelled with its source."""
+    fake_db.on("FROM chunks c", [
+        (1, "Disaster Recovery Runbook", "dr.md", "4.2 Failover", "Promote the replica.", 0.81),
+    ])
+
+    result = tool_lookup_runbook("How do I perform a database failover?")
+
+    assert result == "[Disaster Recovery Runbook › 4.2 Failover (Similarity: 0.81)]\nPromote the replica."
+    _, params = fake_db.queries("FROM chunks c")[0]
+    assert params[2] == 0.50 and params[4] == 3
+
+
+def test_agent_tool_lookup_runbook_says_so_when_nothing_matches(fake_gemini, fake_db):
+    assert tool_lookup_runbook("best pizza topping") == "No relevant runbook sections found with similarity >= 0.50."
+
+
+def test_agent_tool_run_system_diagnostics(fake_db):
     """tool_run_system_diagnostics() should return JSON diagnostic data for known components."""
+    fake_db.on("SELECT 1", [(1,)]).on("COUNT(*) FROM documents", [(5,)]).on("COUNT(*) FROM chunks", [(80,)])
     # Database
     db_res = json.loads(tool_run_system_diagnostics("database"))
     assert db_res["component"] == "database"
-    assert db_res["status"] in ("healthy", "degraded")
+    assert db_res["status"] == "healthy"
 
     # Kubernetes Pods
     k8s_res = json.loads(tool_run_system_diagnostics("kubernetes_pods"))
@@ -51,7 +70,7 @@ def test_agent_tool_run_system_diagnostics():
     assert api_res["component"] == "api_gateway"
 
 
-def test_agent_tool_execute_recovery_action():
+def test_agent_tool_execute_recovery_action(no_network):
     """tool_execute_recovery_action() should execute approved actions and reject unknown ones."""
     # Scale deployment
     scale_res = json.loads(tool_execute_recovery_action("scale_deployment", "deployment/knowops-api"))
@@ -67,6 +86,7 @@ def test_agent_tool_execute_recovery_action():
     assert unkn_res["status"] == "rejected"
 
 
+@pytest.mark.live
 def test_agent_tool_ticket_management():
     """tool_get_ticket and tool_update_ticket should inspect and modify CRM tickets."""
     ticket = create_ticket(
@@ -86,6 +106,7 @@ def test_agent_tool_ticket_management():
     assert "updated successfully" in upd_msg
 
 
+@pytest.mark.live
 def test_agent_tool_create_ticket():
     """tool_create_ticket() should file a new ticket via the CRM (Phase 7.1)."""
     msg = tool_create_ticket(
@@ -99,6 +120,7 @@ def test_agent_tool_create_ticket():
     assert get_ticket(ticket_id)["priority"] == "P2"
 
 
+@pytest.mark.live
 def test_agent_tool_escalate_to_human():
     """tool_escalate_to_human() should return the on-call escalation path and, given a
     ticket_id, set that ticket's status and append an escalation note (Phase 7.1)."""
@@ -127,7 +149,7 @@ def test_agent_tool_escalate_to_human():
     assert "not found" in missing_result["ticket_update"]
 
 
-def test_escalate_to_human_notifies_n8n_webhook_when_configured(monkeypatch):
+def test_escalate_to_human_notifies_n8n_webhook_when_configured(monkeypatch, fake_db):
     """
     Phase 9.4 (D-031): escalate_to_human should POST to N8N_ESCALATION_WEBHOOK_URL when one is
     configured, with enough in the payload for the n8n workflow to build a Discord/Slack message
@@ -144,7 +166,9 @@ def test_escalate_to_human_notifies_n8n_webhook_when_configured(monkeypatch):
     monkeypatch.setattr("app.agent.settings.n8n_escalation_webhook_url", "http://localhost:5678/webhook/escalate-to-human")
     monkeypatch.setattr("app.agent.httpx.post", fake_post)
 
-    ticket = create_ticket(subject="Data loss suspected", description="Backup job failed silently.", priority="P1")
+    ticket = {"id": 42}
+    fake_db.on("UPDATE tickets", [(42, "Data loss suspected", "Backup job failed silently.", "P1", "open",
+                                   "2026-11-06 10:00:00+00", "2026-11-06 10:05:00+00", "Escalated")])
     tool_escalate_to_human(ticket["id"], "Suspected data loss — backup job failed")
 
     assert len(calls) == 1
@@ -156,7 +180,7 @@ def test_escalate_to_human_notifies_n8n_webhook_when_configured(monkeypatch):
     assert "steps_taken" in payload
 
 
-def test_escalate_to_human_skips_webhook_when_unconfigured(monkeypatch):
+def test_escalate_to_human_skips_webhook_when_unconfigured(monkeypatch, no_network):
     """No N8N_ESCALATION_WEBHOOK_URL set -> no HTTP call at all (local dev without n8n running)."""
     calls = []
     monkeypatch.setattr("app.agent.settings.n8n_escalation_webhook_url", "")
@@ -168,7 +192,7 @@ def test_escalate_to_human_skips_webhook_when_unconfigured(monkeypatch):
     assert result["result"] == "escalated"
 
 
-def test_escalate_to_human_survives_webhook_failure(monkeypatch):
+def test_escalate_to_human_survives_webhook_failure(monkeypatch, no_network):
     """n8n being unreachable must not break the escalation tool itself (best-effort notify)."""
     def failing_post(*args, **kwargs):
         raise ConnectionError("n8n is not running")
@@ -207,7 +231,7 @@ class _FakeClient:
         self.models = _FakeModels()
 
 
-def test_run_agent_never_returns_blank_resolution_on_malformed_gemini_response(monkeypatch):
+def test_run_agent_never_returns_blank_resolution_on_malformed_gemini_response(monkeypatch, no_network):
     """
     Regression test for a real bug found during Phase 7.2 live testing: Gemini's JSON mode can
     return finish_reason=MALFORMED_RESPONSE with resp.text=None (not an exception). The old code
@@ -246,6 +270,7 @@ class _FakeModelsSingleReply:
         return _FakeTextResponse(self.reply_json)
 
 
+@pytest.mark.live
 def test_run_agent_executes_tool_call_bundled_with_is_final(monkeypatch):
     """
     Regression test for a real bug found live during Phase 7.4 triage testing: Gemini sometimes
@@ -286,7 +311,7 @@ def test_run_agent_executes_tool_call_bundled_with_is_final(monkeypatch):
     assert updated["resolution_notes"] == "Fixed via regression test."
 
 
-def test_api_cron_reindex_requires_cron_secret_in_every_environment(client):
+def test_api_cron_reindex_requires_cron_secret_in_every_environment(client, no_network):
     """
     Phase 9.2 (D-030): GET /cron/reindex must reject a missing or wrong CRON_SECRET
     whenever one is configured, in every environment — not just "production" (the old
@@ -300,6 +325,7 @@ def test_api_cron_reindex_requires_cron_secret_in_every_environment(client):
     ).status_code == 401
 
 
+@pytest.mark.live
 def test_api_cron_reindex_endpoint(client):
     """
     GET /cron/reindex (Phase 9.1 — was POST, guide requires GET since that's what

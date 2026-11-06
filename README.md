@@ -27,7 +27,7 @@ create, check and triage incident tickets, and escalate to a human.
 5. `python scripts/ingest.py` to load `data/docs/` into the knowledge base
 6. `uvicorn app.main:app --reload`, then open `/health`, `/docs` (Swagger) or `/` (web console)
 
-Tests: `pytest`
+Tests: `pytest` (skips tests marked `live`) · `pytest -m live` (tests that need the real database and Gemini)
 
 ## Project layout
 

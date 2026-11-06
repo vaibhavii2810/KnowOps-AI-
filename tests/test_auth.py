@@ -3,8 +3,11 @@ tests/test_auth.py  –  Phase 2.5
 Tests for JWT generation, verification, password hashing, and authentication endpoints.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+
+import jwt
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.auth import (
@@ -16,6 +19,9 @@ from app.auth import (
 )
 from app.config import settings
 from app.main import app
+
+# Every test here is offline; the guard proves it (Phase 11.2).
+pytestmark = pytest.mark.usefixtures("no_network")
 
 
 @pytest.fixture
@@ -55,9 +61,11 @@ def test_expired_jwt_token_raises_401():
         {"sub": "admin"},
         expires_delta=timedelta(seconds=-10),  # expired 10 seconds ago
     )
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(HTTPException) as excinfo:
         decode_access_token(token)
-    assert "401" in str(excinfo.value) or "expired" in str(excinfo.value).lower()
+    assert excinfo.value.status_code == 401
+    assert excinfo.value.detail == "Token has expired. Please log in again."
+    assert excinfo.value.headers == {"WWW-Authenticate": "Bearer"}
 
 
 def test_login_endpoint_success(client):
@@ -98,3 +106,73 @@ def test_auth_me_endpoint_protected(client):
     data = auth_res.json()
     assert data["username"] == settings.app_username
     assert data["authenticated"] is True
+
+
+# --- Phase 11.2: invalid tokens --------------------------------------------------------------
+
+def _claims(**overrides) -> dict:
+    now = datetime.now(timezone.utc)
+    claims = {"sub": "admin", "iat": now, "exp": now + timedelta(minutes=5), "iss": "knowops-ai"}
+    claims.update(overrides)
+    return {k: v for k, v in claims.items() if v is not None}
+
+
+def _assert_rejected_as_invalid(token: str) -> None:
+    with pytest.raises(HTTPException) as excinfo:
+        decode_access_token(token)
+    assert excinfo.value.status_code == 401
+    assert excinfo.value.detail.startswith("Invalid token:")
+
+
+def test_a_valid_token_round_trips_with_its_expiry_in_the_future():
+    payload = decode_access_token(create_access_token({"sub": "admin"}))
+    assert payload["exp"] > datetime.now(timezone.utc).timestamp()
+    assert payload["iat"] <= payload["exp"]
+
+
+def test_tampered_payload_is_rejected():
+    header, body, signature = create_access_token({"sub": "admin", "role": "operator"}).split(".")
+    forged_body = jwt.utils.base64url_encode(b'{"sub":"root","role":"operator","iss":"knowops-ai","exp":9999999999}')
+    _assert_rejected_as_invalid(f"{header}.{forged_body.decode()}.{signature}")
+
+
+def test_token_signed_with_another_secret_is_rejected():
+    _assert_rejected_as_invalid(jwt.encode(_claims(), "not-the-real-secret", algorithm=settings.jwt_algorithm))
+
+
+def test_unsigned_alg_none_token_is_rejected():
+    _assert_rejected_as_invalid(jwt.encode(_claims(), None, algorithm="none"))
+
+
+def test_token_using_a_different_algorithm_is_rejected():
+    """Same secret, but HS512: only the configured algorithm is accepted."""
+    _assert_rejected_as_invalid(jwt.encode(_claims(), settings.jwt_secret, algorithm="HS512"))
+
+
+@pytest.mark.parametrize("issuer", ["someone-else", None])
+def test_wrong_or_missing_issuer_is_rejected(issuer):
+    _assert_rejected_as_invalid(jwt.encode(_claims(iss=issuer), settings.jwt_secret, algorithm=settings.jwt_algorithm))
+
+
+@pytest.mark.parametrize("garbage", ["", "not-a-jwt", "a.b.c", "Bearer abc"])
+def test_garbage_tokens_are_rejected(garbage):
+    _assert_rejected_as_invalid(garbage)
+
+
+@pytest.mark.parametrize("headers", [
+    {},                                                    # no header
+    {"Authorization": "Bearer"},                           # scheme, no token
+    {"Authorization": "Basic YWRtaW46YWRtaW4="},           # wrong scheme
+    {"Authorization": "Bearer not-a-jwt"},                 # malformed
+], ids=["missing", "empty-bearer", "basic-scheme", "malformed"])
+def test_protected_route_rejects_bad_authorization_headers(client, headers):
+    response = client.get("/auth/me", headers=headers)
+    assert response.status_code == 401
+    assert response.headers.get("www-authenticate") == "Bearer"
+
+
+def test_protected_route_rejects_an_expired_token(client):
+    token = create_access_token({"sub": "admin"}, expires_delta=timedelta(seconds=-1))
+    response = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Token has expired. Please log in again."
