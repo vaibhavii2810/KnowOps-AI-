@@ -332,6 +332,11 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   `agent_run` line *displayed* `… (truncated)`, but a search for a word only in its last step matched it, so Vercel
   stored it whole — no change needed (D-043 note). 19 new tests (`tests/test_retry.py`, `tests/test_agent_dispatch.py`);
   5 mutation checks each fail them; a real embed + chat call still works with the timeout (0.5 s, 1.1 s). 343 passed.
+  **Deployed as `5dc81ce` and verified live (2026-11-06 17:26 UTC):** CI green on both branches; a read-only capped
+  `/agent/chat` run (`max_steps=1`, no ticket) returned a plain-text answer ("To roll back a Kubernetes deployment, you
+  can check the revision history using `kubectl rollout history …`", not JSON), and Vercel's log shows its `agent_run`
+  with `outcome=max_steps` and the full trace; `/ask` 200 with 5 sources in 14.4 s. The 25 s timeout itself has not been
+  triggered live (only tested with a fake clock).
 
 ## Phase log
 
