@@ -714,7 +714,7 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   `RequestLogMiddleware`, added as the outermost middleware, gives each request an id (an inbound `X-Request-ID` is kept
   only if it matches `^[A-Za-z0-9._-]{8,64}$`, otherwise a uuid4), returns it as `X-Request-ID`, and writes one `request`
   line with method, path, status, latency, user, the tools the agent ran, Vercel's `x-vercel-id`, and the error type on
-  an unhandled error (level: info < 400, warning 4xx, error 5xx). All 8 `print()` calls became named events
+  an unhandled error (level: info < 400, warning 4xx, error 5xx). (Since D-046 it is the second-outermost middleware, just inside the request counter.) All 8 `print()` calls became named events
   (`retrying`, `rate_limiter_unavailable`, `kb_chunk_dropped`, `history_persist_failed`, `n8n_webhook_failed`,
   `tool_blocked`, `run_tainted`, `ticket_tainted`) that carry the same `request_id`. New optional `LOG_LEVEL` (INFO).
 - **Why:** Vercel collects stdout as runtime logs and its log search reads JSON fields, so one line per event is enough —
@@ -818,3 +818,40 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   `plain_text_answer` keeps a JSON reply that has neither `final_answer` nor `thought` as raw text.
 - **Revisit if:** Logs show many `retry_budget_spent` events on calls that would have succeeded (raise the timeout), or a
   capped run's answer still comes back structured.
+
+### D-046 · `GET /metrics`: hourly request counters in Postgres, written after every API request (Phase 12.4, stretch)
+- **Date · by · source:** 2026-11-06 · Vaishnavi (with Claude) · Build guide (12.4: "a simple `/metrics` endpoint: request
+  count, average latency, error rate")
+- **Decision:** New `app/metrics.py`. `RequestMetricsMiddleware` (pure ASGI, the outermost middleware) counts every API
+  request after its response is done into table `request_metrics` — one row per (hour, method, route) holding the request
+  count, 5xx count, 4xx count, summed latency and max latency — with one upsert, on one reused plain connection, failing
+  open (a warning, never a broken request). Routes are labelled with their **template** (`/tickets/{ticket_id}`), unknown
+  URLs share one `(unmatched)` label, and the web console `/`, `/metrics` itself, static files, `/docs`, `/redoc`,
+  `/openapi.json` and CORS preflights are not counted. `GET /metrics?hours=24` (1–168, JWT required) returns totals and a
+  per-route breakdown: requests, average and max latency, server errors, client errors, and error rate. **Error rate is
+  5xx responses ÷ requests**; 4xx (401, 422, 429, 404) are reported separately because they are mostly callers' mistakes.
+  The window is the current partly-elapsed hour plus the `hours - 1` before it. New optional `METRICS_ENABLED` (true);
+  the table self-creates (also in `scripts/init_db.sql`); rows older than 30 days are pruned on ~1% of writes. An outage
+  on the *read* side returns 503, not zeros.
+- **Why:** Same argument as the rate limiter (D-036): serverless instances restart and run side by side, so in-memory
+  counters would reset on every cold start and each instance would count only its own traffic. Postgres is already
+  shared. Hourly sums are exact for count, average and error rate, and cost a handful of rows per hour. Labelling by
+  template (found in `scope["route"]`, checked empirically) keeps the table bounded: a scanner requesting random URLs
+  makes one `(unmatched)` row instead of one per URL (a test sends five and checks for one). The middleware sits outside
+  the log middleware so the counting write — after the response — is in neither the logged nor the counted latency.
+  Verified against real Postgres, because `memory_db` does not parse SQL: the upsert and the aggregate query returned
+  the hand-calculated totals (average 162.5 ms, max 300 ms, 1 server + 1 client error over two hours), and a
+  previous-hour row fell outside a 1-hour window.
+- **Alternatives considered:** In-memory counters (simplest; wrong across instances and after every cold start);
+  deriving metrics from Vercel's logs (not reachable from inside the app, 1-hour retention on Hobby); a per-request row
+  (exact percentiles, but unbounded growth and a heavier read); batching counts in memory and flushing every few seconds
+  (cheaper per request, but a serverless instance can freeze with counts unwritten); Prometheus or a hosted service (new
+  infrastructure the guide doesn't ask for).
+- **Tradeoff accepted:** Every counted request pays one Postgres write — measured ~65 ms once the connection is open
+  (~555 ms for the first request in a process, which also creates the table). It happens after the response is produced,
+  but on a serverless runtime the invocation (and so the caller) may still wait for it. Sums and a max are stored, so
+  **no percentiles** (no p95). Hourly granularity. A fault means requests go uncounted for as long as it lasts (visible
+  as `metrics_unavailable` warnings). `/health` is counted, so a monitor pinging it adds to the totals; per-route rows
+  show it separately. Counting is off in the test suite by default, so a test can never write to a real database.
+- **Revisit if:** The 65 ms matters (batch the writes, or sample), p95 is needed (store a histogram per hour), or traffic
+  grows enough that one hot row per route per hour contends (shard by instance).

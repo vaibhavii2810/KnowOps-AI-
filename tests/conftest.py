@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import psycopg
 import pytest
 
-from app import db, llm, ratelimit
+from app import db, llm, metrics, ratelimit
 from app.auth import create_access_token
 from app.config import settings
 from scripts import ingest
@@ -33,6 +33,14 @@ def rate_limits_off_by_default(monkeypatch):
     monkeypatch.setattr(settings, "rate_limit_agent_per_minute", 0)
     monkeypatch.setattr(settings, "rate_limit_login_per_minute", 0)
     monkeypatch.setattr(settings, "rate_limit_login_per_hour", 0)
+
+
+@pytest.fixture(autouse=True)
+def metrics_off_by_default(monkeypatch):
+    """Phase 12.4: request counting would send a database write after every request in every test, including
+    the ones that use no database fixture (and so would reach whatever DATABASE_URL .env holds). tests/test_metrics.py
+    switches it back on, always together with memory_db."""
+    monkeypatch.setattr(settings, "metrics_enabled", False)
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +235,8 @@ def fake_db(monkeypatch, no_network):
     monkeypatch.setattr(db, "register_vector", lambda conn: None)
     monkeypatch.setattr(ratelimit, "_conn", None)
     monkeypatch.setattr(ratelimit, "_table_ready", False)
+    monkeypatch.setattr(metrics, "_conn", None)
+    monkeypatch.setattr(metrics, "_table_ready", False)
     return fake
 
 
@@ -257,9 +267,15 @@ class MemoryDB:
         self.documents: dict[int, dict] = {}     # id -> {"source", "title", "content_hash"}
         self.chunks: list[dict] = []             # {"id", "document_id", "chunk_index", "heading", "content", "embedding"}
         self.rate_limits: dict[tuple, int] | None = {}  # (user_key, bucket, window_start) -> hits; None = dropped
+        # (hour_start, method, route) -> [requests, server_errors, client_errors, latency_sum, latency_max]
+        self.request_metrics: dict[tuple, list] = {}
         self.unknown: list[str] = []
         self._ids = {table: itertools.count(1) for table in ("tickets", "conversations", "messages", "documents", "chunks")}
         self._install()
+
+    def queries(self, fragment: str = "") -> list[tuple[str, object]]:
+        """Every statement sent so far that contains `fragment` (see FakeDB.queries)."""
+        return self._db.queries(fragment)
 
     # -- statements ---------------------------------------------------------
     def _install(self):
@@ -321,6 +337,12 @@ class MemoryDB:
         on("DELETE FROM rate_limits WHERE user_key LIKE 'rltest-%'", self._delete_test_rate_limits)
         on("SELECT hits FROM rate_limits WHERE user_key = %s",
            lambda p: [(hits,) for (user, _, _), hits in (self.rate_limits or {}).items() if user == p[0]])
+
+        # request counters (app/metrics.py)
+        on("CREATE TABLE IF NOT EXISTS request_metrics", lambda p: [])
+        on("INSERT INTO request_metrics", self._count_request)
+        on("DELETE FROM request_metrics WHERE hour_start < %s", self._prune_request_metrics)
+        on("FROM request_metrics WHERE hour_start >= %s GROUP BY method, route", self._summarise_request_metrics)
 
     def _unrecognised(self, params):
         sql = " ".join(self._db.executed[-1][0].split())  # FakeDB records the statement before calling us
@@ -437,6 +459,34 @@ class MemoryDB:
         if self.rate_limits:
             self.rate_limits = {k: v for k, v in self.rate_limits.items() if k[2] >= p[0]}
         return []
+
+    def _count_request(self, p):
+        hour_start, method, route, server_error, client_error, latency, _ = p
+        row = self.request_metrics.setdefault((hour_start, method, route), [0, 0, 0, 0.0, 0.0])
+        row[0] += 1
+        row[1] += server_error
+        row[2] += client_error
+        row[3] += latency
+        row[4] = max(row[4], latency)
+        return []
+
+    def _prune_request_metrics(self, p):
+        self.request_metrics = {k: v for k, v in self.request_metrics.items() if k[0] >= p[0]}
+        return []
+
+    def _summarise_request_metrics(self, p):
+        """SUM/MAX per (method, route) over hours >= p[0], busiest first — the same shape SUMMARY_SQL returns."""
+        grouped: dict[tuple, list] = {}
+        for (hour_start, method, route), row in self.request_metrics.items():
+            if hour_start >= p[0]:
+                total = grouped.setdefault((method, route), [0, 0, 0, 0.0, 0.0])
+                total[0] += row[0]
+                total[1] += row[1]
+                total[2] += row[2]
+                total[3] += row[3]
+                total[4] = max(total[4], row[4])
+        ordered = sorted(grouped.items(), key=lambda item: (-item[1][0], item[0][1], item[0][0]))
+        return [(method, route, *totals) for (method, route), totals in ordered]
 
     def _delete_test_rate_limits(self, p):
         if self.rate_limits:

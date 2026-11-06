@@ -6,7 +6,7 @@ An AI-powered technical support backend for DevOps/SRE teams. It answers support
 runbook knowledge base with citations (RAG), and runs an agent that can search the knowledge base,
 create, check and triage incident tickets, and escalate to a human.
 
-**Progress:** Phases 1–11 of 15 complete. Live status of every phase: [AGENTS.md](AGENTS.md#phase-status). New to the code? Start with [CODE_TOUR.md](CODE_TOUR.md).
+**Progress:** Phases 1–12 of 15 complete. Live status of every phase: [AGENTS.md](AGENTS.md#phase-status). New to the code? Start with [CODE_TOUR.md](CODE_TOUR.md).
 
 ## Stack (free tier)
 
@@ -19,6 +19,8 @@ create, check and triage incident tickets, and escalate to a human.
 | Auth | Self-rolled JWT |
 | CRM | Mocked in Postgres |
 | Automation | Vercel Cron + local n8n |
+| Testing | pytest (offline fakes, no real API calls) + GitHub Actions on every push |
+| Monitoring | Structured JSON logs (Vercel Runtime Logs) + `GET /metrics` |
 
 ## Quick start
 
@@ -34,13 +36,14 @@ Tests: `pytest` (skips tests marked `live`) · `pytest -m live` (tests that need
 ## Project layout
 
 ```
-app/        FastAPI app: routes, config, DB, auth, RAG, LLM, agent, CRM
+app/        FastAPI app: routes, config, DB, auth, RAG, LLM, agent, CRM, retry, guardrails, rate limits, logs, metrics
 api/        Vercel entrypoint (sprint-2 branch)
 scripts/    DB schema, ingestion
 data/docs/  runbook knowledge base
 static/     web console
 n8n/        n8n workflow export
-tests/      pytest suite + RAG eval
+tests/      pytest suite (offline fakes in conftest.py) + RAG eval
+.github/    CI workflow: runs pytest on every push
 ```
 
 ## Deployment
@@ -48,6 +51,13 @@ tests/      pytest suite + RAG eval
 Deployed on Vercel through the project `knowops-ai-`, which is Git-connected to this repo, so pushes
 deploy automatically. Environment variables are set in the Vercel dashboard. Details in
 [AGENTS.md](AGENTS.md#deployment).
+
+## Monitoring
+
+Every request writes one JSON log line (request id, user, latency, status, tools the agent used) that shows up in
+Vercel's Runtime Logs; the id also comes back in an `X-Request-ID` header. `GET /metrics` (login required) reports
+request count, average latency and error rate for the last 1–168 hours, per route. Details in [AGENTS.md](AGENTS.md)
+(Phase 12) and [DECISION.md](DECISION.md) (D-042, D-043, D-046).
 
 ## Understanding the code
 

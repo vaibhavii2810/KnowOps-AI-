@@ -32,15 +32,16 @@ Then `app/main.py` itself runs:
 
 4. `app = FastAPI(...)` — Swagger at `/docs`, ReDoc at `/redoc`
 5. `logs.configure_logging()` — one JSON handler on the `knowops` logger, writing to stdout (Phase 12.1, D-042)
-6. `CORSMiddleware` (all origins), then `logs.RequestLogMiddleware`, added last so it is the outermost layer
+6. `CORSMiddleware` (all origins), then `logs.RequestLogMiddleware`, then `metrics.RequestMetricsMiddleware` — added last, so it is the outermost layer (Phase 12.4, D-046)
 7. Mounts `/static` if `static/` exists
-8. The route decorators register 16 routes
+8. The route decorators register 17 routes
 
 Nothing touches Postgres or Gemini at startup. DB connections open per call. The Gemini client is
 created on first use by `llm.get_client()` (`lru_cache` → one client per process, with `HttpOptions(timeout=GEMINI_TIMEOUT_SECONDS × 1000)` ms — D-045).
 
 ## 3. Every request
 
+`RequestMetricsMiddleware` (Phase 12.4, D-046: starts a timer; skipped when `METRICS_ENABLED` is false) →
 `RequestLogMiddleware` (Phase 12.1, D-042: request id from a valid inbound `X-Request-ID` or a new uuid4, stored in a
 context variable as one mutable record; timing starts) → `CORSMiddleware` → route match → dependencies (`get_current_user_required` on every route below except
 `/health`, `/auth/login`, `GET /`, `/static/*`, `/docs`, `/redoc`, `/cron/reindex` — Phase 5.4, D-022 →
@@ -54,6 +55,10 @@ Phase 10.2, D-033) → route handler → response serialised through its
 written (method, path, status, latency, `user` — set by the auth dependency via `logs.set_request_user()` — the
 `tools` the agent ran via `logs.record_tool_call()`, `vercel_id`, and `error_type` on an unhandled error). Every
 `log_event()` during the request (retries, rate-limiter fail-open, blocked tools, …) carries the same `request_id`.
+Then, back in `RequestMetricsMiddleware` once the response is done: `metrics.route_label(scope)` picks the label (the
+route template from `scope["route"]`; `(unmatched)` for unknown URLs; nothing for `/`, `/metrics`, static files, docs and
+CORS preflights) and `record_request()` upserts one `request_metrics` row via `run_in_threadpool` — fail-open, with a
+`metrics_unavailable` warning on error.
 
 ## 4. Route call chains
 
@@ -62,6 +67,16 @@ written (method, path, status, latency, `user` — set by the auth dependency vi
 health()
   → [DB] get_conn(retry=False) — fails fast, no connect retries (D-032) — COUNT(*) documents, COUNT(*) chunks
   → HealthResponse            (503 if the DB call fails)
+```
+
+### `GET /metrics` (`Depends(get_current_user_required)` — Phase 12.4, D-046)
+```
+metrics(hours=24 [1–168]) → metrics.read_metrics(hours)
+  → [DB] one reused plain connection (no pgvector setup); creates request_metrics on first use
+  → SELECT method, route, SUM(requests), SUM(server_errors), SUM(client_errors), SUM(latency_ms_sum), MAX(latency_ms_max)
+    FROM request_metrics WHERE hour_start >= <start of the current hour - (hours-1)h> GROUP BY method, route
+  → totals + per-route rows: requests, average/max latency, server and client errors, error rate (5xx ÷ requests)
+  → MetricsResponse           (503 "Metrics are unavailable" if the database cannot be read)
 ```
 
 ### `POST /auth/login`
@@ -270,7 +285,7 @@ Every call above now sends `Authorization: Bearer <jwt>` via `authHeaders()`.
 
 ```
 api/index.py       → app.main
-app.main           → app.agent, app.auth, app.config, app.crm, app.db, app.llm, app.logs, app.rag, app.ratelimit, app.schemas,
+app.main           → app.agent, app.auth, app.config, app.crm, app.db, app.llm, app.logs, app.metrics, app.rag, app.ratelimit, app.schemas,
                      scripts.ingest (Phase 9.1, D-029 — so GET /cron/reindex can call reindex_knowledge_base())
 app.agent          → app.crm, app.db, app.guardrails, app.llm, app.logs, app.rag, app.retry
 app.rag            → app.db, app.llm, app.schemas
@@ -280,6 +295,7 @@ app.llm            → app.config, app.guardrails, app.logs, app.retry
 app.db             → app.config, app.retry
 app.retry          → app.logs (+ httpx, psycopg, google.genai.errors)
 app.logs           → app.config (stdlib logging/contextvars only — Phase 12.1, D-042)
+app.metrics        → app.config, app.logs (+ psycopg directly: ONE reused plain connection, like ratelimit — Phase 12.4, D-046)
 app.guardrails     → (none — stdlib only)
 app.ratelimit      → app.auth, app.config, app.logs (+ psycopg directly: ONE reused plain connection, no pgvector setup — D-036)
 scripts/ingest.py  → app.db, app.llm
@@ -295,3 +311,4 @@ scripts/ingest.py  → app.db, app.llm
 | `conversations` | `/ask`, `POST /conversations` | `/ask`, `GET /conversations*` |
 | `messages` | `/ask` | `/ask` (history), `GET /conversations*` |
 | `rate_limits` | `app.ratelimit` (upsert per request on `/ask`, `/agent/*`; self-creates the table) | `app.ratelimit` |
+| `request_metrics` | `app.metrics` (one upsert per counted API request, from `RequestMetricsMiddleware`; self-creates the table; ~1% of writes prune rows older than 30 days) | `GET /metrics` |

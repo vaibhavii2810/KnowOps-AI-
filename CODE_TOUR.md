@@ -135,9 +135,9 @@ Runbooks (.md) ──ingest──▶ Postgres (chunks + numbers) ──search─
   The agent's `create_ticket` tool is a thin wrapper over this same function.
 - **Try it:** `POST /tickets`, then `GET /tickets/{id}` and see the same ticket come back.
 
-## Phase 9 — Automation (cron + n8n) — partly done
+## Phase 9 — Automation (cron + n8n)
 - **What:** `GET /cron/reindex` in `main.py`, `reindex_knowledge_base()` in `scripts/ingest.py`,
-  `n8n/incident_triage_workflow.json`.
+  `n8n/workflow.json` (escalation → Slack) and `n8n/incident_triage_workflow.json`.
 - **Why:** If someone edits a runbook, the search index should update itself without manual work.
 - **Main idea:** fingerprint each file; only re-embed files whose fingerprint changed.
   ```python
@@ -148,11 +148,64 @@ Runbooks (.md) ──ingest──▶ Postgres (chunks + numbers) ──search─
   Vercel Cron calls the route daily at 03:00 UTC; it needs the `CRON_SECRET` bearer token.
 - **Try it:** `python scripts/ingest.py` twice — the second run reports every document "unchanged".
 
+## Phase 10 — Error handling & security
+- **What:** `app/retry.py`, `app/guardrails.py`, `app/ratelimit.py`, the input types in `app/schemas.py`,
+  `tests/test_secrets_hygiene.py`.
+- **Why:** The public app must survive flaky services, hostile input, tricked AI and password guessing.
+- **Main idea:** four small shields, each with its own tests.
+  ```python
+  # retry.py — Gemini or Postgres hiccups (429, 5xx, timeouts) are retried with growing waits
+  retry_call(lambda: client.models.generate_content(...), is_transient=is_transient_gemini_error, label="gemini chat")
+
+  # guardrails.py — text from tickets/runbooks is wrapped as DATA, never instructions
+  f'<untrusted_data source="{source}">\n{text}\n</untrusted_data>'
+  ```
+  Input is checked by Pydantic types (empty text, NUL bytes, absurd IDs → a clear 422, never a 500). A run that read
+  instruction-like text is "tainted" and cannot create/update tickets or run recovery actions. `ratelimit.py` counts
+  requests per user in Postgres (10/min on `/ask`, 5/min on the agent) and per IP on login → `429 + Retry-After`.
+  A standing test scans every file and every commit for secrets.
+- **Try it:** send `/ask` 11 times in a minute → the 11th is a `429`.
+
+## Phase 11 — Testing & QA
+- **What:** `tests/` (the test suite), `tests/conftest.py` (the fakes), `pytest.ini`, `.github/workflows/tests.yml`.
+- **Why:** Tests that call the real database or Gemini are slow, flaky, cost quota and can't run in CI. So plain
+  `pytest` makes **zero** real calls: Gemini and Postgres are replaced by fakes, and a guard fails any test that
+  tries to reach the internet.
+- **Main idea:** script what "Gemini" says and let a fake in-memory database hold the tables.
+  ```python
+  def test_ask_on_an_empty_knowledge_base_answers_without_sources(client, auth_headers, fake_gemini, memory_db):
+      fake_gemini.reply(REFUSAL)                       # what the fake model will say
+      response = client.post("/ask", json={"question": "..."}, headers=auth_headers)
+      assert response.json()["sources"] == []          # nothing in the (empty) fake database
+  ```
+  Tests that genuinely need the real services are marked `live` and run only with `pytest -m live`. GitHub Actions
+  runs plain `pytest` on every push (Python 3.11 + 3.12, no secrets).
+- **Try it:** `pytest` (about 2 seconds) · `pytest -m live` (a few minutes, uses real Neon + Gemini).
+
+## Phase 12 — Logging & monitoring
+- **What:** `app/logs.py`, the `agent_run` event in `app/agent.py`, `app/metrics.py`, `GET /metrics`.
+- **Why:** When something goes wrong in production you need to see *what happened* for one request — and a quick
+  health picture over time.
+- **Main idea:** one JSON line per request, tied together by a request id.
+  ```json
+  {"event": "request", "request_id": "kops-12-3-1bfd6d939735", "method": "POST", "path": "/agent/chat",
+   "status": 200, "latency_ms": 513.6, "user": "admin", "tools": ["lookup_runbook"]}
+  ```
+  Every other log line written while handling that request carries the same `request_id`, and the id is sent back in
+  an `X-Request-ID` header. Every agent run also logs an `agent_run` event; if it failed, hit its step limit or hit a
+  tool error, the event includes the whole step-by-step trace. Passwords, tokens and request bodies are never logged.
+  `GET /metrics` (login required) adds counts: `RequestMetricsMiddleware` upserts one row per (hour, route) into
+  Postgres, so `/metrics?hours=24` returns requests, average latency and error rate (5xx ÷ requests) per route.
+  Counts live in Postgres, not memory, because serverless copies restart and run side by side.
+- **Try it:** call a few routes, then `GET /metrics` (after logging in) — or open Vercel → Logs and search for
+  your request id.
+
 ---
 
-## Phases 10–15 (not built yet)
+## Phases 13–15 (not built yet)
 Add a section here when each phase is done (the `/phase-done` step is a good moment):
-10 error handling & security · 11 testing & CI · 12 logging · 13 AI evaluation · 14 final deployment · 15 docs.
+13 AI evaluation · 14 final deployment · 15 docs.
 
 ## How to read the code yourself (suggested order)
-`config.py` → `db.py` → `schemas.py` → `rag.py` → `llm.py` → the `/ask` route in `main.py` → `crm.py` → `agent.py`.
+`config.py` → `db.py` → `schemas.py` → `rag.py` → `llm.py` → the `/ask` route in `main.py` → `crm.py` → `agent.py`
+→ then the shields and eyes: `retry.py` → `guardrails.py` → `ratelimit.py` → `logs.py` → `metrics.py`.

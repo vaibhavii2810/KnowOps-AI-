@@ -45,7 +45,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 9 | Automation (cron + n8n) | Vaishnavi | ✅ Done — all 5 chunks live; scheduled cron run confirmed in the Vercel dashboard (reported by Vaishnavi, 2026-11-03) |
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
 | 11 | Testing & QA | Vaishnavi | ✅ Done — plain `pytest` makes zero real calls; green on GitHub Actions (3.11 + 3.12) for `main` and `sprint-2` at `6111862` (D-038–D-041) |
-| 12 | Logging & monitoring | Vaishnavi | 🟡 Partial — 12.1–12.3 done (JSON logs + request id, D-042; `agent_run` trace, D-043; checked in Vercel's runtime logs, which exposed a production outage — fixed by pinning deps, D-044, deployed and verified); 12.4 `/metrics` (stretch) not started |
+| 12 | Logging & monitoring | Vaishnavi | ✅ Done — JSON logs + request id (D-042), `agent_run` trace (D-043), checked in Vercel's runtime logs (12.3, which exposed an outage fixed by pinning deps, D-044); `GET /metrics` (12.4, stretch, D-046) built and tested — live check pending its first deploy |
 | 13 | AI eval harness | Vaishnavi | 🟡 Partial — `tests/eval_rag.py` exists |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
 | 15 | Docs & wrap-up | Vaishnavi | ⬜ Not started |
@@ -279,9 +279,9 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
 - Pushing needed a GitHub token with the `workflow` scope (GitHub refuses workflow-file changes without it); the
   first push was rejected until the token was updated.
 
-**Phase 12 — Logging & monitoring** 🟡 in progress (12.1–12.3 done)
+**Phase 12 — Logging & monitoring** ✅
 - 12.1 Done. New `app/logs.py` (D-042): every log line is one JSON object on stdout (`ts`, `level`, `event`,
-  `request_id`, fields) — what Vercel collects as runtime logs. `RequestLogMiddleware` (outermost) gives each request an
+  `request_id`, fields) — what Vercel collects as runtime logs. `RequestLogMiddleware` (second-outermost since 12.4 added the request counter around it) gives each request an
   id (a valid inbound `X-Request-ID` is kept, anything else replaced), returns it as `X-Request-ID`, and logs one
   `request` line: method, path, status, latency, user, the agent's `tools`, `vercel_id`, and `error_type` on a 500.
   Auth records the user (`set_request_user`), the agent loop records each tool it runs or blocks (`record_tool_call`);
@@ -337,6 +337,30 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   can check the revision history using `kubectl rollout history …`", not JSON), and Vercel's log shows its `agent_run`
   with `outcome=max_steps` and the full trace; `/ask` 200 with 5 sources in 14.4 s. The 25 s timeout itself has not been
   triggered live (only tested with a fake clock).
+- 12.4 Done (stretch; code-complete, **not yet deployed**). New `app/metrics.py` and `GET /metrics?hours=24` (1–168, JWT
+  required) — D-046. `RequestMetricsMiddleware` (outermost) counts every API request into table `request_metrics`: one
+  row per (hour, method, route) with the request count, 5xx count, 4xx count, summed and max latency, via one upsert on a
+  reused plain connection, failing open. Routes are counted by **template** (`/tickets/{ticket_id}`); unknown URLs share
+  `(unmatched)`, so hostile URLs cannot grow the table; the console `/`, `/metrics` itself, static files, docs and CORS
+  preflights are not counted. The endpoint returns totals and a per-route breakdown: requests, average/max latency, server
+  errors, client errors and **error rate = 5xx ÷ requests** (4xx are reported separately). Counters live in Postgres, not
+  memory, for the same reason as the rate limiter (serverless instances restart and run side by side). New optional
+  `METRICS_ENABLED`; the table self-creates and is in `scripts/init_db.sql`; rows older than 30 days are pruned on ~1% of
+  writes. 27 tests in `tests/test_metrics.py` (offline, 0.09s): counting by template, hostile paths → one row, 5xx vs 4xx,
+  console/static/docs/preflights/`/metrics` not counted, disabled switch, exact totals/averages/error rate, empty window,
+  window edges, pruning, auth, bounds on `hours`, missing table, a read outage → 503, a counter fault → request still
+  succeeds with a warning that carries the request id, connection reuse + one reconnect. 8 mutation checks (raw URL instead
+  of template, 4xx counted as errors, wrong average, window off by one, `/metrics` counting itself, static counted as
+  unmatched, fault breaking the request, switch ignored) each fail them. `memory_db` gained the new statements; metrics are
+  **off by default in every test** (autouse fixture) so no test can write to a real database. Because `memory_db` doesn't
+  parse SQL, the real upsert and aggregate were also run against the local Neon database with unique route labels (cleaned
+  up afterwards): the two-hour totals matched the hand calculation (average 162.5 ms, max 300, 1 server + 1 client error).
+  Measured cost: ~65 ms per counted request (~555 ms for the first request in a process, which creates the table).
+  371 passed, 109 live deselected.
+- **Phase 12 done-when check (2026-11-06):** "you can look at a single request in Vercel's logs and see exactly what the
+  agent did" holds — proven live in 12.3 (request id `kops-12-3-1bfd6d939735`) and again for the 12.2 fixes (`kops-d045-agent-01`).
+  12.4 is the guide's optional stretch; its live check (deploy, hit a few routes, read `/metrics`, compare a request's
+  time before and after) is the one open item.
 
 ## Phase log
 
@@ -356,6 +380,7 @@ Append one line per finished phase (newest last).
 | 2026-11-03 | 10 | Vaishnavi (with Claude) | Retry/backoff for Gemini+DB (10.1); fuzzed all routes — 6 HTTP 500s + a non-ASCII login crash found and fixed (10.2); prompt-injection guardrails after measuring a 1-in-3 hijack (10.3); secrets/history scan clean + hygiene tests (10.4); DB-backed per-user rate limits (10.5) |
 | 2026-11-03 | 9 | Vaishnavi (with Claude) | Closed the last open item: scheduled `/cron/reindex` run confirmed in the Vercel Cron Jobs dashboard (per Vaishnavi); Phase 9 now ✅ |
 | 2026-11-06 | 11 | Vaishnavi (with Claude) | Offline Gemini/Postgres fakes + network guard (11.1); `live` marker and auth/RAG-ranking/dispatch unit tests (11.2); mocked `/ask` round trip (11.3); edge cases + in-memory `MemoryDB` with a real-Postgres twin of every DB test (11.4); GitHub Actions on 3.11 + 3.12, green on first run (11.5) — suite went from 2m19s with live calls to ~2s with none |
+| 2026-11-06 | 12 | Vaishnavi (with Claude) | Structured JSON logs with a request id on every line (12.1); an `agent_run` event with the bounded trace on any non-clean run (12.2); verified on Vercel's runtime logs (12.3) — which exposed a production outage (`google-genai` 3.0.0 → Gemini `v1` 404) fixed by pinning dependencies, plus a raw-JSON summary and a 97 s `/ask` hang fixed with a plain-text summary and a Gemini timeout + retry budget; Postgres-backed `GET /metrics` (12.4, stretch — built and tested, deploy pending) |
 
 ## Deployment
 
@@ -379,7 +404,7 @@ Append one line per finished phase (newest last).
   go live; was the bare scaffold before that. Keep it fast-forwarded from `sprint-2` as work lands, or Vercel
   Production silently falls behind.
 - `sprint-1-(base)` — Phases 1–4 code.
-- `sprint-2` — Active branch; everything through Phase 11 lives here first, then gets fast-forwarded to `main`.
+- `sprint-2` — Active branch; everything through Phase 12 lives here first, then gets fast-forwarded to `main`.
   Production was promoted to Phase 10 on 2026-11-03 (`2d0fe88`) and checked live: validation 422s, non-ASCII login
   401 (was a 500), rate-limit 429 + `Retry-After` on `/ask` and the agent endpoints, cron still protected.
 
@@ -389,6 +414,7 @@ Append one line per finished phase (newest last).
 |---|---|---|---|
 | GET | `/` | none | Web operations console (`static/`) |
 | GET | `/health` | none (correct) | DB + KB health |
+| GET | `/metrics` | required | Request count, average latency, error rate — last `hours` (1–168, default 24), per route (Phase 12.4, D-046) |
 | POST | `/auth/login` | none (correct); 5/min + 30/hour per IP (429) | Returns JWT |
 | GET | `/auth/me` | required | Current operator |
 | POST | `/ask` | required, 10/min per user (429) | RAG answer with citations |
@@ -406,7 +432,7 @@ Interactive docs: `/docs` (Swagger UI).
 9.4, D-031; `escalate_to_human` skips the webhook call entirely when unset) · `RATE_LIMIT_ASK_PER_MINUTE` (10) /
 `RATE_LIMIT_AGENT_PER_MINUTE` (5) (optional — Phase 10.5, D-036; 0 disables) · `RATE_LIMIT_LOGIN_PER_MINUTE` (5) /
 `RATE_LIMIT_LOGIN_PER_HOUR` (30) (optional — D-037; per client IP) · `LOG_LEVEL` (INFO) (optional — Phase 12.1, D-042) · `GEMINI_TIMEOUT_SECONDS` (25) (optional — D-045; per Gemini request,
-also each call's retry budget).
+also each call's retry budget) · `METRICS_ENABLED` (true) (optional — Phase 12.4, D-046; false stops request counting).
 Template: `.env.example`.
 All are now set on both Preview and Production in the Vercel project (2026-10-27) — `main` was fast-forwarded
 to `sprint-2`'s tip the same day, so Production is a real, working deployment for the first time.
@@ -418,7 +444,7 @@ AGENTS.md   this file — status + rules      DECISION.md  why things are the wa
 FLOW.md     how execution moves through the code
 CODE_TOUR.md  plain-English, phase-by-phase walkthrough of the code (for teammates new to it)
 app/        main.py (routes) · config.py · db.py · auth.py · rag.py · llm.py · agent.py · crm.py · schemas.py · retry.py · guardrails.py ·
-            ratelimit.py · logs.py (JSON logs + request id, Phase 12.1)
+            ratelimit.py · logs.py (JSON logs + request id, Phase 12.1) · metrics.py (GET /metrics counters, Phase 12.4)
 api/        index.py — Vercel entrypoint (sprint-2)
 scripts/    init_db.sql · ingest.py · generate_phase_*_pdf.py (report generators)
 data/docs/  runbook knowledge base (markdown)
@@ -452,6 +478,13 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   `run_system_diagnostics`/`execute_recovery_action` are still simulated for everything except the database
   diagnostic — no real infrastructure is inspected or changed.
 - **`/ask` history:** loads the *first* 8 messages of a conversation, not the latest 8.
+- **Request counting costs a Postgres write (~65 ms) per API request (Phase 12.4, D-046):** measured against the real
+  database; it runs after the response is produced but the caller may still wait for it on a serverless runtime.
+  `/metrics` has no percentiles (only sums and a max are stored). `METRICS_ENABLED=false` turns counting off. Check
+  the live cost after the first deploy; if it matters, batch or sample the writes.
+- **Tests can't see a changed SQL statement that keeps its matching text** (D-040): `MemoryDB` answers by fragment, so
+  e.g. flipping the history query's `ORDER BY` goes unnoticed offline. The `live` variants (`pytest -m live`) catch it;
+  run them before a deploy that touches SQL.
 - **Phase 9.4:** `n8n/workflow.json`'s Slack URL is a placeholder (`.../mock/webhook/...`); the backend→webhook
   mechanism is verified (D-031) but nobody has actually run `npx n8n` and imported the workflow for real yet.
 

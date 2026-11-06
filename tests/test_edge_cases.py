@@ -97,6 +97,7 @@ def test_malformed_json_is_a_422_before_any_work_is_done(client, auth_headers, f
 # Every protected route, with a body that would otherwise be valid, so a 401 can only be the token.
 PROTECTED = [
     ("GET", "/auth/me", None),
+    ("GET", "/metrics", None),
     ("POST", "/conversations", None),
     ("GET", "/conversations", None),
     ("GET", "/conversations/{conversation_id}", None),

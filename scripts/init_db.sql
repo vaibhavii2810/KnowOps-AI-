@@ -48,6 +48,19 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Hourly request counters for GET /metrics (Phase 12.4, D-046). app/metrics.py also creates this on first use.
+CREATE TABLE IF NOT EXISTS request_metrics (
+    hour_start     BIGINT           NOT NULL,
+    method         TEXT             NOT NULL,
+    route          TEXT             NOT NULL,
+    requests       INTEGER          NOT NULL DEFAULT 0,
+    server_errors  INTEGER          NOT NULL DEFAULT 0,
+    client_errors  INTEGER          NOT NULL DEFAULT 0,
+    latency_ms_sum DOUBLE PRECISION NOT NULL DEFAULT 0,
+    latency_ms_max DOUBLE PRECISION NOT NULL DEFAULT 0,
+    PRIMARY KEY (hour_start, method, route)
+);
+
 -- Per-user rate-limit counters (Phase 10.5, D-036). app/ratelimit.py also creates this on first use.
 CREATE TABLE IF NOT EXISTS rate_limits (
     user_key     TEXT    NOT NULL,

@@ -259,6 +259,33 @@ class CRMStatsResponse(BaseModel):
     active_p1_incidents: int
 
 
+class RouteMetrics(BaseModel):
+    """One route's request counts in the GET /metrics window."""
+
+    method: str
+    route: str = Field(description="The route template (e.g. /tickets/{ticket_id}), or (unmatched) for unknown URLs.")
+    requests: int
+    avg_latency_ms: float
+    max_latency_ms: float
+    server_errors: int = Field(description="Responses with a 5xx status.")
+    client_errors: int = Field(description="Responses with a 4xx status (401, 422, 429, ...).")
+    error_rate: float = Field(description="server_errors / requests (0 to 1).")
+
+
+class MetricsResponse(BaseModel):
+    """Response payload for GET /metrics (Phase 12.4, D-046)."""
+
+    window_hours: int = Field(description="The current, partly-elapsed hour plus the hours before it.")
+    since: str = Field(description="Start of the window (UTC).")
+    requests: int
+    avg_latency_ms: float
+    max_latency_ms: float
+    server_errors: int
+    client_errors: int
+    error_rate: float = Field(description="server_errors / requests (0 to 1). Client errors are not counted.")
+    routes: list[RouteMetrics]
+
+
 # ---------------------------------------------------------------------------
 # Autonomous Agent Schemas (Phase 3.2)
 # ---------------------------------------------------------------------------

@@ -49,6 +49,7 @@ from app.crm import (
 from app.db import get_conn
 from app.llm import chat_completion
 from app.logs import RequestLogMiddleware, configure_logging, log_event
+from app.metrics import RequestMetricsMiddleware, read_metrics
 from app.rag import retrieve_and_format
 from app.ratelimit import login_rate_limited, rate_limited
 from scripts.ingest import reindex_knowledge_base
@@ -64,6 +65,7 @@ from app.schemas import (
     CronReindexResponse,
     HealthResponse,
     LoginRequest,
+    MetricsResponse,
     Priority,
     MessageRecord,
     TicketCreateRequest,
@@ -103,6 +105,9 @@ app.add_middleware(
 )
 # Added last, so it is the outermost middleware: it times and logs everything, CORS preflights included.
 app.add_middleware(RequestLogMiddleware)
+# Added after RequestLogMiddleware, so it is the outermost layer: it times the whole stack, and its own database
+# write happens after the request log line, so counting a request never inflates that request's logged latency.
+app.add_middleware(RequestMetricsMiddleware)
 
 # Mount static assets if directory exists
 if STATIC_DIR.exists():
@@ -333,6 +338,34 @@ def health() -> HealthResponse:
         database=db_status,
         knowledge_base=kb_stats,
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /metrics — request count, latency and error rate (Phase 12.4, D-046)
+# ---------------------------------------------------------------------------
+
+@app.get(
+    "/metrics",
+    response_model=MetricsResponse,
+    summary="Request count, average latency and error rate",
+    tags=["System"],
+)
+def metrics(
+    hours: int = Query(default=24, ge=1, le=168, description="Window: the current hour plus the hours before it (1–168)."),
+    current_user: dict = Depends(get_current_user_required),
+) -> MetricsResponse:
+    """
+    Totals and a per-route breakdown over the last `hours` hours, counted across all serverless instances.
+    Error rate is the share of responses with a 5xx status; 4xx responses are counted separately.
+    """
+    try:
+        return MetricsResponse(**read_metrics(hours))
+    except Exception as exc:
+        log_event("metrics_read_failed", "error", error_type=type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Metrics are unavailable — the database could not be read.",
+        )
 
 
 # ---------------------------------------------------------------------------
