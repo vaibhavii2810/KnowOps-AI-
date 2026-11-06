@@ -44,7 +44,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 8 | Mock CRM / tickets | Vaishnavi | ✅ Done |
 | 9 | Automation (cron + n8n) | Vaishnavi | ✅ Done — all 5 chunks live; scheduled cron run confirmed in the Vercel dashboard (reported by Vaishnavi, 2026-11-03) |
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
-| 11 | Testing & QA | Vaishnavi | 🟡 Partial — 11.1–11.2 done (offline fakes + guard, D-038; `live` marker, auth/RAG-ranking/dispatch unit tests, D-039); 47 default-run tests still reach Postgres (11.4), no CI (11.5) |
+| 11 | Testing & QA | Vaishnavi | 🟡 Partial — 11.1–11.3 done (offline fakes + guard, D-038; `live` marker + auth/RAG-ranking/dispatch unit tests, D-039; mocked `/ask` round trip); 47 default-run tests still reach Postgres (11.4), no CI (11.5) |
 | 12 | Logging & monitoring | Vaishnavi | ⬜ Not started |
 | 13 | AI eval harness | Vaishnavi | 🟡 Partial — `tests/eval_rag.py` exists |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
@@ -209,7 +209,7 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   with the limiter on; the 5 injection cases are blocked by the guardrails even for a fully hijacked model
   (D-034). Residual risk is recorded there: the detector is a heuristic.
 
-**Phase 11 — Testing & QA** 🟡 in progress (11.1–11.2 done)
+**Phase 11 — Testing & QA** 🟡 in progress (11.1–11.3 done)
 - 11.1 Done. `tests/conftest.py` now has `fake_gemini`, `fake_db` and `no_network` (D-038). The fakes replace
   `genai.Client` and `psycopg.connect` at the root, so `get_client()` in `app/llm.py` *and* `app/agent.py`,
   `get_conn()` and the rate limiter all get them without per-module patching. `no_network` blocks non-loopback sockets
@@ -237,7 +237,19 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
 - Found and fixed on the way: 11.1's `tests/test_fixtures.py` used a made-up database URL with a short fake password,
   which the 10.4 secrets scanner (rightly) flags; switched to the `.env.example` placeholder form and amended the unpushed 11.1 commit
   (now `e755b83`) so the false positive never enters history.
-- Still to do: 11.3 a mocked `/ask` round trip; 11.4 edge cases (empty KB) and move the 47 default-run tests that
+- 11.3 Done. New `tests/test_ask_integration.py`: a full `POST /ask` round trip through the real route, JWT check,
+  rate limiter (switched on), conversation handling, `retrieve()`, citation formatting, prompt building and message
+  persistence — only Gemini and Postgres are fakes. Checks the answer, ranked `sources`, new `conversation_id` and
+  `X-RateLimit-Remaining`; one embed call (`RETRIEVAL_QUERY`) and one grounded chat call carrying both fenced citations
+  and the question; the DB statements in order (limiter table + hit, new conversation, vector search with `top_k`,
+  saved turn with the right params). A second test covers the follow-up branch: an existing `conversation_id` loads
+  its history, which reaches the model before the new question, and no new conversation is created. 6 mutation
+  checks on `app/main.py` (question/answer swapped when saved, history not sent, citations dropped, caller's `top_k`
+  ignored, context not sent, limiter unwired) each fail it. Offline, 0.04s. Default run: 256 passed, 9 live deselected.
+- Found and fixed on the way: the 11.2 `AGENTS.md` text quoted the fake URL it was describing, so the hygiene scanner
+  flagged `AGENTS.md`; reworded and amended the unpushed 11.2 commit (now `cd8d639`). Both slips passed a full run
+  because `tests/test_secrets_hygiene.py` scans only tracked files — run it after `git add`, before committing.
+- Still to do: 11.4 edge cases (empty KB) and move the 47 default-run tests that
   still reach Postgres onto the fakes or `live` — `test_rate_limit` 24, `test_crm` 9, `test_input_validation` 5,
   `test_retry` 3, `test_api_v2_5` 2, `test_auth_protection` 2 (also network), `test_ingest` 1, `test_prompt_injection`
   1 (Gemini); 11.5 GitHub Actions (also: `test_api_cron_reindex_requires_cron_secret_in_every_environment` asserts
