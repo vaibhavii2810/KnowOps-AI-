@@ -15,7 +15,7 @@ Notation: `→` calls · `[DB]` opens a Postgres connection via `app.db.get_conn
 | Vercel Cron | Daily `0 3 * * *` (03:00 UTC) → `GET /cron/reindex` | `api_cron_reindex()` → `scripts.ingest.reindex_knowledge_base()` (Phase 9.1, D-029) |
 | Ingestion | `python scripts/ingest.py` | `main()` in `scripts/ingest.py` → `reindex_knowledge_base()` (§5) |
 | DB setup | `scripts/init_db.sql`, run by hand in Neon | Creates the `vector` extension, 5 tables and the HNSW index |
-| Tests | `pytest` | `tests/*.py` |
+| Tests | `pytest` | `tests/*.py`; offline tests use `tests/conftest.py`'s `fake_gemini` / `fake_db` / `no_network`, which replace `genai.Client` and `psycopg.connect` at the root so `get_conn()`, `get_client()` and the rate limiter never reach a real server (Phase 11.1, D-038) |
 
 ## 2. Startup (cold start) — import order
 

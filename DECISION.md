@@ -592,3 +592,32 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   office/NAT address shares one allowance. A legitimate user fumbling the password 5 times in a minute waits up to 60 s.
 - **Revisit if:** The app is hosted somewhere that does not overwrite these headers; a second operator is added; or logs
   (Phase 12) show distributed guessing.
+
+### D-038 · Shared offline fakes for Gemini and Postgres, patched at their roots, with a network guard (Phase 11.1)
+- **Date · by · source:** 2026-11-06 · Vaishnavi (with Claude) · Build guide (11.1: "fixtures that mock the Gemini client and the database")
+- **Decision:** `tests/conftest.py` gains three fixtures. `fake_gemini` replaces `genai.Client` itself and clears
+  `get_client()`'s `lru_cache` before and after; it returns deterministic unit-vector embeddings and scripted replies
+  (text, a dict for the agent's JSON mode, an exception, or `None` for a MALFORMED_RESPONSE), recording every call.
+  `fake_db` replaces `psycopg.connect` (and skips `register_vector`); SQL fragments map to scripted tuple rows, every
+  statement is recorded, and the rate limiter's cached connection is reset so a fake can't leak into a later test.
+  `no_network` blocks every non-loopback socket connect and every real `psycopg.connect`; both fakes pull it in.
+  Blocked attempts are also **recorded and fail the test at teardown**.
+- **Why:** The guide's Phase 11 "Done when" is *no real API calls during tests*, and CI (11.5) will have no `.env`,
+  database or Gemini key. Patching at the root (`genai.Client`, `psycopg.connect`) instead of each module's imported
+  name means every current and future caller is covered — `app/agent.py` imports `get_client` by name, and a mutation
+  check showed the old per-module style (patch `llm.get_client` only) let the agent reach Google's API
+  (`172.217.117.4:443`). Teardown checking matters because the app swallows some errors on purpose (agent loop,
+  rate-limiter fail-open, best-effort webhook); a second mutation check showed a swallowed real connect is still caught.
+  The fake DB is a script, not a SQL engine, because the app only ever uses `conn.execute(sql, params).fetchone()/
+  .fetchall()` with tuple rows.
+- **Alternatives considered:** A real Postgres + pgvector service container in CI (truer to production, but slower,
+  needs schema setup, and is not what the guide asks for — still an option for a later integration job);
+  an in-memory SQL engine such as SQLite (doesn't speak pgvector's `<=>` or Postgres SQL); `unittest.mock.MagicMock`
+  everywhere (accepts any call, so a wrong attribute or a forgotten fake passes silently); a third-party
+  network blocker such as `pytest-socket` (a new dependency, and it can't see libpq's C-level connections anyway).
+- **Tradeoff accepted:** The fake DB does not check SQL — a typo'd query or wrong column order passes unless a test
+  asserts on `fake_db.queries(...)`; cosine ranking is Postgres's job, so offline tests can only check that the
+  database's order and the `threshold`/`top_k` params are respected. Unscripted statements return no rows rather than
+  failing. Loopback and Unix sockets stay allowed. Existing live tests are untouched until 11.2/11.4 move them over.
+- **Revisit if:** The app starts using cursors, transactions or dict rows; a real-SQL bug slips past the fakes (then add
+  a Postgres service-container job); or a new external service is added (give it a fake too).

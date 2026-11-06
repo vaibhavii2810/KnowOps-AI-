@@ -44,7 +44,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 8 | Mock CRM / tickets | Vaishnavi | ✅ Done |
 | 9 | Automation (cron + n8n) | Vaishnavi | ✅ Done — all 5 chunks live; scheduled cron run confirmed in the Vercel dashboard (reported by Vaishnavi, 2026-11-03) |
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
-| 11 | Testing & QA | Vaishnavi | 🟡 Partial — tests exist, no CI (11.5) |
+| 11 | Testing & QA | Vaishnavi | 🟡 Partial — 11.1 done (offline Gemini/DB fakes + network guard, D-038); live tests still to move (11.2–11.4), no CI (11.5) |
 | 12 | Logging & monitoring | Vaishnavi | ⬜ Not started |
 | 13 | AI eval harness | Vaishnavi | 🟡 Partial — `tests/eval_rag.py` exists |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
@@ -209,6 +209,19 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   with the limiter on; the 5 injection cases are blocked by the guardrails even for a fully hijacked model
   (D-034). Residual risk is recorded there: the detector is a heuristic.
 
+**Phase 11 — Testing & QA** 🟡 in progress (11.1 done)
+- 11.1 Done. `tests/conftest.py` now has `fake_gemini`, `fake_db` and `no_network` (D-038). The fakes replace
+  `genai.Client` and `psycopg.connect` at the root, so `get_client()` in `app/llm.py` *and* `app/agent.py`,
+  `get_conn()` and the rate limiter all get them without per-module patching. `no_network` blocks non-loopback sockets
+  and real Postgres connections, and fails the test at teardown even if the app swallowed the error. 12 tests in
+  `tests/test_fixtures.py` (0.09s, fully offline) cover embeddings, chat, the agent loop, `retrieve()`, `/health` and
+  the rate limiter on the fakes, plus the guard. Two mutation checks: patching only `llm.get_client` (the old style)
+  let the agent reach Google's API and the guard caught it; a swallowed real connect left uncleared fails at teardown.
+  220/220 pass.
+- Still to do: 11.2/11.4 move the live tests (`test_rag.py`, parts of `test_api_v2_5.py`, `test_crm.py`, the
+  2 live-model injection tests) onto the fakes or behind an opt-in marker and add the empty-KB case; 11.3 a mocked
+  `/ask` round trip; 11.5 GitHub Actions.
+
 ## Phase log
 
 Append one line per finished phase (newest last).
@@ -323,7 +336,8 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 ## Working here
 
 - `python -m venv .venv` → `pip install -r requirements.txt` → `uvicorn app.main:app --reload`
-- Tests: `pytest`
+- Tests: `pytest`. New tests should use the `fake_gemini` / `fake_db` fixtures (offline, D-038), not the real
+  database or Gemini.
 - Never commit `.env` or real keys.
 
 ## Rules for every code change
