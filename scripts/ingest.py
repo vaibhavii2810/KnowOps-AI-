@@ -46,6 +46,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.db import get_conn
 from app.llm import embed_document
+from app.logs import configure_logging
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -405,6 +406,7 @@ def reindex_knowledge_base(force: bool = False, verbose: bool = True) -> dict:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    configure_logging()  # run as a script, app.main never loads: set up the JSON logs here (Phase 12.2)
     parser = argparse.ArgumentParser(
         description="Ingest Markdown documents into the KnowOps knowledge base."
     )

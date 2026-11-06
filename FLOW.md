@@ -126,18 +126,22 @@ PATCH /tickets/{id}    → api_update_ticket()    → crm.update_ticket_status()
 ### `POST /agent/chat` — ReAct loop (`Depends(ratelimit.rate_limited("agent"))` — JWT required, 5/min per user, shared with triage)
 ```
 api_agent_chat(AgentChatRequest) → agent.run_agent(prompt, max_steps)
+  run_agent() starts a timer and a `run` record (outcome "completed"), then calls _run_agent_loop() — and in a
+  `finally`, even on a crash, writes one `agent_run` log event (Phase 12.2, D-043, see the end of this block)
   for step in 1..max_steps:
     → llm.get_client() → [Gemini] generate_content (JSON mode, AGENT_SYSTEM_PROMPT, temperature 0.1)
       (each call goes through retry_call for 429/5xx/timeouts, D-032; separately retries up to 3x if
        resp.text is empty, e.g. finish_reason=MALFORMED_RESPONSE — D-026;
-       exhausted retries or any other exception → non-blank fallback final_answer, is_final=True)
+       exhausted retries or any other exception → non-blank fallback final_answer, is_final=True, and the run's
+       outcome becomes "generation_error" with the error type and step)
     → json.loads → {thought, action, args, is_final, final_answer}
     → if no valid action (none, or unknown tool name) → stop here with final_answer
     → else, if the run is *tainted* and the tool is state-changing (create_ticket / update_ticket /
       execute_recovery_action) → NOT executed: observation = "BLOCKED: …", step marked blocked, and the step is
       never treated as final (the model wrote its answer before seeing the block — it gets to answer again)
       (Phase 10.3, D-034)
-    → else execute the tool FIRST (even if is_final is also true — D-027, so a tool call bundled
+    → else logs.record_tool_call(action) (so the `request` log line lists it, D-042), then execute the tool FIRST
+      (even if is_final is also true — D-027, so a tool call bundled
       with is_final isn't silently dropped), then stop after it if is_final was set; if the output carries
       embedded instructions (guardrails.find_injection) the run becomes tainted from then on
     → else AVAILABLE_TOOLS[action](**args):
@@ -154,11 +158,17 @@ api_agent_chat(AgentChatRequest) → agent.run_agent(prompt, max_steps)
          execute_recovery_action → canned JSON (simulated — nothing is executed)
     → thought / action / observation appended to the text transcript for the next step; the observation is
       wrapped by guardrails.fence() as <untrusted_data> (forged closing tags are stripped)
+  if the loop ran every step without a final answer (`for … else`) → outcome "max_steps"
   if no step gave a *non-blank* final answer (checks truthiness, not just key presence — D-026)
-    → [Gemini] one summary call
+    → [Gemini] one summary call (if it fails: the summary's error type is recorded, a canned answer is used)
   if the run was tainted → a code-generated "[Security notice]" listing blocked actions is appended to the
     resolution, whatever the model said
 → {task, total_steps, steps, resolution} → AgentChatResponse
+  finally → _log_agent_run(): one `agent_run` event — outcome (completed / max_steps / generation_error / crashed),
+    steps, tools, duration, tainted. A clean run stops there (info); anything else — any outcome but completed,
+    a failed summary, a tool error, or a tainted run — also logs the trace via trace_for_log() (thought, action,
+    args, observation, final answer each clipped; past ~4,000 chars the oldest middle steps are dropped, first and
+    last kept). Level warning; error for a crash, which is then re-raised.
 ```
 
 ### `POST /agent/triage/{ticket_id}` (`Depends(ratelimit.rate_limited("agent"))` — same bucket as /agent/chat: it runs the same loop)
@@ -197,6 +207,7 @@ serve_dashboard() → static/index.html (inline fallback HTML if missing); asset
 
 ```
 main()
+  → logs.configure_logging() (run as a script, app.main never loads; Phase 12.2)
   → argparse: --file, --reset, --quiet
   → --file given → ingest_file(path, conn, force=True)   (explicit single-file ingest, always re-embeds)
   → otherwise     → reindex_knowledge_base(force=args.reset)   (--reset wipes documents+chunks first, forcing

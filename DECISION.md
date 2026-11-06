@@ -732,3 +732,31 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   per-line overhead (not measured separately; a whole offline `/agent/chat` test request, logging included, took ~1 ms).
 - **Revisit if:** Logs need to outlive Vercel's retention (add a log drain), or per-request detail needs to grow beyond
   what fits on one readable line (Phase 12.2 adds the agent trace on failure only).
+
+### D-043 · Every agent run logs one `agent_run` event; anything but a clean run includes its bounded trace (Phase 12.2)
+- **Date · by · source:** 2026-11-06 · Vaishnavi (with Claude) · Build guide (12.2: "log the full tool-call trace when the
+  agent loop fails or hits its iteration cap")
+- **Decision:** `run_agent()` is now a thin wrapper around the unchanged loop (`_run_agent_loop`). It times the run and,
+  in a `finally`, writes one `agent_run` event: `outcome` (`completed`, `max_steps`, `generation_error`, `crashed`),
+  steps, `max_steps`, tools, `duration_ms`, `tainted`, plus `error_type`/`error_step`, `summary_error_type` and
+  `tool_errors` when they apply. A clean run logs that summary at info. Any other run also logs `trace` —
+  thought ≤200, args ≤200, observation ≤300 and final answer ≤200 characters per step, the whole trace ≤~4,000
+  characters by dropping the oldest middle steps (first and last always kept, `omitted_steps` says how many) — at
+  warning, or error for a crash, which is still re-raised. The API response is unchanged.
+- **Why:** The loop deliberately turns every problem into a "final answer" (D-026), so from outside a generation error
+  or a capped run looked like success; the only record was the HTTP response, gone once it was sent. The guide's Phase
+  12 "Done when" is seeing exactly what the agent did from the logs. "Fails" is read broadly — a failed summary, a tool
+  error and a tainted (possible prompt-injection) run are all moments someone will want the trace. Logging it only then
+  keeps normal traffic readable. The `finally` means a crash keeps the steps it got through; before, a 500 lost them.
+  The budget exists because Vercel truncates long log messages (its log API has a `messageTruncated` field; the exact
+  limit isn't documented in what was found), and a cut line would lose the end of the run — where a failure usually is.
+- **Alternatives considered:** A log line per step (many lines per run, and a step's line means little without its run);
+  logging the full trace for every run (noisy, and longer lines); storing traces in Postgres (more schema and cost for a
+  debugging aid that Phase 13's eval can revisit).
+- **Tradeoff accepted:** The trace includes the agent's tool arguments and observations, clipped. They can echo user
+  text (for example a ticket subject the agent writes into `create_ticket`) — a deliberate exception to D-042's "no
+  user text", since the guide asks for what the agent *did*. The task prompt itself is never logged. Clipping means a
+  long observation is only partly visible; the full one is still in the API response. The ~4,000-character budget is a
+  guess pending Phase 12.3's look at real Vercel logs.
+- **Revisit if:** Phase 12.3 shows Vercel truncating these lines (lower the budget) or showing much more (raise it), or
+  traces need keeping longer than Vercel's 1-hour Hobby retention.

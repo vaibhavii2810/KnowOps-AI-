@@ -45,7 +45,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 9 | Automation (cron + n8n) | Vaishnavi | ✅ Done — all 5 chunks live; scheduled cron run confirmed in the Vercel dashboard (reported by Vaishnavi, 2026-11-03) |
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
 | 11 | Testing & QA | Vaishnavi | ✅ Done — plain `pytest` makes zero real calls; green on GitHub Actions (3.11 + 3.12) for `main` and `sprint-2` at `6111862` (D-038–D-041) |
-| 12 | Logging & monitoring | Vaishnavi | 🟡 Partial — 12.1 done (structured JSON logs + request id, D-042); 12.2 agent trace, 12.3 Vercel check, 12.4 `/metrics` (stretch) to do |
+| 12 | Logging & monitoring | Vaishnavi | 🟡 Partial — 12.1–12.2 done (JSON logs + request id, D-042; `agent_run` event with the trace on failure, D-043); 12.3 Vercel check, 12.4 `/metrics` (stretch) to do |
 | 13 | AI eval harness | Vaishnavi | 🟡 Partial — `tests/eval_rag.py` exists |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
 | 15 | Docs & wrap-up | Vaishnavi | ⬜ Not started |
@@ -279,7 +279,7 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
 - Pushing needed a GitHub token with the `workflow` scope (GitHub refuses workflow-file changes without it); the
   first push was rejected until the token was updated.
 
-**Phase 12 — Logging & monitoring** 🟡 in progress (12.1 done)
+**Phase 12 — Logging & monitoring** 🟡 in progress (12.1–12.2 done)
 - 12.1 Done. New `app/logs.py` (D-042): every log line is one JSON object on stdout (`ts`, `level`, `event`,
   `request_id`, fields) — what Vercel collects as runtime logs. `RequestLogMiddleware` (outermost) gives each request an
   id (a valid inbound `X-Request-ID` is kept, anything else replaced), returns it as `X-Request-ID`, and logs one
@@ -293,6 +293,19 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   a 500 logged with its type, `vercel_id`, no secrets/bodies/query strings, long fields cut and newlines escaped. 5
   mutation checks (user not recorded, tools not recorded, any inbound id trusted, events losing the id, the context
   given a copy) each fail them. 312 passed, 109 live deselected.
+- 12.2 Done. Every agent run writes one `agent_run` event (D-043): `run_agent()` now wraps the unchanged loop
+  (`_run_agent_loop`) and logs from a `finally`, so a crash is logged with the steps it got through and still re-raised.
+  Outcome is `completed`, `max_steps` (found with `for … else`), `generation_error` (the `except` that used to turn a
+  Gemini/JSON failure into a normal-looking answer) or `crashed`, plus steps, tools, duration, tainted, error type/step,
+  failed summary and tool-error count. A clean run logs that summary (info); anything else adds the trace — each field
+  clipped, the whole ≤~4,000 chars by dropping the oldest middle steps — at warning, error for a crash. The API
+  response is unchanged. 12 tests in `tests/test_agent_logging.py` (offline, 0.04s): one per outcome, failed summary,
+  tool error, tainted run, clipping/truncation, and an `/agent/chat` request showing the event shares the request id
+  and leaves out the prompt. 5 mutation checks (cap not detected, generation errors not recorded, crash logged as clean,
+  tool errors/tainted/failed summary treated as clean, truncation keeping the oldest steps) each fail them.
+  Also fixed a 12.1 gap: the JSON handler was only set up by `app.main`, so `python scripts/ingest.py` (which never
+  loads it) would have shown retry notices as a bare `retrying`; its `main()` now calls `configure_logging()`.
+  324 passed, 109 live deselected.
 
 ## Phase log
 

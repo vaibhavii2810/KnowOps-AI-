@@ -307,6 +307,76 @@ CRITICAL RULES:
 # ReAct Orchestrator
 # ---------------------------------------------------------------------------
 
+# Phase 12.2 (D-043): how much of an agent trace goes into one log line. Vercel truncates long log
+# messages, so each field is clipped and, past the budget, middle steps are dropped (first and last kept).
+TRACE_FIELD_CHARS = {"thought": 200, "args": 200, "observation": 300, "final_answer": 200}
+TRACE_BUDGET_CHARS = 4000
+
+
+def _clip(value: Any, limit: int) -> Any:
+    text = value if isinstance(value, str) else json.dumps(value, default=str)
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _json_size(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False, default=str))
+
+
+def trace_for_log(trace: list[dict]) -> tuple[list[dict], bool]:
+    """A bounded copy of the agent trace for one log line; returns (steps, truncated)."""
+    steps = []
+    for step in trace:
+        entry = {"step": step.get("step"), "action": step.get("action") or None}
+        for field, limit in TRACE_FIELD_CHARS.items():
+            if step.get(field) not in (None, "", {}):
+                entry[field] = _clip(step[field], limit)
+        if step.get("blocked"):
+            entry["blocked"] = True
+        if step.get("security_flags"):
+            entry["security_flags"] = step["security_flags"]
+        steps.append(entry)
+
+    if len(steps) <= 2 or _json_size(steps) <= TRACE_BUDGET_CHARS:
+        return steps, False
+    # Keep the first step and as many of the latest as fit: the end of a failing run is where it went wrong.
+    first, middle, last = steps[0], steps[1:-1], steps[-1]
+    kept = list(middle)
+
+    def build():
+        return [first, {"omitted_steps": len(middle) - len(kept)}, *kept, last]
+
+    while kept and _json_size(build()) > TRACE_BUDGET_CHARS:
+        kept.pop(0)
+    return build(), True
+
+
+def _log_agent_run(run: dict, trace: list[dict], max_steps: int, started: float) -> None:
+    """
+    One `agent_run` event per run. A clean run logs a short summary; anything else — a generation error, the
+    step cap, a crash, a failed summary call, a tool error or a tainted run — logs the full bounded trace too.
+    """
+    tool_errors = sum(str(s.get("observation") or "").startswith("Tool execution error") for s in trace)
+    fields = {
+        "outcome": run["outcome"],
+        "steps": len(trace),
+        "max_steps": max_steps,
+        "tools": [s["action"] for s in trace if s.get("action")],
+        "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+        "tainted": run["tainted"],
+    }
+    for key in ("error_type", "error_step", "summary_error_type"):
+        if run.get(key):
+            fields[key] = run[key]
+    if tool_errors:
+        fields["tool_errors"] = tool_errors
+    clean = run["outcome"] == "completed" and not run.get("summary_error_type") and not tool_errors and not run["tainted"]
+    if clean:
+        log_event("agent_run", "info", **fields)
+        return
+    fields["trace"], fields["trace_truncated"] = trace_for_log(trace)
+    log_event("agent_run", "error" if run["outcome"] == "crashed" else "warning", **fields)
+
+
 def run_agent(task_prompt: str, max_steps: int = 5, taint_reason: Optional[str] = None) -> dict:
     """
     Execute the autonomous ReAct agent loop on an operational task.
@@ -320,9 +390,25 @@ def run_agent(task_prompt: str, max_steps: int = 5, taint_reason: Optional[str] 
 
     Returns:
         Structured trace including thoughts, tool actions, observations, and final answer.
+
+    Every run writes one `agent_run` log event (Phase 12.2, D-043) — from a `finally`, so a crash is
+    logged with the steps it got through before re-raising.
     """
-    client = get_client()
     trace: list[dict] = []
+    run = {"outcome": "completed", "tainted": bool(taint_reason)}
+    started = time.perf_counter()
+    try:
+        return _run_agent_loop(task_prompt, max_steps, taint_reason, trace, run)
+    except Exception as exc:
+        run["outcome"], run["error_type"] = "crashed", type(exc).__name__
+        raise
+    finally:
+        _log_agent_run(run, trace, max_steps, started)
+
+
+def _run_agent_loop(task_prompt: str, max_steps: int, taint_reason: Optional[str], trace: list[dict], run: dict) -> dict:
+    """The ReAct loop itself. Appends to `trace` as it goes and records how it ended in `run`."""
+    client = get_client()
     tainted = taint_reason
 
     # Format tools schema for prompt guidance
@@ -385,6 +471,8 @@ When you have gathered enough information and resolved or completed the task, se
             step_data = json.loads(raw_text)
         except Exception as exc:
             # Fallback if JSON parsing or model generation encounters temporary error
+            if run["outcome"] == "completed":
+                run.update(outcome="generation_error", error_type=type(exc).__name__, error_step=step_num)
             step_data = {
                 "thought": f"Agent encountered generation notice: {exc}",
                 "is_final": True,
@@ -463,6 +551,8 @@ When you have gathered enough information and resolved or completed the task, se
             f"Action {step_num}: {action}({json.dumps(args)})\n"
             f"Observation {step_num}: {fence(observation, 'tool: ' + action)}\n"
         )
+    else:
+        run["outcome"] = "max_steps"  # the loop ran out of steps without a final answer
 
     # If loop ended without a non-empty final answer, synthesize one.
     # (Checking `"final_answer" in s` instead of `s.get("final_answer")` would miss a step whose
@@ -484,10 +574,12 @@ When you have gathered enough information and resolved or completed the task, se
             )
             final_text = final_resp.text or "Incident investigation concluded."
         except Exception as e:
+            run["summary_error_type"] = type(e).__name__
             final_text = f"Investigation completed. Steps executed: {len(trace)}."
         trace.append({"step": len(trace) + 1, "thought": "Final resolution synthesized", "final_answer": final_text})
 
     resolution = trace[-1].get("final_answer", "Completed.")
+    run["tainted"] = bool(tainted)
     if tainted:
         # Appended by code, not left to the model: the operator must see this whatever the model says.
         blocked_actions = [step["action"] for step in trace if step.get("blocked")]
