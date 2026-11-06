@@ -44,7 +44,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 8 | Mock CRM / tickets | Vaishnavi | ✅ Done |
 | 9 | Automation (cron + n8n) | Vaishnavi | ✅ Done — all 5 chunks live; scheduled cron run confirmed in the Vercel dashboard (reported by Vaishnavi, 2026-11-03) |
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
-| 11 | Testing & QA | Vaishnavi | 🟡 Partial — all 5 chunks code-complete (D-038–D-041); plain `pytest` makes zero real calls and passes in a local CI simulation; a green run on GitHub Actions (part of the guide's "Done when") is pending the first push |
+| 11 | Testing & QA | Vaishnavi | ✅ Done — plain `pytest` makes zero real calls; green on GitHub Actions (3.11 + 3.12) for `main` and `sprint-2` at `6111862` (D-038–D-041) |
 | 12 | Logging & monitoring | Vaishnavi | ⬜ Not started |
 | 13 | AI eval harness | Vaishnavi | 🟡 Partial — `tests/eval_rag.py` exists |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
@@ -209,7 +209,7 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   with the limiter on; the 5 injection cases are blocked by the guardrails even for a fully hijacked model
   (D-034). Residual risk is recorded there: the detector is a heuristic.
 
-**Phase 11 — Testing & QA** 🟡 code-complete, one item outstanding
+**Phase 11 — Testing & QA** ✅
 - 11.1 Done. `tests/conftest.py` now has `fake_gemini`, `fake_db` and `no_network` (D-038). The fakes replace
   `genai.Client` and `psycopg.connect` at the root, so `get_client()` in `app/llm.py` *and* `app/agent.py`,
   `get_conn()` and the rate limiter all get them without per-module patching. `no_network` blocks non-loopback sockets
@@ -272,8 +272,12 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   secret instead of asserting `.env` has one; a new offline twin of the live `/cron/reindex` test ingests the real
   `data/docs/` into `memory_db` and checks the second run skips every file (40 s → 0.05 s once `fake_gemini` zeroes the
   free-tier pause). Simulated CI: 301 passed, 1 skipped (needs a `.env`), 109 live deselected, on both versions.
-- **Outstanding:** the guide's "Done when" says `pytest` passes *in CI* — that needs the first push to GitHub and a green
-  run in the repo's Actions tab. Then mark Phase 11 ✅.
+- **Phase 11 done-when check (2026-11-06):** `pytest` passes locally (302 passed, 109 live deselected, ~2s, zero real
+  network/Postgres connections per a per-test inventory) and in CI: the first GitHub Actions runs for `6111862` passed
+  on Python 3.11 and 3.12, on both `sprint-2` (run 42227593073) and `main` (run 42227612601), with no secrets
+  configured. `pytest -m live` (109/109) is the manual check against real Neon + Gemini.
+- Pushing needed a GitHub token with the `workflow` scope (GitHub refuses workflow-file changes without it); the
+  first push was rejected until the token was updated.
 
 ## Phase log
 
@@ -292,6 +296,7 @@ Append one line per finished phase (newest last).
 | 2026-10-27 | 9 | Vaishnavi (with Claude) | Fixed CRON_SECRET bypass (9.2) found live; added n8n escalation webhook + workflow.json (9.4/9.5); fast-forwarded main to Production for the first real deploy, filled 7 missing Vercel env vars across both environments; dashboard-confirmed cron run still pending |
 | 2026-11-03 | 10 | Vaishnavi (with Claude) | Retry/backoff for Gemini+DB (10.1); fuzzed all routes — 6 HTTP 500s + a non-ASCII login crash found and fixed (10.2); prompt-injection guardrails after measuring a 1-in-3 hijack (10.3); secrets/history scan clean + hygiene tests (10.4); DB-backed per-user rate limits (10.5) |
 | 2026-11-03 | 9 | Vaishnavi (with Claude) | Closed the last open item: scheduled `/cron/reindex` run confirmed in the Vercel Cron Jobs dashboard (per Vaishnavi); Phase 9 now ✅ |
+| 2026-11-06 | 11 | Vaishnavi (with Claude) | Offline Gemini/Postgres fakes + network guard (11.1); `live` marker and auth/RAG-ranking/dispatch unit tests (11.2); mocked `/ask` round trip (11.3); edge cases + in-memory `MemoryDB` with a real-Postgres twin of every DB test (11.4); GitHub Actions on 3.11 + 3.12, green on first run (11.5) — suite went from 2m19s with live calls to ~2s with none |
 
 ## Deployment
 
@@ -315,7 +320,7 @@ Append one line per finished phase (newest last).
   go live; was the bare scaffold before that. Keep it fast-forwarded from `sprint-2` as work lands, or Vercel
   Production silently falls behind.
 - `sprint-1-(base)` — Phases 1–4 code.
-- `sprint-2` — Active branch; everything through Phase 10 lives here first, then gets fast-forwarded to `main`.
+- `sprint-2` — Active branch; everything through Phase 11 lives here first, then gets fast-forwarded to `main`.
   Production was promoted to Phase 10 on 2026-11-03 (`2d0fe88`) and checked live: validation 422s, non-ASCII login
   401 (was a 500), rate-limit 429 + `Retry-After` on `/ask` and the agent endpoints, cron still protected.
 
