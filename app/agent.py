@@ -21,6 +21,7 @@ from app.crm import get_ticket, update_ticket_status, create_ticket, list_ticket
 from app.db import get_conn
 from app.guardrails import STATE_CHANGING_TOOLS, fence, find_injection
 from app.llm import get_client, settings
+from app.logs import log_event, record_tool_call
 from app.rag import retrieve, format_context_for_llm
 from app.retry import is_transient_gemini_error, retry_call
 
@@ -88,7 +89,8 @@ def notify_n8n_escalation(payload: dict) -> None:
     try:
         httpx.post(settings.n8n_escalation_webhook_url, json=payload, timeout=5.0)
     except Exception as exc:
-        print(f"[Warning] Failed to notify n8n escalation webhook: {exc}")
+        # error_type only: an httpx error message includes the URL, and a webhook URL can carry a secret path
+        log_event("n8n_webhook_failed", "warning", error_type=type(exc).__name__)
 
 
 def tool_escalate_to_human(ticket_id: Optional[int], reason: str) -> str:
@@ -423,8 +425,10 @@ When you have gathered enough information and resolved or completed the task, se
                 f"for the rest of this run; read-only tools and escalate_to_human are still available."
             )
             step_record["blocked"] = True
-            print(f"[Security] Blocked {action}: {tainted}")
+            record_tool_call(f"{action} (blocked)")
+            log_event("tool_blocked", "warning", tool=action, step=step_num, reason=tainted)
         else:
+            record_tool_call(action)
             try:
                 if isinstance(args, dict):
                     observation = tool_fn(**args)
@@ -440,7 +444,7 @@ When you have gathered enough information and resolved or completed the task, se
                 step_record["security_flags"] = flags
                 if not tainted:
                     tainted = f"the output of '{action}' contained embedded instructions ({', '.join(flags)})"
-                    print(f"[Security] Run tainted: {tainted}")
+                    log_event("run_tainted", "warning", tool=action, step=step_num, flags=flags)
 
         step_record["observation"] = observation
 
@@ -522,7 +526,7 @@ def triage_ticket_with_agent(ticket_id: int) -> dict:
         f"the ticket text contained embedded instructions ({', '.join(ticket_flags)})" if ticket_flags else None
     )
     if taint_reason:
-        print(f"[Security] Ticket #{ticket['id']}: {taint_reason}")
+        log_event("ticket_tainted", "warning", ticket_id=ticket["id"], flags=ticket_flags)
 
     prompt = (
         f"Investigate Incident Ticket #{ticket['id']}:\n"

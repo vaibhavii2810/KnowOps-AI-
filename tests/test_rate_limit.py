@@ -5,6 +5,7 @@ database under `pytest -m live` (Phase 11.4), with a unique user per test and fr
 boundary mid-test cannot make a test flaky.
 """
 
+import json
 import time
 import uuid
 from types import SimpleNamespace
@@ -130,7 +131,9 @@ def test_it_fails_open_when_the_counter_cannot_be_reached(user, window_start, fr
     )
     result = check_rate_limit(user, "ask", 1, now=window_start)
     assert result.allowed is True
-    assert "Rate limiter unavailable" in capsys.readouterr().out
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
+    warning = next(e for e in events if e["event"] == "rate_limiter_unavailable")
+    assert warning["level"] == "warning" and warning["error_type"] == "OperationalError"
 
 
 def test_it_reuses_one_connection_instead_of_connecting_per_request(user, window_start, fresh_limiter_connection, monkeypatch):

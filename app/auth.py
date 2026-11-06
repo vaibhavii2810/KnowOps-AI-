@@ -24,6 +24,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import settings
+from app.logs import set_request_user
 
 # HTTP Bearer scheme for Swagger UI and header extraction
 security_bearer = HTTPBearer(auto_error=False)
@@ -145,7 +146,9 @@ def get_current_user_optional(
     """
     if not auth or not auth.credentials:
         return None
-    return decode_access_token(auth.credentials)
+    payload = decode_access_token(auth.credentials)
+    set_request_user(payload.get("sub"))
+    return payload
 
 
 def get_current_user_required(
@@ -161,4 +164,6 @@ def get_current_user_required(
             detail="Authentication credentials were not provided.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return decode_access_token(auth.credentials)
+    payload = decode_access_token(auth.credentials)
+    set_request_user(payload.get("sub"))
+    return payload

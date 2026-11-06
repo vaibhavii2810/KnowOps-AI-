@@ -31,16 +31,18 @@ Notation: `→` calls · `[DB]` opens a Postgres connection via `app.db.get_conn
 Then `app/main.py` itself runs:
 
 4. `app = FastAPI(...)` — Swagger at `/docs`, ReDoc at `/redoc`
-5. `CORSMiddleware` (all origins)
-6. Mounts `/static` if `static/` exists
-7. The route decorators register 16 routes
+5. `logs.configure_logging()` — one JSON handler on the `knowops` logger, writing to stdout (Phase 12.1, D-042)
+6. `CORSMiddleware` (all origins), then `logs.RequestLogMiddleware`, added last so it is the outermost layer
+7. Mounts `/static` if `static/` exists
+8. The route decorators register 16 routes
 
 Nothing touches Postgres or Gemini at startup. DB connections open per call. The Gemini client is
 created on first use by `llm.get_client()` (`lru_cache` → one client per process).
 
 ## 3. Every request
 
-`CORSMiddleware` → route match → dependencies (`get_current_user_required` on every route below except
+`RequestLogMiddleware` (Phase 12.1, D-042: request id from a valid inbound `X-Request-ID` or a new uuid4, stored in a
+context variable as one mutable record; timing starts) → `CORSMiddleware` → route match → dependencies (`get_current_user_required` on every route below except
 `/health`, `/auth/login`, `GET /`, `/static/*`, `/docs`, `/redoc`, `/cron/reindex` — Phase 5.4, D-022 →
 `security_bearer` reads `Authorization: Bearer <jwt>`, missing/invalid/expired → 401; on `/ask`, `/agent/chat` and
 `/agent/triage/{id}` the dependency is `ratelimit.rate_limited(bucket)`, which authenticates first and then counts the
@@ -48,7 +50,10 @@ request — over the per-minute limit → 429 + `Retry-After`; Phase 10.5, D-036
 validated against `app/schemas.py` and the routes' `Query(...)` bounds (422 if invalid — text is whitespace-stripped
 before its length check and NUL bytes are refused; priority/status are case-insensitive enums; `limit` is bounded;
 Phase 10.2, D-033) → route handler → response serialised through its
-`response_model`.
+`response_model` → back in `RequestLogMiddleware`: `X-Request-ID` added to the response and one `request` log line
+written (method, path, status, latency, `user` — set by the auth dependency via `logs.set_request_user()` — the
+`tools` the agent ran via `logs.record_tool_call()`, `vercel_id`, and `error_type` on an unhandled error). Every
+`log_event()` during the request (retries, rate-limiter fail-open, blocked tools, …) carries the same `request_id`.
 
 ## 4. Route call chains
 
@@ -96,7 +101,7 @@ ask(AskRequest, Depends(ratelimit.rate_limited("ask")))   ← JWT required (Phas
          <untrusted_data> → grounded prompt = context block + question, after the history turns (Phase 10.3, D-034)
        → [Gemini] generate_content (SYSTEM_INSTRUCTION, temperature 0.2, max 1024 tokens; same retry_call policy as above, D-032)
      (503 if generation fails)
-  4. [DB] INSERT the user + model messages (a failure here is printed, not raised)
+  4. [DB] INSERT the user + model messages (a failure here is logged as `history_persist_failed`, not raised)
   5. AskResponse(answer, sources=chunks, question, conversation_id)
 ```
 
@@ -250,17 +255,18 @@ Every call above now sends `Authorization: Bearer <jwt>` via `authHeaders()`.
 
 ```
 api/index.py       → app.main
-app.main           → app.agent, app.auth, app.config, app.crm, app.db, app.llm, app.rag, app.ratelimit, app.schemas,
+app.main           → app.agent, app.auth, app.config, app.crm, app.db, app.llm, app.logs, app.rag, app.ratelimit, app.schemas,
                      scripts.ingest (Phase 9.1, D-029 — so GET /cron/reindex can call reindex_knowledge_base())
-app.agent          → app.crm, app.db, app.guardrails, app.llm, app.rag, app.retry
+app.agent          → app.crm, app.db, app.guardrails, app.llm, app.logs, app.rag, app.retry
 app.rag            → app.db, app.llm, app.schemas
 app.crm            → app.db
-app.auth           → app.config
-app.llm            → app.config, app.guardrails, app.retry
+app.auth           → app.config, app.logs
+app.llm            → app.config, app.guardrails, app.logs, app.retry
 app.db             → app.config, app.retry
-app.retry          → (none — httpx, psycopg, google.genai.errors only)
+app.retry          → app.logs (+ httpx, psycopg, google.genai.errors)
+app.logs           → app.config (stdlib logging/contextvars only — Phase 12.1, D-042)
 app.guardrails     → (none — stdlib only)
-app.ratelimit      → app.auth, app.config (+ psycopg directly: ONE reused plain connection, no pgvector setup — D-036)
+app.ratelimit      → app.auth, app.config, app.logs (+ psycopg directly: ONE reused plain connection, no pgvector setup — D-036)
 scripts/ingest.py  → app.db, app.llm
 ```
 

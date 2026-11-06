@@ -703,3 +703,32 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   production, which sets `JWT_SECRET` in Vercel.
 - **Revisit if:** A dependency release breaks CI (then pin), CI gets slow, or the team wants live checks before every
   deploy (then a separate, manually triggered `live` workflow with secrets restricted to `main`).
+
+### D-042 · Structured JSON logs on stdout, one `request` line per request, correlated by a request id (Phase 12.1)
+- **Date · by · source:** 2026-11-06 · Vaishnavi (with Claude) · Build guide (12.1: "structured JSON logging (request id,
+  user, latency, which tools were called)")
+- **Decision:** New `app/logs.py` on the standard `logging` module: a `knowops` logger with one handler that writes one
+  JSON object per line to stdout (`ts`, `level`, `event`, `request_id`, then the event's own fields). A pure ASGI
+  `RequestLogMiddleware`, added as the outermost middleware, gives each request an id (an inbound `X-Request-ID` is kept
+  only if it matches `^[A-Za-z0-9._-]{8,64}$`, otherwise a uuid4), returns it as `X-Request-ID`, and writes one `request`
+  line with method, path, status, latency, user, the tools the agent ran, Vercel's `x-vercel-id`, and the error type on
+  an unhandled error (level: info < 400, warning 4xx, error 5xx). All 8 `print()` calls became named events
+  (`retrying`, `rate_limiter_unavailable`, `kb_chunk_dropped`, `history_persist_failed`, `n8n_webhook_failed`,
+  `tool_blocked`, `run_tainted`, `ticket_tainted`) that carry the same `request_id`. New optional `LOG_LEVEL` (INFO).
+- **Why:** Vercel collects stdout as runtime logs and its log search reads JSON fields, so one line per event is enough —
+  no log service, nothing new to pay for. The per-request state lives in a context variable as one *mutable* record:
+  FastAPI runs sync dependencies and routes in a threadpool with a *copy* of the context, so a value set there (the user
+  from the JWT, the tools from the agent loop) would never reach the middleware — a mutation check that hands the
+  context a copy loses both. A pure ASGI middleware instead of `@app.middleware("http")` avoids `BaseHTTPMiddleware`'s
+  extra task and its known streaming/context pitfalls. The inbound id is validated because it is copied into a header
+  and the logs: a forged value with a quote or newline could otherwise inject a fake log line.
+- **Alternatives considered:** `structlog` or `python-json-logger` (a dependency for ~100 lines we own and test);
+  OpenTelemetry or a hosted log service (more setup than the guide asks for, and Vercel's runtime logs are free);
+  keeping `print()` with a prefix (not searchable by field, no request id).
+- **Tradeoff accepted:** The `request` line logs the path but not the query string, body, headers or question text, so a
+  log alone can't replay a request — deliberately, so a token, password or user's data never lands in the logs (a test
+  checks for each). Exception text is kept short (120 chars) and dropped entirely for the n8n webhook, whose URL could
+  carry a secret. Hobby keeps runtime logs for 1 hour only. Logging goes through a lock-protected handler, a little
+  per-line overhead (not measured separately; a whole offline `/agent/chat` test request, logging included, took ~1 ms).
+- **Revisit if:** Logs need to outlive Vercel's retention (add a log drain), or per-request detail needs to grow beyond
+  what fits on one readable line (Phase 12.2 adds the agent trace on failure only).

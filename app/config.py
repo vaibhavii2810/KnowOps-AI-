@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     rate_limit_agent_per_minute: int = 5
     rate_limit_login_per_minute: int = 5
     rate_limit_login_per_hour: int = 30
+    log_level: str = "INFO"  # Phase 12.1: DEBUG, INFO, WARNING or ERROR (D-042)
 
     class Config:
         env_file = ".env"

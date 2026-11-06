@@ -45,7 +45,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 9 | Automation (cron + n8n) | Vaishnavi | ✅ Done — all 5 chunks live; scheduled cron run confirmed in the Vercel dashboard (reported by Vaishnavi, 2026-11-03) |
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
 | 11 | Testing & QA | Vaishnavi | ✅ Done — plain `pytest` makes zero real calls; green on GitHub Actions (3.11 + 3.12) for `main` and `sprint-2` at `6111862` (D-038–D-041) |
-| 12 | Logging & monitoring | Vaishnavi | ⬜ Not started |
+| 12 | Logging & monitoring | Vaishnavi | 🟡 Partial — 12.1 done (structured JSON logs + request id, D-042); 12.2 agent trace, 12.3 Vercel check, 12.4 `/metrics` (stretch) to do |
 | 13 | AI eval harness | Vaishnavi | 🟡 Partial — `tests/eval_rag.py` exists |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
 | 15 | Docs & wrap-up | Vaishnavi | ⬜ Not started |
@@ -279,6 +279,21 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
 - Pushing needed a GitHub token with the `workflow` scope (GitHub refuses workflow-file changes without it); the
   first push was rejected until the token was updated.
 
+**Phase 12 — Logging & monitoring** 🟡 in progress (12.1 done)
+- 12.1 Done. New `app/logs.py` (D-042): every log line is one JSON object on stdout (`ts`, `level`, `event`,
+  `request_id`, fields) — what Vercel collects as runtime logs. `RequestLogMiddleware` (outermost) gives each request an
+  id (a valid inbound `X-Request-ID` is kept, anything else replaced), returns it as `X-Request-ID`, and logs one
+  `request` line: method, path, status, latency, user, the agent's `tools`, `vercel_id`, and `error_type` on a 500.
+  Auth records the user (`set_request_user`), the agent loop records each tool it runs or blocks (`record_tool_call`);
+  both run in FastAPI's threadpool, so the request context holds one mutable record rather than plain values. All 8
+  `print()` calls are now named events carrying the request id; the n8n webhook failure logs only the error type (its
+  URL can carry a secret). Never logged: bodies, query strings, headers, tokens, passwords, question text. New optional
+  `LOG_LEVEL`. 10 tests in `tests/test_logging.py` (offline, 0.07s) — one line + header per request, distinct ids,
+  hostile inbound id replaced (no forged line), user and 401 level, the agent's tools on the line, events sharing the id,
+  a 500 logged with its type, `vercel_id`, no secrets/bodies/query strings, long fields cut and newlines escaped. 5
+  mutation checks (user not recorded, tools not recorded, any inbound id trusted, events losing the id, the context
+  given a copy) each fail them. 312 passed, 109 live deselected.
+
 ## Phase log
 
 Append one line per finished phase (newest last).
@@ -346,7 +361,8 @@ Interactive docs: `/docs` (Swagger UI).
 `JWT_SECRET` · `APP_USERNAME` / `APP_PASSWORD` · `CRON_SECRET` · `N8N_ESCALATION_WEBHOOK_URL` (optional — Phase
 9.4, D-031; `escalate_to_human` skips the webhook call entirely when unset) · `RATE_LIMIT_ASK_PER_MINUTE` (10) /
 `RATE_LIMIT_AGENT_PER_MINUTE` (5) (optional — Phase 10.5, D-036; 0 disables) · `RATE_LIMIT_LOGIN_PER_MINUTE` (5) /
-`RATE_LIMIT_LOGIN_PER_HOUR` (30) (optional — D-037; per client IP). Template: `.env.example`.
+`RATE_LIMIT_LOGIN_PER_HOUR` (30) (optional — D-037; per client IP) · `LOG_LEVEL` (INFO) (optional — Phase 12.1, D-042).
+Template: `.env.example`.
 All are now set on both Preview and Production in the Vercel project (2026-10-27) — `main` was fast-forwarded
 to `sprint-2`'s tip the same day, so Production is a real, working deployment for the first time.
 
@@ -356,7 +372,8 @@ to `sprint-2`'s tip the same day, so Production is a real, working deployment fo
 AGENTS.md   this file — status + rules      DECISION.md  why things are the way they are
 FLOW.md     how execution moves through the code
 CODE_TOUR.md  plain-English, phase-by-phase walkthrough of the code (for teammates new to it)
-app/        main.py (routes) · config.py · db.py · auth.py · rag.py · llm.py · agent.py · crm.py · schemas.py · retry.py · guardrails.py
+app/        main.py (routes) · config.py · db.py · auth.py · rag.py · llm.py · agent.py · crm.py · schemas.py · retry.py · guardrails.py ·
+            ratelimit.py · logs.py (JSON logs + request id, Phase 12.1)
 api/        index.py — Vercel entrypoint (sprint-2)
 scripts/    init_db.sql · ingest.py · generate_phase_*_pdf.py (report generators)
 data/docs/  runbook knowledge base (markdown)

@@ -11,6 +11,7 @@ from google.genai import types
 
 from app.config import settings
 from app.guardrails import fence, find_injection
+from app.logs import log_event
 from app.retry import is_transient_gemini_error, retry_call
 
 
@@ -112,7 +113,7 @@ def chat_completion(
     for chunk in context_chunks:
         flags = find_injection(chunk)
         if flags:
-            print(f"[Security] Dropped a knowledge-base chunk with embedded instructions ({', '.join(flags)})")
+            log_event("kb_chunk_dropped", "warning", reason="embedded instructions", flags=flags)
             continue
         safe_chunks.append(fence(chunk, "knowledge base"))
     context_block = "\n\n".join(safe_chunks) if safe_chunks else "No context available."

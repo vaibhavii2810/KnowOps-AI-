@@ -48,6 +48,7 @@ from app.crm import (
 )
 from app.db import get_conn
 from app.llm import chat_completion
+from app.logs import RequestLogMiddleware, configure_logging, log_event
 from app.rag import retrieve_and_format
 from app.ratelimit import login_rate_limited, rate_limited
 from scripts.ingest import reindex_knowledge_base
@@ -91,6 +92,8 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+configure_logging()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -98,6 +101,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Added last, so it is the outermost middleware: it times and logs everything, CORS preflights included.
+app.add_middleware(RequestLogMiddleware)
 
 # Mount static assets if directory exists
 if STATIC_DIR.exists():
@@ -415,7 +420,7 @@ def ask(
                 (conv_id, request.question, conv_id, answer),
             )
     except Exception as exc:
-        print(f"[Warning] Failed to persist message history: {exc}")
+        log_event("history_persist_failed", "warning", conversation_id=conv_id, error_type=type(exc).__name__)
 
     # ── Step 5: Return structured response with citations ────────────────────
     return AskResponse(

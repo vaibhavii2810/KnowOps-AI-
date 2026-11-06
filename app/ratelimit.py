@@ -31,6 +31,7 @@ from fastapi import Depends, HTTPException, Request, Response, status
 
 from app.auth import get_current_user_required
 from app.config import settings
+from app.logs import log_event
 
 WINDOW_SECONDS = 60
 
@@ -116,7 +117,8 @@ def check_rate_limit(
     try:
         hits = _upsert_hit(user_key, bucket, window_start, now)
     except Exception as exc:
-        print(f"[Warning] Rate limiter unavailable, allowing the request: {type(exc).__name__}: {str(exc)[:120]}")
+        log_event("rate_limiter_unavailable", "warning", bucket=bucket, action="allowed (fail-open)",
+                  error_type=type(exc).__name__, error=str(exc)[:120])
         return RateLimitResult(allowed=True, limit=limit, remaining=limit, retry_after=retry_after)
 
     return RateLimitResult(

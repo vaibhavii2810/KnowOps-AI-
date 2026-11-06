@@ -19,6 +19,8 @@ import psycopg
 from google.genai import errors as genai_errors
 from psycopg import errors as pg_errors
 
+from app.logs import log_event
+
 T = TypeVar("T")
 
 DEFAULT_ATTEMPTS = 4
@@ -62,9 +64,9 @@ def retry_call(
             if attempt == attempts or not is_transient(exc):
                 raise
             delay = min(max_delay, base_delay * 2 ** (attempt - 1)) * random.uniform(0.5, 1.0)
-            print(
-                f"[Retry] {label} failed ({type(exc).__name__}: {str(exc)[:120]}); "
-                f"attempt {attempt}/{attempts}, retrying in {delay:.1f}s"
+            log_event(
+                "retrying", "warning", call=label, attempt=attempt, attempts=attempts,
+                delay_s=round(delay, 1), error_type=type(exc).__name__, error=str(exc)[:120],
             )
             time.sleep(delay)
     raise AssertionError("unreachable")  # pragma: no cover
