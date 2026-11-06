@@ -855,3 +855,6 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   show it separately. Counting is off in the test suite by default, so a test can never write to a real database.
 - **Revisit if:** The 65 ms matters (batch the writes, or sample), p95 is needed (store a histogram per hour), or traffic
   grows enough that one hot row per route per hour contends (shard by instance).
+- **Checked live 2026-11-06 (`80d779d`):** a known request mix was counted exactly (templates, `(unmatched)`, 4xx vs 5xx,
+  uncounted routes). Client-side, `/auth/me` took a median 400 ms before and 323 ms after (12 samples each, noise ≈ ±100 ms):
+  no measurable cost, though not proof that the ~65 ms measured locally is absent.

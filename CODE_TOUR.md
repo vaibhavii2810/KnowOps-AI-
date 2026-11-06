@@ -198,7 +198,8 @@ Runbooks (.md) ──ingest──▶ Postgres (chunks + numbers) ──search─
   Postgres, so `/metrics?hours=24` returns requests, average latency and error rate (5xx ÷ requests) per route.
   Counts live in Postgres, not memory, because serverless copies restart and run side by side.
 - **Try it:** call a few routes, then `GET /metrics` (after logging in) — or open Vercel → Logs and search for
-  your request id.
+  your request id. The first numbers showed database-backed routes taking 2–4 s on Production: see Known issues in
+  `AGENTS.md`.
 
 ---
 
