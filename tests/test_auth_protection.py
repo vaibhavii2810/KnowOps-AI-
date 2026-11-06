@@ -30,7 +30,7 @@ PROTECTED_NO_BODY = [
 ]
 
 
-def test_unprotected_routes_need_no_token(client):
+def test_unprotected_routes_need_no_token(client, memory_db):
     """/health must stay reachable without a token."""
     for method, path in UNPROTECTED:
         response = client.request(method, path)
@@ -63,7 +63,7 @@ def test_agent_routes_require_auth(client):
     assert client.post("/agent/triage/1").status_code == 401
 
 
-def test_ask_succeeds_with_valid_token(client, auth_headers):
+def test_ask_succeeds_with_valid_token(client, auth_headers, fake_gemini, memory_db):
     """POST /ask with a valid token reaches the RAG pipeline and returns 200."""
     response = client.post(
         "/ask",

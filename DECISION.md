@@ -646,3 +646,32 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   still reach Postgres (and 3 reach the network) in the default run — they move in 11.4 before CI (11.5).
 - **Revisit if:** CI gets a real Postgres service container (some `live` tests could then run there), or the live set
   grows big enough to need its own scheduled job.
+
+### D-040 · An in-memory copy of the app's tables (`MemoryDB`), with every DB test also run against real Postgres (Phase 11.4)
+- **Date · by · source:** 2026-11-06 · Vaishnavi (with Claude) · Agent (needed for the Phase 11 "Done when")
+- **Decision:** `tests/conftest.py` gains `memory_db`: the `tickets`, `conversations`, `messages`, `documents`, `chunks`
+  and `rate_limits` tables kept in Python on top of `fake_db`, answering exactly the statements the app sends (including
+  `retrieve()`'s vector search with the same cosine/threshold/`LIMIT`, the CRM's priority ordering, `ON DELETE CASCADE`
+  for chunks, and the limiter's upsert). State carries across statements, so create → fetch → update works. Any statement
+  it does not recognise is recorded and **fails the test at teardown**. A parametrized `db_backend` fixture runs each
+  database-dependent test twice: on `memory_db` by default, and against the real Postgres from `.env` as a `live`
+  variant. `test_crm.py`, `test_api_v2_5.py`, `test_rate_limit.py`, `test_input_validation.py` and the ingest test use
+  `db_backend`; `test_retry.py`'s `/ask` tests and `test_auth_protection.py` use `memory_db` directly; the two live-model
+  prompt-injection tests are `live`.
+- **Why:** 47 tests in the default run still reached Postgres (and 3 the network) after 11.2, so plain `pytest` broke the
+  guide's "no real API calls" and CI would have nothing to connect to. These tests check *behaviour across statements*
+  (a ticket created then fetched, a counter that climbs to its limit), which scripted per-statement rows can't express
+  without rewriting every test. Keeping the same test bodies and adding a real-Postgres variant means the fake is checked
+  against the real database whenever someone runs `pytest -m live`, instead of being trusted.
+- **Alternatives considered:** Mark all 47 `live` (CI would then not test the CRM, conversations or rate limiter at all);
+  rewrite each with scripted rows (loses the round-trip checks, and much more churn); a Postgres service container in CI
+  (real SQL, but slower, needs schema setup and secrets-free bootstrapping — still the right next step if the fake ever
+  misleads us); SQLite (no pgvector, different SQL).
+- **Tradeoff accepted:** `MemoryDB` matches statements by fragment and does not parse SQL. A changed statement that keeps
+  its fragment is answered as before — e.g. flipping `ORDER BY id ASC` to `DESC` on the history query, or reordering a
+  `SELECT`'s columns, goes unnoticed offline (both confirmed by mutation checks) and is caught only by the `live` variant.
+  `test_unicode_and_sql_looking_text_is_stored_verbatim` proves parameterisation only in its `live` run. Two tests
+  (`test_crm_stats_direct`, `test_api_list_tickets_endpoint`) relied on leftover rows in the shared live database and
+  now create the tickets they assert on.
+- **Revisit if:** The app's SQL changes often enough that keeping `MemoryDB` in step is a chore, or a bug reaches
+  production that the fake hid — then move the DB tests to a Postgres service container in CI.

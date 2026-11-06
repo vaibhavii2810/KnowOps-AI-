@@ -15,6 +15,9 @@ from app.crm import (
 )
 from app.main import app
 
+# Phase 11.4: every test here runs on MemoryDB by default and against real Postgres under `pytest -m live`.
+pytestmark = pytest.mark.usefixtures("db_backend")
+
 
 @pytest.fixture
 def client():
@@ -70,6 +73,7 @@ def test_crm_update_ticket_status_direct():
 
 def test_crm_stats_direct():
     """get_crm_stats() should return valid count aggregation."""
+    create_ticket(subject="Stats probe", description="Counted by get_crm_stats().", priority="P1")
     stats = get_crm_stats()
     assert "total_tickets" in stats
     assert "open" in stats
@@ -106,6 +110,8 @@ def test_api_create_ticket_requires_auth(client):
 
 def test_api_list_tickets_endpoint(client, auth_headers):
     """GET /tickets should return a list of tickets, supporting status/priority filters."""
+    create_ticket(subject="List probe P1", description="Should appear under priority=P1.", priority="P1")
+    create_ticket(subject="List probe P3", description="Should not appear under priority=P1.", priority="P3")
     response = client.get("/tickets", headers=auth_headers)
     assert response.status_code == 200
     tickets = response.json()
@@ -116,7 +122,7 @@ def test_api_list_tickets_endpoint(client, auth_headers):
     p1_res = client.get("/tickets?priority=P1", headers=auth_headers)
     assert p1_res.status_code == 200
     p1_tickets = p1_res.json()
-    assert all(t["priority"] == "P1" for t in p1_tickets)
+    assert p1_tickets and all(t["priority"] == "P1" for t in p1_tickets)
 
 
 def test_api_list_tickets_requires_auth(client):
@@ -126,6 +132,7 @@ def test_api_list_tickets_requires_auth(client):
 
 def test_api_ticket_stats_endpoint(client, auth_headers):
     """GET /tickets/stats should return summary counts."""
+    create_ticket(subject="Stats probe", description="Counted by /tickets/stats.", priority="P2")
     response = client.get("/tickets/stats", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()

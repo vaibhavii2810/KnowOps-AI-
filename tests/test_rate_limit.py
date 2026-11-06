@@ -1,7 +1,8 @@
 """
 tests/test_rate_limit.py  –  Phase 10.5 (D-036)
-Per-user rate limiting on /ask and /agent/*. Uses the local database for the counters, with a unique
-user per test and frozen time so a minute boundary mid-test cannot make a test flaky.
+Per-user rate limiting on /ask and /agent/*. The counters live in MemoryDB by default and in the local
+database under `pytest -m live` (Phase 11.4), with a unique user per test and frozen time so a minute
+boundary mid-test cannot make a test flaky.
 """
 
 import time
@@ -19,6 +20,9 @@ from app.auth import create_access_token
 from app.config import settings
 from app.db import get_conn
 from app.ratelimit import check_rate_limit, client_ip
+
+# Phase 11.4: every test here runs on MemoryDB by default and against real Postgres under `pytest -m live`.
+pytestmark = pytest.mark.usefixtures("db_backend")
 
 
 @pytest.fixture

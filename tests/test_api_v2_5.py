@@ -7,6 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 
+# Phase 11.4: every test here runs on MemoryDB by default and against real Postgres under `pytest -m live`.
+pytestmark = pytest.mark.usefixtures("db_backend")
+
 
 @pytest.fixture
 def client():

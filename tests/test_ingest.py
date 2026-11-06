@@ -43,7 +43,7 @@ def test_compute_content_hash_is_deterministic_and_content_sensitive():
     assert len(a) == 64  # sha256 hex digest
 
 
-def test_ingest_file_skips_unchanged_content_without_embedding(tmp_path, monkeypatch):
+def test_ingest_file_skips_unchanged_content_without_embedding(tmp_path, monkeypatch, db_backend):
     """
     Phase 9.1 (D-029): re-ingesting a file whose content hasn't changed must not call
     embed_document at all (the whole point — GET /cron/reindex should be free and fast

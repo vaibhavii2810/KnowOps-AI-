@@ -1,10 +1,12 @@
 # Pytest test configuration and fixtures (built in Phase 4; Gemini/DB fakes added in Phase 11.1, D-038)
 
 import hashlib
+import itertools
 import json
 import math
 import re
 import socket
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import psycopg
@@ -224,3 +226,239 @@ def fake_db(monkeypatch, no_network):
     monkeypatch.setattr(ratelimit, "_conn", None)
     monkeypatch.setattr(ratelimit, "_table_ready", False)
     return fake
+
+
+# ---------------------------------------------------------------------------
+# Phase 11.4: an in-memory stand-in for the app's tables
+# ---------------------------------------------------------------------------
+
+_PRIORITY_RANK = {"P1": 1, "P2": 2, "P3": 3, "P4": 4}
+
+
+class MemoryDB:
+    """
+    The app's tables kept in Python, answering exactly the statements the app sends (tickets,
+    conversations, messages, documents, chunks — including the pgvector search — and rate_limits).
+    State carries across statements, so create → fetch → update round trips behave like Postgres.
+
+    It does not parse SQL: each statement is recognised by a fragment, as FakeDB does. A statement it
+    does not recognise is recorded in `unknown` and fails the test at teardown, so a new query in the
+    app can't silently get "no rows". The `live` variant of `db_backend` runs the same tests against
+    real Postgres, which is what catches this fake drifting from the real thing.
+    """
+
+    def __init__(self, fake_db: FakeDB):
+        self._db = fake_db
+        self.tickets: dict[int, list] = {}
+        self.conversations: dict[int, datetime] = {}
+        self.messages: list[tuple] = []          # (id, conversation_id, role, content, created_at)
+        self.documents: dict[int, dict] = {}     # id -> {"source", "title", "content_hash"}
+        self.chunks: list[dict] = []             # {"id", "document_id", "chunk_index", "heading", "content", "embedding"}
+        self.rate_limits: dict[tuple, int] | None = {}  # (user_key, bucket, window_start) -> hits; None = dropped
+        self.unknown: list[str] = []
+        self._ids = {table: itertools.count(1) for table in ("tickets", "conversations", "messages", "documents", "chunks")}
+        self._install()
+
+    # -- statements ---------------------------------------------------------
+    def _install(self):
+        on = self._db.on
+        on("", self._unrecognised)  # lowest precedence: FakeDB tries later registrations first
+
+        # tickets (app/crm.py)
+        on("INSERT INTO tickets", self._insert_ticket)
+        on("FROM tickets WHERE id = %s", lambda p: self._ticket_rows([p[0]]))
+        on("FROM tickets ORDER BY CASE priority", lambda p: self._list_tickets(None, None, p[0]))
+        on("FROM tickets WHERE status = %s ORDER BY", lambda p: self._list_tickets(p[0], None, p[1]))
+        on("FROM tickets WHERE priority = %s ORDER BY", lambda p: self._list_tickets(None, p[0], p[1]))
+        on("FROM tickets WHERE status = %s AND priority = %s ORDER BY", lambda p: self._list_tickets(p[0], p[1], p[2]))
+        on("UPDATE tickets SET status = %s, updated_at = %s WHERE id = %s",
+           lambda p: self._update_ticket(p[2], p[0], p[1], None))
+        on("UPDATE tickets SET status = %s, resolution_notes = %s, updated_at = %s WHERE id = %s",
+           lambda p: self._update_ticket(p[3], p[0], p[2], p[1]))
+        on("SELECT COUNT(*) FROM tickets", lambda p: [(len(self.tickets),)])
+        for status in ("open", "in_progress", "resolved"):
+            on(f"SELECT COUNT(*) FROM tickets WHERE status = '{status}'",
+               lambda p, status=status: [(sum(t[4] == status for t in self.tickets.values()),)])
+        on("SELECT COUNT(*) FROM tickets WHERE priority = 'P1' AND status != 'resolved'",
+           lambda p: [(sum(t[3] == "P1" and t[4] != "resolved" for t in self.tickets.values()),)])
+
+        # conversations and messages (app/main.py)
+        on("INSERT INTO conversations DEFAULT VALUES", self._insert_conversation)
+        on("SELECT id FROM conversations WHERE id = %s",
+           lambda p: [(p[0],)] if p[0] in self.conversations else [])
+        on("SELECT id, created_at FROM conversations WHERE id = %s",
+           lambda p: [(p[0], self.conversations[p[0]])] if p[0] in self.conversations else [])
+        on("FROM conversations c LEFT JOIN messages m", self._list_conversations)
+        on("INSERT INTO messages", self._insert_messages)
+        on("SELECT role, content FROM messages WHERE conversation_id = %s",
+           lambda p: [(m[2], m[3]) for m in self._messages_of(p[0])][:8])  # ORDER BY id ASC LIMIT 8
+        on("SELECT id, role, content, created_at FROM messages WHERE conversation_id = %s",
+           lambda p: [(m[0], m[2], m[3], m[4]) for m in self._messages_of(p[0])])
+
+        # knowledge base (scripts/ingest.py, app/rag.py, /health, the agent's DB diagnostic)
+        on("SELECT 1", lambda p: [(1,)])
+        on("SELECT COUNT(*) FROM documents", lambda p: [(len(self.documents),)])
+        on("SELECT COUNT(*) FROM chunks", lambda p: [(len(self.chunks),)])
+        on("SELECT id FROM documents WHERE source = %s", lambda p: [(i,) for i in self._docs_by_source(p[0])])
+        on("SELECT id, content_hash FROM documents WHERE source = %s",
+           lambda p: [(i, self.documents[i]["content_hash"]) for i in self._docs_by_source(p[0])])
+        on("INSERT INTO documents (source, title, content_hash)", self._insert_document)
+        on("UPDATE documents SET title = %s, content_hash = %s WHERE id = %s", self._update_document)
+        on("DELETE FROM documents", lambda p: self._delete_documents(list(self.documents)))
+        on("DELETE FROM documents WHERE source = %s", lambda p: self._delete_documents(self._docs_by_source(p[0])))
+        on("DELETE FROM chunks", lambda p: self.chunks.clear() or [])
+        on("DELETE FROM chunks WHERE document_id = %s", lambda p: self._delete_chunks_of([p[0]]))
+        on("INSERT INTO chunks (document_id, chunk_index, heading, content, embedding)", self._insert_chunk)
+        on("FROM chunks c JOIN documents d", self._vector_search)
+
+        # rate limiter (app/ratelimit.py)
+        on("CREATE TABLE IF NOT EXISTS rate_limits", self._create_rate_limits)
+        on("DROP TABLE IF EXISTS rate_limits", lambda p: setattr(self, "rate_limits", None) or [])
+        on("INSERT INTO rate_limits", self._hit_rate_limit)
+        on("DELETE FROM rate_limits WHERE window_start < %s", self._prune_rate_limits)
+        on("DELETE FROM rate_limits WHERE user_key LIKE 'rltest-%'", self._delete_test_rate_limits)
+        on("SELECT hits FROM rate_limits WHERE user_key = %s",
+           lambda p: [(hits,) for (user, _, _), hits in (self.rate_limits or {}).items() if user == p[0]])
+
+    def _unrecognised(self, params):
+        sql = " ".join(self._db.executed[-1][0].split())  # FakeDB records the statement before calling us
+        self.unknown.append(sql)
+        return []
+
+    # -- tickets --------------------------------------------------------------
+    def _ticket_rows(self, ids):
+        return [tuple(self.tickets[i]) for i in ids if i in self.tickets]
+
+    def _insert_ticket(self, p):
+        subject, description, priority, status, created_at, updated_at = p
+        ticket_id = next(self._ids["tickets"])
+        self.tickets[ticket_id] = [ticket_id, subject, description, priority, status, created_at, updated_at, None]
+        return self._ticket_rows([ticket_id])
+
+    def _list_tickets(self, status, priority, limit):
+        rows = [t for t in self.tickets.values()
+                if (status is None or t[4] == status) and (priority is None or t[3] == priority)]
+        rows.sort(key=lambda t: (_PRIORITY_RANK.get(t[3], 5), -t[0]))
+        return [tuple(t) for t in rows[:limit]]
+
+    def _update_ticket(self, ticket_id, status, updated_at, notes):
+        ticket = self.tickets.get(ticket_id)
+        if ticket is None:
+            return []
+        ticket[4], ticket[6] = status, updated_at
+        if notes is not None:
+            ticket[7] = notes
+        return self._ticket_rows([ticket_id])
+
+    # -- conversations and messages ----------------------------------------
+    def _insert_conversation(self, p):
+        conversation_id = next(self._ids["conversations"])
+        self.conversations[conversation_id] = datetime.now(timezone.utc)
+        return [(conversation_id, self.conversations[conversation_id])]
+
+    def _list_conversations(self, p):
+        rows = [(cid, created, sum(m[1] == cid for m in self.messages))
+                for cid, created in self.conversations.items()]
+        return sorted(rows, key=lambda r: -r[0])[:p[0]]
+
+    def _insert_messages(self, p):
+        # /ask's INSERT carries the roles as literals: VALUES (%s, 'user', %s), (%s, 'model', %s)
+        for (conversation_id, content), role in zip(zip(p[0::2], p[1::2]), itertools.cycle(("user", "model"))):
+            self.messages.append((next(self._ids["messages"]), conversation_id, role, content, datetime.now(timezone.utc)))
+        return []
+
+    def _messages_of(self, conversation_id):
+        return sorted((m for m in self.messages if m[1] == conversation_id), key=lambda m: m[0])
+
+    # -- knowledge base -------------------------------------------------------
+    def _docs_by_source(self, source):
+        return [i for i, d in self.documents.items() if d["source"] == source]
+
+    def _insert_document(self, p):
+        source, title, content_hash = p
+        if self._docs_by_source(source):
+            raise psycopg.errors.UniqueViolation("duplicate key value violates unique constraint \"documents_source_key\"")
+        document_id = next(self._ids["documents"])
+        self.documents[document_id] = {"source": source, "title": title, "content_hash": content_hash}
+        return [(document_id,)]
+
+    def _update_document(self, p):
+        title, content_hash, document_id = p
+        if document_id in self.documents:
+            self.documents[document_id].update(title=title, content_hash=content_hash)
+        return []
+
+    def _delete_chunks_of(self, document_ids):
+        self.chunks = [c for c in self.chunks if c["document_id"] not in document_ids]
+        return []
+
+    def _delete_documents(self, document_ids):
+        for document_id in document_ids:
+            self.documents.pop(document_id, None)
+        return self._delete_chunks_of(document_ids)  # ON DELETE CASCADE
+
+    def _insert_chunk(self, p):
+        document_id, chunk_index, heading, content, embedding = p
+        self.chunks.append({"id": next(self._ids["chunks"]), "document_id": document_id, "chunk_index": chunk_index,
+                            "heading": heading, "content": content, "embedding": [float(x) for x in embedding]})
+        return []
+
+    def _vector_search(self, p):
+        """retrieve()'s query: similarity = 1 - cosine distance, filtered by threshold, best first, LIMIT top_k."""
+        query_literal, _, threshold, _, top_k = p
+        query = [float(x) for x in query_literal.strip("[]").split(",")]
+        query_norm = math.sqrt(sum(x * x for x in query))
+        scored = []
+        for chunk in self.chunks:
+            norm = math.sqrt(sum(x * x for x in chunk["embedding"])) * query_norm
+            similarity = sum(a * b for a, b in zip(query, chunk["embedding"])) / norm if norm else 0.0
+            if similarity >= threshold:
+                document = self.documents[chunk["document_id"]]
+                scored.append((round(similarity, 6), chunk, document))
+        scored.sort(key=lambda s: -s[0])
+        return [(c["id"], d["title"], d["source"], c["heading"] or "", c["content"], sim) for sim, c, d in scored[:top_k]]
+
+    # -- rate limiter ---------------------------------------------------------
+    def _create_rate_limits(self, p):
+        if self.rate_limits is None:
+            self.rate_limits = {}
+        return []
+
+    def _hit_rate_limit(self, p):
+        if self.rate_limits is None:
+            raise psycopg.errors.UndefinedTable('relation "rate_limits" does not exist')
+        key = tuple(p)  # (user_key, bucket, window_start); ON CONFLICT ... hits = hits + 1 RETURNING hits
+        self.rate_limits[key] = self.rate_limits.get(key, 0) + 1
+        return [(self.rate_limits[key],)]
+
+    def _prune_rate_limits(self, p):
+        if self.rate_limits:
+            self.rate_limits = {k: v for k, v in self.rate_limits.items() if k[2] >= p[0]}
+        return []
+
+    def _delete_test_rate_limits(self, p):
+        if self.rate_limits:
+            self.rate_limits = {k: v for k, v in self.rate_limits.items() if not k[0].startswith("rltest-")}
+        return []
+
+
+@pytest.fixture
+def memory_db(fake_db):
+    """The app's tables in memory (MemoryDB), behind fake_db — so offline, via no_network."""
+    store = MemoryDB(fake_db)
+    yield store
+    if store.unknown:
+        pytest.fail("MemoryDB does not understand these statements (add them to MemoryDB._install):\n  "
+                    + "\n  ".join(store.unknown))
+
+
+@pytest.fixture(params=["memory", pytest.param("postgres", marks=pytest.mark.live)])
+def db_backend(request):
+    """
+    Run a database-dependent test twice: on MemoryDB by default, and against the real Postgres from
+    .env as a `live` variant (`pytest -m live`). Same test body both times, so the live run is what
+    shows MemoryDB still behaves like Postgres.
+    """
+    if request.param == "memory":
+        return request.getfixturevalue("memory_db")
+    return None

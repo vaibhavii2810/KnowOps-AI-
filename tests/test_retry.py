@@ -283,7 +283,7 @@ def _failing_gemini(monkeypatch, code):
     return calls
 
 
-def test_ask_still_maps_exhausted_embedding_retries_to_the_same_503(client, auth_headers, sleeps, monkeypatch):
+def test_ask_still_maps_exhausted_embedding_retries_to_the_same_503(memory_db, client, auth_headers, sleeps, monkeypatch):
     calls = _failing_gemini(monkeypatch, 503)
     r = client.post("/ask", json={"question": "How do I fail over the database?"}, headers=auth_headers)
     assert r.status_code == 503
@@ -293,7 +293,7 @@ def test_ask_still_maps_exhausted_embedding_retries_to_the_same_503(client, auth
 
 
 def test_ask_still_maps_a_permanent_embedding_error_to_the_same_503_without_retrying(
-    client, auth_headers, sleeps, monkeypatch
+    memory_db, client, auth_headers, sleeps, monkeypatch
 ):
     calls = _failing_gemini(monkeypatch, 400)
     r = client.post("/ask", json={"question": "How do I fail over the database?"}, headers=auth_headers)
@@ -303,7 +303,7 @@ def test_ask_still_maps_a_permanent_embedding_error_to_the_same_503_without_retr
     assert sleeps == []
 
 
-def test_ask_still_maps_exhausted_chat_retries_to_the_same_503(client, auth_headers, sleeps, monkeypatch):
+def test_ask_still_maps_exhausted_chat_retries_to_the_same_503(memory_db, client, auth_headers, sleeps, monkeypatch):
     monkeypatch.setattr("app.main.retrieve_and_format", lambda **kwargs: ([], []))
     calls = _failing_gemini(monkeypatch, 500)
     r = client.post("/ask", json={"question": "How do I fail over the database?"}, headers=auth_headers)

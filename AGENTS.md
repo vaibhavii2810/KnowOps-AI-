@@ -44,7 +44,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 8 | Mock CRM / tickets | Vaishnavi | ✅ Done |
 | 9 | Automation (cron + n8n) | Vaishnavi | ✅ Done — all 5 chunks live; scheduled cron run confirmed in the Vercel dashboard (reported by Vaishnavi, 2026-11-03) |
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
-| 11 | Testing & QA | Vaishnavi | 🟡 Partial — 11.1–11.3 done (offline fakes + guard, D-038; `live` marker + auth/RAG-ranking/dispatch unit tests, D-039; mocked `/ask` round trip); 47 default-run tests still reach Postgres (11.4), no CI (11.5) |
+| 11 | Testing & QA | Vaishnavi | 🟡 Partial — 11.1–11.4 done (offline fakes + guard, D-038; `live` marker + unit tests, D-039; mocked `/ask` round trip; edge cases + `MemoryDB`, D-040 — plain `pytest` now makes zero real calls); no CI yet (11.5) |
 | 12 | Logging & monitoring | Vaishnavi | ⬜ Not started |
 | 13 | AI eval harness | Vaishnavi | 🟡 Partial — `tests/eval_rag.py` exists |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
@@ -209,7 +209,7 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   with the limiter on; the 5 injection cases are blocked by the guardrails even for a fully hijacked model
   (D-034). Residual risk is recorded there: the detector is a heuristic.
 
-**Phase 11 — Testing & QA** 🟡 in progress (11.1–11.3 done)
+**Phase 11 — Testing & QA** 🟡 in progress (11.1–11.4 done)
 - 11.1 Done. `tests/conftest.py` now has `fake_gemini`, `fake_db` and `no_network` (D-038). The fakes replace
   `genai.Client` and `psycopg.connect` at the root, so `get_client()` in `app/llm.py` *and* `app/agent.py`,
   `get_conn()` and the rate limiter all get them without per-module patching. `no_network` blocks non-loopback sockets
@@ -249,11 +249,24 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
 - Found and fixed on the way: the 11.2 `AGENTS.md` text quoted the fake URL it was describing, so the hygiene scanner
   flagged `AGENTS.md`; reworded and amended the unpushed 11.2 commit (now `cd8d639`). Both slips passed a full run
   because `tests/test_secrets_hygiene.py` scans only tracked files — run it after `git add`, before committing.
-- Still to do: 11.4 edge cases (empty KB) and move the 47 default-run tests that
-  still reach Postgres onto the fakes or `live` — `test_rate_limit` 24, `test_crm` 9, `test_input_validation` 5,
-  `test_retry` 3, `test_api_v2_5` 2, `test_auth_protection` 2 (also network), `test_ingest` 1, `test_prompt_injection`
-  1 (Gemini); 11.5 GitHub Actions (also: `test_api_cron_reindex_requires_cron_secret_in_every_environment` asserts
-  `CRON_SECRET` is set in `.env`, which CI won't have).
+- 11.4 Done. **Edge cases** (new `tests/test_edge_cases.py`, 47 tests): empty knowledge base — `/health` 200 with zero
+  counts, `/ask` answers with no sources and the model is told "No context available." while the turn is still saved,
+  `retrieve()` and the agent's runbook lookup return nothing; malformed JSON (truncated, array, bare string, number,
+  `null`, trailing garbage) on all 5 JSON routes is a 422 on `body` before any DB or Gemini work; an expired JWT gets the
+  exact 401 on all 12 protected routes with the limiter on and nothing counted, plus a completeness test that fails if a
+  route is added without being listed as protected or deliberately open. **No more real calls**: new `memory_db` keeps the
+  app's tables in memory (vector search, CRM ordering, cascades, the limiter's upsert) and fails a test that sends a
+  statement it doesn't understand; `db_backend` runs each DB test on it and, as a `live` variant, on real Postgres (D-040).
+  The 47 tests that reached Postgres now use it; two CRM tests had relied on leftover rows in the live DB and now create
+  their own; the 2 live-model injection tests are `live`. A per-test connection inventory of the default run records
+  **zero** real network or Postgres connections: 301 passed in 1.8s (was 2m19s). `pytest -m live`: 109/109 pass against real Neon + Gemini, so `MemoryDB` matches Postgres on every
+  test run on both (a first live run had 1 failure + 2 errors, all a Neon connection dropped mid-statement; they passed on
+  re-run and a second full run was clean — statements are not retried by design, D-032). Mutation checks: removing
+  auth from `/tickets/stats` and a blank context block on an empty KB each fail; a statement `MemoryDB` has never seen
+  fails at teardown with what to add; a changed statement that keeps its fragment (e.g. history `ORDER BY` flipped) is
+  **not** caught offline — only the `live` variant can (D-040).
+- Still to do: 11.5 GitHub Actions running `pytest` on every push. `test_api_cron_reindex_requires_cron_secret_in_every_environment`
+  asserts `CRON_SECRET` is set in `.env`, which CI won't have.
 
 ## Phase log
 
@@ -284,7 +297,8 @@ Append one line per finished phase (newest last).
 - **Two Neon databases exist:** the Vercel app's `DATABASE_URL` points at a different Neon database from the one
   first used in a local `.env` (D-024). Re-ingest after any `data/docs/` or chunker change into **each** one you
   care about: `DATABASE_URL='<url>' python scripts/ingest.py --reset --quiet` (the env var overrides `.env`).
-  A local `.env` pointing at the live database means `pytest` writes test tickets into it.
+  A local `.env` pointing at the live database means `pytest -m live` writes test tickets into it (plain `pytest` no
+  longer touches any database, D-040).
 - `GEMINI_API_KEY` must exist in Vercel for **Preview** as well as Production (a missing key shows as a 503
   "No API key was provided" from `/ask`); variables only apply to new deployments.
 
@@ -369,8 +383,9 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 ## Working here
 
 - `python -m venv .venv` → `pip install -r requirements.txt` → `uvicorn app.main:app --reload`
-- Tests: `pytest` (offline set; tests marked `live` are skipped). `pytest -m live` runs the ones that need the real
-  Neon DB and Gemini (D-039). New tests should use the `fake_gemini` / `fake_db` fixtures (offline, D-038).
+- Tests: `pytest` (offline, ~2s; tests marked `live` are skipped). `pytest -m live` runs the ones that need the real
+  Neon DB and Gemini, including the real-Postgres variant of every `db_backend` test (D-039, D-040). New tests should use
+  `fake_gemini`, `fake_db` or `memory_db` (D-038, D-040); a test needing a new SQL statement must add it to `MemoryDB`.
 - Never commit `.env` or real keys.
 
 ## Rules for every code change
