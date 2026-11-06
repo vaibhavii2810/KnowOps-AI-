@@ -703,6 +703,8 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   production, which sets `JWT_SECRET` in Vercel.
 - **Revisit if:** A dependency release breaks CI (then pin), CI gets slow, or the team wants live checks before every
   deploy (then a separate, manually triggered `live` workflow with secrets restricted to `main`).
+- **Partly superseded by D-044** (2026-11-06): the "unpinned dependencies" tradeoff — an unpinned release broke
+  production, not CI, so dependencies are now pinned.
 
 ### D-042 · Structured JSON logs on stdout, one `request` line per request, correlated by a request id (Phase 12.1)
 - **Date · by · source:** 2026-11-06 · Vaishnavi (with Claude) · Build guide (12.1: "structured JSON logging (request id,
@@ -760,3 +762,30 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   guess pending Phase 12.3's look at real Vercel logs.
 - **Revisit if:** Phase 12.3 shows Vercel truncating these lines (lower the budget) or showing much more (raise it), or
   traces need keeping longer than Vercel's 1-hour Hobby retention.
+
+### D-044 · Pin every dependency to an exact, live-tested version (hotfix found by Phase 12.3)
+- **Date · by · source:** 2026-11-06 · Vaishnavi (with Claude) · Agent (production outage found while verifying 12.3)
+- **Decision:** `requirements.txt` pins the ten top-level packages to the exact versions in the local venv that passed
+  `pytest -m live` against real Neon + Gemini (`google-genai==2.28.0`, `fastapi==0.142.2`, …). Upgrades are deliberate:
+  bump a version, run `pytest` and `pytest -m live`, then deploy. `.env.example`'s `GEMINI_CHAT_MODEL` default changes
+  from the retired `gemini-2.5-flash` to `gemini-flash-lite-latest`, matching `app/config.py` and both environments.
+  Partly supersedes D-041's "unpinned dependencies" tradeoff.
+- **Why:** The first real request in Phase 12.3 logged `agent_run outcome=generation_error error_type=ClientError` —
+  `404 NOT_FOUND: models/gemini-flash-lite-latest is not found for API version v1` — and `/ask` returned 503 on
+  production. `google-genai` 3.0.0 was released that day; every fresh Vercel build installed it, and it calls Gemini's
+  stable `v1` API, where the `-latest` alias doesn't exist (2.28.0 uses `v1beta`, where it does — the same model name
+  works there, checked with the real API). CI stayed green because it is offline by design (D-041): the fakes never
+  reach Google, so no CI run could see this. The agent answered HTTP 200 with a fallback text, so without 12.2's
+  `agent_run` event the outage would have looked like a normal answer. Verified: a fresh Python 3.12 venv installed
+  from the pinned file gets 2.28.0, uses `v1beta`, and a real `chat_completion` call succeeds; the offline suite passes
+  on it (324).
+- **Alternatives considered:** `google-genai<3` (still lets a 2.x minor change behaviour unseen); forcing
+  `api_version="v1beta"` in `get_client()` (works around this one symptom, but the next major release could change
+  something else); switching to a model name that exists on `v1` (untested against our prompts and JSON mode, and it
+  would still leave builds unreproducible); a lock file with every transitive dependency (more reproducible still —
+  a candidate if a transitive package ever breaks us; for now top-level pins).
+- **Tradeoff accepted:** No automatic security or bug-fix updates; someone has to bump versions on purpose. Transitive
+  dependencies (e.g. `pydantic`, `starlette`) are still resolved freshly within the pinned packages' ranges. The deeper
+  gap stays: nothing checks the *deployed* app against real Gemini automatically — that is the Phase 14 smoke test.
+- **Revisit if:** A transitive dependency breaks a build (move to a full lock file), or a pinned package has a security
+  fix to take.

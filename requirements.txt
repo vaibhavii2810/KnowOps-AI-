@@ -1,10 +1,14 @@
-fastapi
-uvicorn[standard]
-pydantic-settings
-psycopg[binary]
-pgvector
-google-genai
-pyjwt
-python-dotenv
-pytest
-httpx
+# Exact versions (D-044): these are the versions that passed `pytest -m live` against real Neon + Gemini.
+# Unpinned, a fresh Vercel build took google-genai 3.0.0 on its release day (2026-11-06); it calls Gemini's
+# v1 API, where our model alias doesn't exist, and /ask went down with a 404. Upgrade deliberately: bump a
+# version, run `pytest` and `pytest -m live`, then deploy.
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+pydantic-settings==2.15.0
+psycopg[binary]==3.3.6
+pgvector==0.5.0
+google-genai==2.28.0
+pyjwt==2.15.1
+python-dotenv==1.2.4
+pytest==9.1.1
+httpx==0.28.1

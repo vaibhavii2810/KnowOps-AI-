@@ -45,7 +45,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 9 | Automation (cron + n8n) | Vaishnavi | ✅ Done — all 5 chunks live; scheduled cron run confirmed in the Vercel dashboard (reported by Vaishnavi, 2026-11-03) |
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
 | 11 | Testing & QA | Vaishnavi | ✅ Done — plain `pytest` makes zero real calls; green on GitHub Actions (3.11 + 3.12) for `main` and `sprint-2` at `6111862` (D-038–D-041) |
-| 12 | Logging & monitoring | Vaishnavi | 🟡 Partial — 12.1–12.2 done (JSON logs + request id, D-042; `agent_run` event with the trace on failure, D-043); 12.3 Vercel check, 12.4 `/metrics` (stretch) to do |
+| 12 | Logging & monitoring | Vaishnavi | 🟡 Partial — 12.1–12.3 done (JSON logs + request id, D-042; `agent_run` trace, D-043; checked in Vercel's runtime logs — which exposed a production outage, fixed by pinning deps, D-044, deploy pending); 12.4 `/metrics` (stretch) to do |
 | 13 | AI eval harness | Vaishnavi | 🟡 Partial — `tests/eval_rag.py` exists |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
 | 15 | Docs & wrap-up | Vaishnavi | ⬜ Not started |
@@ -279,7 +279,7 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
 - Pushing needed a GitHub token with the `workflow` scope (GitHub refuses workflow-file changes without it); the
   first push was rejected until the token was updated.
 
-**Phase 12 — Logging & monitoring** 🟡 in progress (12.1–12.2 done)
+**Phase 12 — Logging & monitoring** 🟡 in progress (12.1–12.3 done)
 - 12.1 Done. New `app/logs.py` (D-042): every log line is one JSON object on stdout (`ts`, `level`, `event`,
   `request_id`, fields) — what Vercel collects as runtime logs. `RequestLogMiddleware` (outermost) gives each request an
   id (a valid inbound `X-Request-ID` is kept, anything else replaced), returns it as `X-Request-ID`, and logs one
@@ -306,6 +306,20 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   Also fixed a 12.1 gap: the JSON handler was only set up by `app.main`, so `python scripts/ingest.py` (which never
   loads it) would have shown retry notices as a bare `retrying`; its `main()` now calls `configure_logging()`.
   324 passed, 109 live deselected.
+- 12.3 Done. Deployed `b19e654` (CI green on 3.11 + 3.12, both branches), then one real `/agent/chat` request on
+  `knowops-ai.vercel.app` with `X-Request-ID: kops-12-3-1bfd6d939735` (echoed back). In Vercel's Production runtime logs
+  (via the Vercel MCP `get_runtime_logs`, `stream=stdout`) both lines appear as JSON under that id: the `request` line
+  (`/agent/chat` 200, 513.6 ms, user `admin`, `vercel_id`) and an `agent_run` warning with its trace. The guide's
+  "Done when" — seeing exactly what the agent did from one request in Vercel's logs — holds. Notes: Vercel's full-text
+  `query` did not match the hyphenated request id (listing recent logs did); the Gemini SDK also writes two plain-text
+  lines per call (`AFC is enabled…`, httpx's `HTTP Request: POST …` — no key in it).
+- **Found by 12.3: production `/ask` and the agent were down** (D-044). The `agent_run` line said
+  `outcome=generation_error`, `404 NOT_FOUND: models/gemini-flash-lite-latest is not found for API version v1`, and `/ask`
+  returned 503. Cause: `google-genai` 3.0.0, released 2026-11-06, was installed by every fresh Vercel build (unpinned
+  `requirements.txt`) and calls `v1`, where the `-latest` alias doesn't exist; 2.28.0 uses `v1beta`. CI was green
+  because it is offline by design. The agent had answered HTTP 200 with fallback text, so only the new log showed it.
+  Fix: `requirements.txt` pinned to the live-tested versions; verified in a fresh 3.12 venv (2.28.0, `v1beta`, real
+  `chat_completion` works, 324 offline tests pass). **Deploy pending** — then re-check `/ask` and `/agent/chat` live.
 
 ## Phase log
 
@@ -411,6 +425,8 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   (a free guess; optional to change). If an env var is ever missing, `app/config.py` silently falls back to
   `admin`/`admin` and `jwt_secret="dev-secret"` (D-007). The per-IP login limit (5/min, 30/hour, D-037) does not stop a
   distributed attack from many addresses, and trusts the client-IP headers only because Vercel sets them.
+- **Production `/ask` + agent down until the D-044 pin is deployed (2026-11-06):** `google-genai` 3.0.0 → Gemini `v1` → 404
+  for `gemini-flash-lite-latest`. Fixed in `requirements.txt`; delete this entry once production answers again.
 - **`get_conn()` latency:** each call costs ~1.2s against the remote Neon DB, ~0.8s of it `register_vector`, which only
   `scripts/ingest.py` needs (found while measuring 10.5). `/ask` pays it 3×. A `vectors=False` default would cut ~2.4s
   from `/ask`; not done.
