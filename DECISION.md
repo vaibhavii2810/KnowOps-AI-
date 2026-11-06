@@ -675,3 +675,31 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   now create the tickets they assert on.
 - **Revisit if:** The app's SQL changes often enough that keeping `MemoryDB` in step is a chore, or a bug reaches
   production that the fake hid — then move the DB tests to a Postgres service container in CI.
+
+### D-041 · GitHub Actions runs the offline suite on every push, with no secrets, on Python 3.11 and 3.12 (Phase 11.5)
+- **Date · by · source:** 2026-11-06 · Vaishnavi (with Claude) · Build guide (11.5: "a GitHub Actions workflow that runs
+  `pytest` on every push")
+- **Decision:** `.github/workflows/tests.yml` runs plain `pytest` (so `live` tests stay excluded via `pytest.ini`) on
+  every push and pull request, on `ubuntu-latest`, Python 3.11 and 3.12. It sets **no secrets or env vars**, has
+  read-only `contents` permission, cancels superseded runs on the same ref, and checks out **full history**
+  (`fetch-depth: 0`). `pytest.ini` gains `pythonpath = .`. The cron-secret test now sets its own `CRON_SECRET`, and an
+  offline twin of the live `/cron/reindex` test ingests the real `data/docs/` into `memory_db`; `fake_gemini` zeroes
+  ingestion's 0.5 s free-tier pause.
+- **Why:** No secrets proves the "no real API calls" half of the Phase 11 "Done when" on a machine with nothing to
+  connect to, and means a fork or PR can't exfiltrate anything. 3.11 is the team's local venv and 3.12 is Vercel's Python
+  runtime, so both are covered. Full history matters because `tests/test_secrets_hygiene.py` runs `git log --all`; on
+  the default shallow clone it would scan one commit and pass without checking anything. A local CI simulation (fresh
+  clone, no `.env`, `env -i`, fresh 3.12 venv with the latest dependencies) found that plain `pytest` could not
+  `import app` — local runs only worked through `python -m pytest`, which adds the current directory itself — hence
+  `pythonpath = .`. The cron test had asserted that `.env` contains `CRON_SECRET`, which CI never has; the reindex twin
+  went from 40 s to 0.05 s once the pacing meant for real Gemini was skipped.
+- **Alternatives considered:** Running `live` tests in CI with repository secrets (spends Gemini quota and writes to the
+  live database on every push, and leaks are possible from PR workflows); a Postgres service container (deferred, see
+  D-040); pinning dependency versions (not done: `requirements.txt` is unpinned, and CI installing the latest each run
+  surfaces upstream breakage early — but it can also turn CI red with no code change).
+- **Tradeoff accepted:** CI never exercises real Neon/Gemini — `pytest -m live` stays a manual step (a candidate for the
+  Phase 14 smoke test). Unpinned dependencies can break CI on an upstream release. In CI the app falls back to the
+  default `jwt_secret="dev-secret"` (D-007), so PyJWT emits `InsecureKeyLengthWarning`s — expected there, irrelevant to
+  production, which sets `JWT_SECRET` in Vercel.
+- **Revisit if:** A dependency release breaks CI (then pin), CI gets slow, or the team wants live checks before every
+  deploy (then a separate, manually triggered `live` workflow with secrets restricted to `main`).

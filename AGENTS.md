@@ -44,7 +44,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 8 | Mock CRM / tickets | Vaishnavi | ✅ Done |
 | 9 | Automation (cron + n8n) | Vaishnavi | ✅ Done — all 5 chunks live; scheduled cron run confirmed in the Vercel dashboard (reported by Vaishnavi, 2026-11-03) |
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
-| 11 | Testing & QA | Vaishnavi | 🟡 Partial — 11.1–11.4 done (offline fakes + guard, D-038; `live` marker + unit tests, D-039; mocked `/ask` round trip; edge cases + `MemoryDB`, D-040 — plain `pytest` now makes zero real calls); no CI yet (11.5) |
+| 11 | Testing & QA | Vaishnavi | 🟡 Partial — all 5 chunks code-complete (D-038–D-041); plain `pytest` makes zero real calls and passes in a local CI simulation; a green run on GitHub Actions (part of the guide's "Done when") is pending the first push |
 | 12 | Logging & monitoring | Vaishnavi | ⬜ Not started |
 | 13 | AI eval harness | Vaishnavi | 🟡 Partial — `tests/eval_rag.py` exists |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
@@ -209,7 +209,7 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   with the limiter on; the 5 injection cases are blocked by the guardrails even for a fully hijacked model
   (D-034). Residual risk is recorded there: the detector is a heuristic.
 
-**Phase 11 — Testing & QA** 🟡 in progress (11.1–11.4 done)
+**Phase 11 — Testing & QA** 🟡 code-complete, one item outstanding
 - 11.1 Done. `tests/conftest.py` now has `fake_gemini`, `fake_db` and `no_network` (D-038). The fakes replace
   `genai.Client` and `psycopg.connect` at the root, so `get_client()` in `app/llm.py` *and* `app/agent.py`,
   `get_conn()` and the rate limiter all get them without per-module patching. `no_network` blocks non-loopback sockets
@@ -265,8 +265,15 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   auth from `/tickets/stats` and a blank context block on an empty KB each fail; a statement `MemoryDB` has never seen
   fails at teardown with what to add; a changed statement that keeps its fragment (e.g. history `ORDER BY` flipped) is
   **not** caught offline — only the `live` variant can (D-040).
-- Still to do: 11.5 GitHub Actions running `pytest` on every push. `test_api_cron_reindex_requires_cron_secret_in_every_environment`
-  asserts `CRON_SECRET` is set in `.env`, which CI won't have.
+- 11.5 Done (code). New `.github/workflows/tests.yml`: plain `pytest` on every push and PR, Python 3.11 + 3.12, **no secrets**,
+  read-only permissions, full git history so the 10.4 history scan really scans (D-041). Found by simulating CI locally
+  (fresh clone with no `.env`, `env -i`, fresh 3.12 venv with the latest dependencies): plain `pytest` couldn't `import app`
+  — only `python -m pytest` worked — fixed with `pythonpath = .` in `pytest.ini`. The cron-secret test now sets its own
+  secret instead of asserting `.env` has one; a new offline twin of the live `/cron/reindex` test ingests the real
+  `data/docs/` into `memory_db` and checks the second run skips every file (40 s → 0.05 s once `fake_gemini` zeroes the
+  free-tier pause). Simulated CI: 301 passed, 1 skipped (needs a `.env`), 109 live deselected, on both versions.
+- **Outstanding:** the guide's "Done when" says `pytest` passes *in CI* — that needs the first push to GitHub and a green
+  run in the repo's Actions tab. Then mark Phase 11 ✅.
 
 ## Phase log
 
@@ -351,7 +358,8 @@ data/docs/  runbook knowledge base (markdown)
 static/     web console (index.html, css, js)
 n8n/        incident_triage_workflow.json (alert → ticket → triage → Slack) ·
             workflow.json (escalate_to_human → Slack, Phase 9.4/9.5, D-031)
-tests/      pytest suite + eval_rag.py
+tests/      pytest suite + eval_rag.py (conftest.py: offline fakes, MemoryDB; pytest.ini at repo root)
+.github/    workflows/tests.yml — CI: plain pytest on every push/PR, Python 3.11 + 3.12 (Phase 11.5, D-041)
 ```
 
 ## Decisions

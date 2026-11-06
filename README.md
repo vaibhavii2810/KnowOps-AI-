@@ -1,5 +1,7 @@
 # AI Support & Knowledge Ops Platform (KnowOps AI)
 
+[![tests](https://github.com/vaibhavii2810/KnowOps-AI-/actions/workflows/tests.yml/badge.svg)](https://github.com/vaibhavii2810/KnowOps-AI-/actions/workflows/tests.yml)
+
 An AI-powered technical support backend for DevOps/SRE teams. It answers support questions from a
 runbook knowledge base with citations (RAG), and runs an agent that can search the knowledge base,
 create, check and triage incident tickets, and escalate to a human.

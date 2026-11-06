@@ -15,6 +15,7 @@ import pytest
 from app import db, llm, ratelimit
 from app.auth import create_access_token
 from app.config import settings
+from scripts import ingest
 
 
 @pytest.fixture
@@ -143,6 +144,7 @@ def fake_gemini(monkeypatch, no_network):
     """
     fake = FakeGemini()
     monkeypatch.setattr(llm.genai, "Client", lambda **kwargs: fake)
+    monkeypatch.setattr(ingest, "EMBED_SLEEP_SECONDS", 0)  # free-tier pacing; pointless against a fake
     llm.get_client.cache_clear()
     yield fake
     llm.get_client.cache_clear()  # don't leave the fake cached for a later test

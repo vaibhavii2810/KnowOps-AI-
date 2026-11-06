@@ -311,18 +311,36 @@ def test_run_agent_executes_tool_call_bundled_with_is_final(monkeypatch):
     assert updated["resolution_notes"] == "Fixed via regression test."
 
 
-def test_api_cron_reindex_requires_cron_secret_in_every_environment(client, no_network):
+def test_api_cron_reindex_requires_cron_secret_in_every_environment(client, no_network, monkeypatch):
     """
     Phase 9.2 (D-030): GET /cron/reindex must reject a missing or wrong CRON_SECRET
     whenever one is configured, in every environment — not just "production" (the old
     D-020 behavior left Preview deployments open to anyone, which mattered once this
     endpoint actually cost real Gemini calls and DB writes, Phase 9.1).
+    The secret is set here rather than read from .env, so the test means the same in CI (Phase 11.5).
     """
-    assert settings.cron_secret, "local .env must have CRON_SECRET set for this test to be meaningful"
+    monkeypatch.setattr(settings, "cron_secret", "test-cron-secret")
     assert client.get("/cron/reindex").status_code == 401  # no header
     assert client.get(
         "/cron/reindex", headers={"Authorization": "Bearer wrong-secret"}
     ).status_code == 401
+
+
+def test_api_cron_reindex_with_the_right_secret_ingests_then_skips_unchanged_files(client, fake_gemini, memory_db, monkeypatch):
+    """Offline twin of the live test below (Phase 11.5): the real data/docs/ runbooks go into MemoryDB with
+    fake embeddings; a second run finds every file unchanged by content hash and embeds nothing."""
+    monkeypatch.setattr(settings, "cron_secret", "test-cron-secret")
+    headers = {"Authorization": "Bearer test-cron-secret"}
+
+    first = client.get("/cron/reindex", headers=headers).json()
+    assert first["status"] == "success"
+    assert first["documents_total"] >= 5 and first["documents_reindexed"] == first["documents_total"]
+    assert first["chunks_embedded"] == len(memory_db.chunks) == len(fake_gemini.embed_calls) > 0
+
+    second = client.get("/cron/reindex", headers=headers).json()
+    assert second["documents_unchanged"] == second["documents_total"] == first["documents_total"]
+    assert second["chunks_embedded"] == 0
+    assert len(fake_gemini.embed_calls) == first["chunks_embedded"]  # no new Gemini calls
 
 
 @pytest.mark.live
