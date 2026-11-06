@@ -762,6 +762,9 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   guess pending Phase 12.3's look at real Vercel logs.
 - **Revisit if:** Phase 12.3 shows Vercel truncating these lines (lower the budget) or showing much more (raise it), or
   traces need keeping longer than Vercel's 1-hour Hobby retention.
+- **Checked 2026-11-06 (12.3 follow-up):** a live `agent_run` line *displayed* as `… (truncated)` through the Vercel MCP
+  log tool, but Vercel stored it whole: a full-text search for `synthesized`, a word only in the line's last step, matched
+  it (a nonsense word matched nothing). The cut is the tool's display; the budget stays as it is.
 
 ### D-044 · Pin every dependency to an exact, live-tested version (hotfix found by Phase 12.3)
 - **Date · by · source:** 2026-11-06 · Vaishnavi (with Claude) · Agent (production outage found while verifying 12.3)
@@ -789,3 +792,29 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   gap stays: nothing checks the *deployed* app against real Gemini automatically — that is the Phase 14 smoke test.
 - **Revisit if:** A transitive dependency breaks a build (move to a full lock file), or a pinned package has a security
   fix to take.
+
+### D-045 · A capped run's summary is asked for in plain text; every Gemini request times out, and a slow call is not retried (Phase 12 follow-up)
+- **Date · by · source:** 2026-11-06 · Vaishnavi (with Claude) · Agent (both seen in Phase 12.3's live logs)
+- **Decision:** (1) The summary call after a capped agent run no longer reuses the full conversation history, whose tool
+  list ends "Format your thought and next action as JSON". It gets `Task: …` + the step transcript + `SUMMARY_INSTRUCTION`
+  (plain text, Markdown fine, no JSON), and its reply goes through `plain_text_answer()`, which unwraps a JSON object
+  (bare or in a code fence) to its `final_answer` (or `thought`) and leaves every other text alone. (2) `get_client()`
+  sets `HttpOptions(timeout=…)` from the new `GEMINI_TIMEOUT_SECONDS` (25), and `retry_call` gains `budget_s`: no new
+  attempt once that many seconds have passed since the first began, backoff included. All four Gemini call sites pass the
+  timeout as their budget; the Postgres connect is unchanged. Spending the budget logs `retry_budget_spent`.
+- **Why:** Live, a capped run's answer to the user began `` ```json {"thought": … `` — the model followed the JSON
+  instruction it was handed. Plain-text instructions fix the cause; the unwrap guards against the model doing it anyway.
+  Live, one `/ask` took 96.7 s, ~83 s in a single Gemini call, because no request had a timeout. A timeout alone would not
+  help: the SDK raises `httpx.ReadTimeout`, which `retry_call` treats as transient, so a slow model would be retried up to
+  4 × 25 s. With the budget, a timed-out call fails once (`/ask` → its existing 503, "The read operation timed out", after
+  ~25 s), while fast 429/5xx failures still get all their retries. Worst case per call stays under ~2 × the timeout.
+  Checked against the real API: the SDK's timeout is in milliseconds; normal embed and chat calls take ~0.5 s and ~1.1 s.
+- **Alternatives considered:** A separate summary system prompt only (the JSON instruction is in the *history*, not the
+  system prompt — it would not have helped); JSON mode for the summary too, then extracting `final_answer` (works, but the
+  summary is prose by nature); counting a timeout as non-transient (then a brief network blip gets no retry either);
+  a global request deadline across all calls in a request (more plumbing; per-call budgets bound it well enough).
+- **Tradeoff accepted:** A genuinely slow but successful Gemini answer (> 25 s) now becomes an error — the user gets a 503 to
+  retry instead of a very long wait. `/ask` makes two Gemini calls, so its worst case is still ~2 × 2 × 25 s.
+  `plain_text_answer` keeps a JSON reply that has neither `final_answer` nor `thought` as raw text.
+- **Revisit if:** Logs show many `retry_budget_spent` events on calls that would have succeeded (raise the timeout), or a
+  capped run's answer still comes back structured.

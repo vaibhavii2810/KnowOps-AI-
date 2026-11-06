@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import random
 import time
-from typing import Callable, TypeVar
+from typing import Callable, Optional, TypeVar
 
 import httpx
 import psycopg
@@ -51,12 +51,18 @@ def retry_call(
     attempts: int = DEFAULT_ATTEMPTS,
     base_delay: float = DEFAULT_BASE_DELAY,
     max_delay: float = DEFAULT_MAX_DELAY,
+    budget_s: Optional[float] = None,
 ) -> T:
     """
     Call fn(); on an error that `is_transient` accepts, wait (exponential backoff + jitter)
     and try again, up to `attempts` total tries. A non-transient error, or the last attempt's
     error, is re-raised unchanged so callers keep their existing error handling.
+
+    budget_s (D-045): don't start another attempt once that many seconds have passed since the first
+    began (backoff included). Gemini calls pass their per-attempt timeout, so a call that timed out
+    is not retried into a multi-minute wait, while fast 429/5xx failures still get their retries.
     """
+    started = time.monotonic()
     for attempt in range(1, attempts + 1):
         try:
             return fn()
@@ -64,6 +70,13 @@ def retry_call(
             if attempt == attempts or not is_transient(exc):
                 raise
             delay = min(max_delay, base_delay * 2 ** (attempt - 1)) * random.uniform(0.5, 1.0)
+            elapsed = time.monotonic() - started
+            if budget_s is not None and elapsed + delay > budget_s:
+                log_event(
+                    "retry_budget_spent", "warning", call=label, attempt=attempt, elapsed_s=round(elapsed, 1),
+                    budget_s=budget_s, error_type=type(exc).__name__,
+                )
+                raise
             log_event(
                 "retrying", "warning", call=label, attempt=attempt, attempts=attempts,
                 delay_s=round(delay, 1), error_type=type(exc).__name__, error=str(exc)[:120],

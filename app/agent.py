@@ -12,6 +12,7 @@ This module provides:
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any, Callable, Optional
 
@@ -303,6 +304,37 @@ CRITICAL RULES:
 """
 
 
+SUMMARY_INSTRUCTION = (
+    "Write the final SRE incident resolution report for the operator, based on all the observations above. "
+    "Answer in plain text (Markdown is fine). Do not answer in JSON and do not wrap the whole answer in a code block."
+)
+
+_WHOLE_ANSWER_CODE_FENCE = re.compile(r"^```[a-zA-Z]*\s*\n(.*?)\n?```\s*$", re.DOTALL)
+
+
+def plain_text_answer(text: Optional[str]) -> str:
+    """
+    The summary call's text as something to show a person. If the model still answered with a JSON object (bare
+    or in a ``` fence) — what it did when the summary prompt carried the agent's JSON-format instructions (D-045) —
+    return its final_answer (or thought). Any other text, Markdown with code blocks included, is returned as is.
+    """
+    if not text:
+        return ""
+    stripped = text.strip()
+    fenced = _WHOLE_ANSWER_CODE_FENCE.match(stripped)
+    candidate = fenced.group(1).strip() if fenced else stripped
+    if candidate.startswith("{"):
+        try:
+            data = json.loads(candidate)
+        except ValueError:
+            return text
+        if isinstance(data, dict):
+            answer = data.get("final_answer") or data.get("thought")
+            if isinstance(answer, str) and answer.strip():
+                return answer.strip()
+    return text
+
+
 # ---------------------------------------------------------------------------
 # ReAct Orchestrator
 # ---------------------------------------------------------------------------
@@ -433,7 +465,11 @@ Format your thought and next action as JSON:
 When you have gathered enough information and resolved or completed the task, set "is_final": true and provide your comprehensive resolution in "final_answer".
 """
 
-    conversation_history = f"Task: {task_prompt}\n\n{tools_description}\n"
+    task_header = f"Task: {task_prompt}\n"
+    conversation_history = f"{task_header}\n{tools_description}\n"
+    # The steps so far without the JSON-format instructions above, for the summary call: given the full history,
+    # the model obeyed "Format your … as JSON" and the user got raw JSON as the answer (seen live, D-045).
+    transcript = ""
 
     for step_num in range(1, max_steps + 1):
         prompt = (
@@ -461,6 +497,7 @@ When you have gathered enough information and resolved or completed the task, se
                     ),
                     is_transient=is_transient_gemini_error,
                     label="gemini agent step",
+                    budget_s=settings.gemini_timeout_seconds,
                 )
                 raw_text = resp.text
                 if raw_text:
@@ -546,11 +583,13 @@ When you have gathered enough information and resolved or completed the task, se
         trace.append(step_record)
 
         # Append to context for next step
-        conversation_history += (
+        step_text = (
             f"\nThought {step_num}: {thought}\n"
             f"Action {step_num}: {action}({json.dumps(args)})\n"
             f"Observation {step_num}: {fence(observation, 'tool: ' + action)}\n"
         )
+        conversation_history += step_text
+        transcript += step_text
     else:
         run["outcome"] = "max_steps"  # the loop ran out of steps without a final answer
 
@@ -559,8 +598,8 @@ When you have gathered enough information and resolved or completed the task, se
     # final_answer is present but blank — e.g. a malformed Gemini response — and silently return "".)
     if not any(s.get("final_answer") for s in trace):
         summary_prompt = (
-            f"{conversation_history}\n\n"
-            "Provide the final SRE incident resolution report based on all observations."
+            f"{task_header}{transcript}\n\n"
+            f"{SUMMARY_INSTRUCTION}"
         )
         try:
             final_resp = retry_call(
@@ -571,8 +610,9 @@ When you have gathered enough information and resolved or completed the task, se
                 ),
                 is_transient=is_transient_gemini_error,
                 label="gemini agent summary",
+                budget_s=settings.gemini_timeout_seconds,
             )
-            final_text = final_resp.text or "Incident investigation concluded."
+            final_text = plain_text_answer(final_resp.text) or "Incident investigation concluded."
         except Exception as e:
             run["summary_error_type"] = type(e).__name__
             final_text = f"Investigation completed. Steps executed: {len(trace)}."

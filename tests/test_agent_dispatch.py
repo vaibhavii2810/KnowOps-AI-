@@ -150,7 +150,7 @@ def test_max_steps_caps_tool_calls_then_one_summary_call(max_steps, spies, fake_
     assert [c[1]["query"] for c in spies["lookup_runbook"].calls] == [f"try {i}" for i in range(max_steps)]
     assert len(fake_gemini.chat_calls) == max_steps + 1  # every step, plus the synthesis call
     summary_call = fake_gemini.chat_calls[-1]
-    assert "Provide the final SRE incident resolution report" in summary_call["contents"]
+    assert "Write the final SRE incident resolution report" in summary_call["contents"]
     assert "response_mime_type" not in summary_call["config"]
     assert result["total_steps"] == max_steps + 1
     assert result["resolution"] == "Summary after the cap."
@@ -169,3 +169,42 @@ def test_later_prompts_carry_the_whole_history(spies, fake_gemini):
     assert "Task: Investigate ticket 7." in third_prompt
     assert third_prompt.index("Thought 1: first look") < third_prompt.index("Thought 2: then diagnose")
     assert "get_ticket observation" in third_prompt and "run_system_diagnostics observation" in third_prompt
+
+
+# --- Phase 12 follow-up (D-045): the summary after a capped run must be plain text --------------------------
+
+def test_the_summary_prompt_drops_the_json_format_instructions_but_keeps_the_task_and_steps(spies, fake_gemini):
+    spies["get_ticket"].result = "Ticket #7: database is down"
+    fake_gemini.reply(step("get_ticket", {"ticket_id": 7}), "Summary.")
+
+    run_agent("Investigate ticket 7.", max_steps=1)
+
+    summary = fake_gemini.chat_calls[-1]["contents"]
+    assert "Format your thought and next action as JSON" in fake_gemini.chat_calls[0]["contents"]  # steps still use it
+    assert "Format your thought and next action as JSON" not in summary
+    assert '"is_final"' not in summary
+    assert summary.startswith("Task: Investigate ticket 7.")
+    assert "Observation 1:" in summary and "Ticket #7: database is down" in summary
+    assert "Do not answer in JSON" in summary
+
+
+@pytest.mark.parametrize("reply,expected", [
+    ('```json\n{"thought": "Diagnosed.", "final_answer": "Restart the worker pod."}\n```', "Restart the worker pod."),
+    ('{"thought": "Diagnosed.", "final_answer": "Restart the worker pod."}', "Restart the worker pod."),
+    ('```\n{"thought": "Only a thought."}\n```', "Only a thought."),
+])
+def test_a_json_wrapped_summary_is_unwrapped_to_its_answer(reply, expected, spies, fake_gemini):
+    fake_gemini.reply(step("get_ticket", {"ticket_id": 7}), reply)
+    assert run_agent("Investigate ticket 7.", max_steps=1)["resolution"] == expected
+
+
+@pytest.mark.parametrize("text", [
+    "Restart the worker pod.",
+    "Run this:\n```bash\nkubectl rollout restart deployment/knowops-worker\n```\nthen watch the pods.",
+    "```bash\nkubectl get pods\n```",
+    '{"not": "an answer"}',
+    "{ this is not json",
+])
+def test_plain_text_and_markdown_answers_are_left_alone(text):
+    from app.agent import plain_text_answer
+    assert plain_text_answer(text) == text

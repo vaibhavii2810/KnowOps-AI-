@@ -21,8 +21,14 @@ from app.retry import is_transient_gemini_error, retry_call
 
 @lru_cache(maxsize=1)
 def get_client() -> genai.Client:
-    """Return a cached Gemini client, initialised with the configured API key."""
-    return genai.Client(api_key=settings.gemini_api_key)
+    """
+    Return a cached Gemini client, initialised with the configured API key. Every request it makes times out
+    after GEMINI_TIMEOUT_SECONDS (D-045): without it one slow call held /ask for 97 s live.
+    """
+    return genai.Client(
+        api_key=settings.gemini_api_key,
+        http_options=types.HttpOptions(timeout=int(settings.gemini_timeout_seconds * 1000)),  # milliseconds
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +60,7 @@ def embed_text(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list[float]:
         ),
         is_transient=is_transient_gemini_error,
         label="gemini embed",
+        budget_s=settings.gemini_timeout_seconds,
     )
     return response.embeddings[0].values
 
@@ -149,5 +156,6 @@ def chat_completion(
         ),
         is_transient=is_transient_gemini_error,
         label="gemini chat",
+        budget_s=settings.gemini_timeout_seconds,
     )
     return response.text or ""

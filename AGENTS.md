@@ -45,7 +45,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 9 | Automation (cron + n8n) | Vaishnavi | ✅ Done — all 5 chunks live; scheduled cron run confirmed in the Vercel dashboard (reported by Vaishnavi, 2026-11-03) |
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
 | 11 | Testing & QA | Vaishnavi | ✅ Done — plain `pytest` makes zero real calls; green on GitHub Actions (3.11 + 3.12) for `main` and `sprint-2` at `6111862` (D-038–D-041) |
-| 12 | Logging & monitoring | Vaishnavi | 🟡 Partial — 12.1–12.3 done (JSON logs + request id, D-042; `agent_run` trace, D-043; checked in Vercel's runtime logs — which exposed a production outage, fixed by pinning deps, D-044, deploy pending); 12.4 `/metrics` (stretch) to do |
+| 12 | Logging & monitoring | Vaishnavi | 🟡 Partial — 12.1–12.3 done (JSON logs + request id, D-042; `agent_run` trace, D-043; checked in Vercel's runtime logs, which exposed a production outage — fixed by pinning deps, D-044, deployed and verified); 12.4 `/metrics` (stretch) not started |
 | 13 | AI eval harness | Vaishnavi | 🟡 Partial — `tests/eval_rag.py` exists |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
 | 15 | Docs & wrap-up | Vaishnavi | ⬜ Not started |
@@ -319,7 +319,19 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   `requirements.txt`) and calls `v1`, where the `-latest` alias doesn't exist; 2.28.0 uses `v1beta`. CI was green
   because it is offline by design. The agent had answered HTTP 200 with fallback text, so only the new log showed it.
   Fix: `requirements.txt` pinned to the live-tested versions; verified in a fresh 3.12 venv (2.28.0, `v1beta`, real
-  `chat_completion` works, 324 offline tests pass). **Deploy pending** — then re-check `/ask` and `/agent/chat` live.
+  `chat_completion` works, 324 offline tests pass). **Deployed as `31ef047` and verified live (2026-11-06 17:06 UTC):**
+  CI green on both branches; `/ask` 200 with 5 sources (top: Disaster Recovery Runbook › 4.2 Manual Failover Steps);
+  `/agent/chat` 200 running `lookup_runbook` → `run_system_diagnostics` → `create_ticket`; Vercel logs show Gemini calls
+  going to `/v1beta/` with 200 OK. That verification run filed a real ticket ("Worker pod OOMKilled CrashLoopBackOff")
+  in the production CRM.
+- Three more things seen in the same logs, now resolved: (1) a capped run's summary came back as raw JSON — the summary
+  call got the history's "Format … as JSON" instruction; it now gets the task + transcript + a plain-text instruction,
+  and `plain_text_answer()` unwraps JSON if the model does it anyway (D-045); (2) `/ask` took 96.7 s, ~83 s in one Gemini
+  call with no timeout — every Gemini request now times out after `GEMINI_TIMEOUT_SECONDS` (25) and `retry_call`'s new
+  `budget_s` stops a timed-out call being retried, so `/ask` fails with a clear 503 in ~25 s instead (D-045); (3) the
+  `agent_run` line *displayed* `… (truncated)`, but a search for a word only in its last step matched it, so Vercel
+  stored it whole — no change needed (D-043 note). 19 new tests (`tests/test_retry.py`, `tests/test_agent_dispatch.py`);
+  5 mutation checks each fail them; a real embed + chat call still works with the timeout (0.5 s, 1.1 s). 343 passed.
 
 ## Phase log
 
@@ -388,7 +400,8 @@ Interactive docs: `/docs` (Swagger UI).
 `JWT_SECRET` · `APP_USERNAME` / `APP_PASSWORD` · `CRON_SECRET` · `N8N_ESCALATION_WEBHOOK_URL` (optional — Phase
 9.4, D-031; `escalate_to_human` skips the webhook call entirely when unset) · `RATE_LIMIT_ASK_PER_MINUTE` (10) /
 `RATE_LIMIT_AGENT_PER_MINUTE` (5) (optional — Phase 10.5, D-036; 0 disables) · `RATE_LIMIT_LOGIN_PER_MINUTE` (5) /
-`RATE_LIMIT_LOGIN_PER_HOUR` (30) (optional — D-037; per client IP) · `LOG_LEVEL` (INFO) (optional — Phase 12.1, D-042).
+`RATE_LIMIT_LOGIN_PER_HOUR` (30) (optional — D-037; per client IP) · `LOG_LEVEL` (INFO) (optional — Phase 12.1, D-042) · `GEMINI_TIMEOUT_SECONDS` (25) (optional — D-045; per Gemini request,
+also each call's retry budget).
 Template: `.env.example`.
 All are now set on both Preview and Production in the Vercel project (2026-10-27) — `main` was fast-forwarded
 to `sprint-2`'s tip the same day, so Production is a real, working deployment for the first time.
@@ -425,8 +438,6 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   (a free guess; optional to change). If an env var is ever missing, `app/config.py` silently falls back to
   `admin`/`admin` and `jwt_secret="dev-secret"` (D-007). The per-IP login limit (5/min, 30/hour, D-037) does not stop a
   distributed attack from many addresses, and trusts the client-IP headers only because Vercel sets them.
-- **Production `/ask` + agent down until the D-044 pin is deployed (2026-11-06):** `google-genai` 3.0.0 → Gemini `v1` → 404
-  for `gemini-flash-lite-latest`. Fixed in `requirements.txt`; delete this entry once production answers again.
 - **`get_conn()` latency:** each call costs ~1.2s against the remote Neon DB, ~0.8s of it `register_vector`, which only
   `scripts/ingest.py` needs (found while measuring 10.5). `/ask` pays it 3×. A `vectors=False` default would cut ~2.4s
   from `/ask`; not done.

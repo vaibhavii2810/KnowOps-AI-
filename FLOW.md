@@ -3,7 +3,7 @@
 What runs first, what calls what, and in which order. **Any change that adds, removes or renames an
 entry point, route, module or call chain must update this file in the same change** (rule in `AGENTS.md`).
 
-Notation: `→` calls · `[DB]` opens a Postgres connection via `app.db.get_conn()` (the *connect* step retries transient failures, except health probes which fail fast; statements never retry — D-032) · `[Gemini]` calls the Gemini API (every call retries transient failures via `app.retry.retry_call` — D-032).
+Notation: `→` calls · `[DB]` opens a Postgres connection via `app.db.get_conn()` (the *connect* step retries transient failures, except health probes which fail fast; statements never retry — D-032) · `[Gemini]` calls the Gemini API (every request times out after `GEMINI_TIMEOUT_SECONDS`, 25 s, and every call retries transient failures via `app.retry.retry_call` — D-032 — but starts no new attempt once that same time has passed, so a timed-out call is not retried — D-045).
 
 ## 1. Entry points
 
@@ -37,7 +37,7 @@ Then `app/main.py` itself runs:
 8. The route decorators register 16 routes
 
 Nothing touches Postgres or Gemini at startup. DB connections open per call. The Gemini client is
-created on first use by `llm.get_client()` (`lru_cache` → one client per process).
+created on first use by `llm.get_client()` (`lru_cache` → one client per process, with `HttpOptions(timeout=GEMINI_TIMEOUT_SECONDS × 1000)` ms — D-045).
 
 ## 3. Every request
 
@@ -91,7 +91,8 @@ ask(AskRequest, Depends(ratelimit.rate_limited("ask")))   ← JWT required (Phas
             → llm.embed_query → llm.embed_text(task_type="RETRIEVAL_QUERY")
                  → llm.get_client() → [Gemini] embed_content, 768 dims
                    (retry_call: up to 4 tries on 429 / 408 / any 5xx / network timeouts, exponential backoff
-                    with jitter ≈ 1s / 2s / 4s — other 4xx fail fast; Phase 10.1, D-032)
+                    with jitter ≈ 1s / 2s / 4s — other 4xx fail fast; Phase 10.1, D-032; no new attempt after
+                    GEMINI_TIMEOUT_SECONDS, so a slow call fails once instead of four times — D-045)
             → [DB] cosine search: 1 - (embedding <=> query) >= 0.55, nearest first, LIMIT top_k (HNSW index)
             → list[ChunkResult]
        → rag.format_context_for_llm(chunks) → "Source: <title> › <heading>\n\n<content>" per chunk
@@ -160,7 +161,10 @@ api_agent_chat(AgentChatRequest) → agent.run_agent(prompt, max_steps)
       wrapped by guardrails.fence() as <untrusted_data> (forged closing tags are stripped)
   if the loop ran every step without a final answer (`for … else`) → outcome "max_steps"
   if no step gave a *non-blank* final answer (checks truthiness, not just key presence — D-026)
-    → [Gemini] one summary call (if it fails: the summary's error type is recorded, a canned answer is used)
+    → [Gemini] one summary call on `Task: …` + the step transcript + SUMMARY_INSTRUCTION (plain text, not JSON) —
+      not the full history, whose tool list says "Format … as JSON" (D-045); the reply goes through
+      plain_text_answer(), which unwraps a JSON/fenced-JSON answer to its final_answer (if it fails: the summary's
+      error type is recorded, a canned answer is used)
   if the run was tainted → a code-generated "[Security notice]" listing blocked actions is appended to the
     resolution, whatever the model said
 → {task, total_steps, steps, resolution} → AgentChatResponse
