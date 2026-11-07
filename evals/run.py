@@ -24,7 +24,7 @@ from typing import Callable, Optional
 from evals.client import EvalSetupError, HttpClient, InProcessClient
 from evals.golden import GoldenItem, load_golden_set, validate
 from evals.judge import judge_answer
-from evals.results import ERROR, AskResult, ItemResult
+from evals.results import ERROR, JUDGE_UNFAITHFUL, AskResult, Flag, ItemResult
 from evals.scoring import DEFAULT_SLOW_MS, is_slow, score_item, summarise
 
 DEFAULT_HTTP_DELAY_SECONDS = 7.0   # keeps a deployed site under its 10 requests/minute limit on /ask
@@ -32,6 +32,7 @@ QUOTA_RETRIES = 2                  # extra tries for a question that hit Gemini'
 DEFAULT_QUOTA_WAIT_SECONDS = 30.0
 EXCERPT_CHARS = 220
 SLOWEST_SHOWN = 3
+FLAGGED_SHOWN = 6
 
 
 def _ask_once(client, item: GoldenItem, top_k: Optional[int]) -> AskResult:
@@ -77,7 +78,11 @@ def run_eval(
 
 
 def _with_judgement(result: ItemResult) -> ItemResult:
-    return replace(result, judge=judge_answer(result.item, result.ask.answer))
+    judgement = judge_answer(result.item, result.ask.answer, result.ask.sources)
+    flags = result.flags
+    if judgement.faithful is False and not result.refused:     # a refusal makes no claims to be unfaithful
+        flags += (Flag(JUDGE_UNFAITHFUL, judgement.unsupported),)
+    return replace(result, judge=judgement, flags=flags)
 
 
 def _excerpt(text: str) -> str:
@@ -107,6 +112,8 @@ def format_result(result: ItemResult, slow_ms: float = DEFAULT_SLOW_MS) -> str:
     line = f"{item.id}  {result.outcome:<19} {detail}{where}  {_secs(result.ask.latency_ms)}"
     if is_slow(result, slow_ms):
         line += f"  SLOW (over {_limit(slow_ms)})"
+    if result.flags:
+        line += "  FLAGGED: " + ", ".join(dict.fromkeys(f.kind for f in result.flags))
     if result.judge is not None:
         line += f"  judge: {result.judge.verdict}"
     lines = [f"{line}\n      {_excerpt(item.question)}"]
@@ -115,6 +122,7 @@ def format_result(result: ItemResult, slow_ms: float = DEFAULT_SLOW_MS) -> str:
             lines.append(f"      missing: {', '.join(result.facts_missing)}")
         shown = result.ask.error if result.ask.error else result.ask.answer
         lines.append(f"      answer: {_excerpt(shown)}")
+    lines += [f"      flag {flag.kind}: {flag.detail}" if flag.detail else f"      flag {flag.kind}" for flag in result.flags]
     if result.judge is not None and result.judge.reason:
         lines.append(f"      judge said: {result.judge.reason}")
     return "\n".join(lines)
@@ -150,6 +158,16 @@ def format_summary(results: list[ItemResult], slow_ms: float = DEFAULT_SLOW_MS, 
             lines.append(f"                     over {_limit(slow_ms)}: none of {lat.count}")
         if latency_note:
             lines.append(f"                     ({latency_note})")
+    if s.hallucination is not None and s.hallucination.answered:
+        h = s.hallucination
+        kinds = ", ".join(f"{kind} {n}" for kind, n in sorted(h.by_kind.items(), key=lambda kv: (-kv[1], kv[0])))
+        lines.append(f"Likely hallucination: {h.flagged}/{h.answered} answers flagged ({_pct(h.flagged, h.answered)})"
+                     + (f" — {kinds}" if kinds else ""))
+        if h.flagged_items:
+            shown = "; ".join(f"{qid} ({', '.join(kinds_)})" for qid, kinds_ in h.flagged_items[:FLAGGED_SHOWN])
+            more = f"; and {len(h.flagged_items) - FLAGGED_SHOWN} more" if len(h.flagged_items) > FLAGGED_SHOWN else ""
+            lines.append(f"                     flagged: {shown}{more}")
+        lines.append("                     (heuristics that point a human at answers worth reading; they are not verdicts)")
     if s.judged:
         counts = ", ".join(f"{verdict} {n}" for verdict, n in sorted(s.judge_counts.items()))
         lines.append(f"Gemini judge       : {counts} | agrees with the keyword check on {s.judge_agrees}/{s.judged}")

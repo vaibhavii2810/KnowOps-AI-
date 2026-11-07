@@ -12,10 +12,12 @@ from __future__ import annotations
 import math
 import statistics
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from evals.golden import GoldenItem, fact_present, normalize
+from evals.golden import GoldenItem, fact_present, normalize, runbook_titles
+from evals.hallucination import find_flags
 from evals.results import (
     ERROR, FALSE_REFUSAL, MISSING_FACTS, PASS, SHOULD_HAVE_REFUSED, AskResult, ItemResult,
 )
@@ -43,13 +45,20 @@ def retrieval_rank(item: GoldenItem, ask: AskResult) -> Optional[int]:
     return None
 
 
-def score_item(item: GoldenItem, ask: AskResult) -> ItemResult:
+@lru_cache(maxsize=1)
+def _default_titles() -> tuple[str, ...]:
+    return runbook_titles()
+
+
+def score_item(item: GoldenItem, ask: AskResult, known_titles: Optional[tuple[str, ...]] = None) -> ItemResult:
     if ask.error is not None or ask.status != 200:
         return ItemResult(item=item, ask=ask, outcome=ERROR)
 
+    titles = known_titles if known_titles is not None else _default_titles()
     refused = is_refusal(ask.answer)
     if item.must_refuse:
-        return ItemResult(item=item, ask=ask, outcome=PASS if refused else SHOULD_HAVE_REFUSED)
+        return ItemResult(item=item, ask=ask, outcome=PASS if refused else SHOULD_HAVE_REFUSED, refused=refused,
+                          flags=find_flags(item, ask, refused, titles))
 
     rank = retrieval_rank(item, ask)
     found = tuple(f for f in item.expected_facts if fact_present(item, f, ask.answer))
@@ -57,9 +66,11 @@ def score_item(item: GoldenItem, ask: AskResult) -> ItemResult:
     # A hedge followed by the real answer ("I don't have enough information about X, but ...") is an answer, not a
     # refusal: it is a false refusal only if it declined and contains none of the expected facts.
     outcome = FALSE_REFUSAL if refused and not found else (PASS if not missing else MISSING_FACTS)
+    declined = outcome == FALSE_REFUSAL
     return ItemResult(
         item=item, ask=ask, outcome=outcome, facts_found=found, facts_missing=missing,
         coverage=len(found) / len(item.expected_facts), retrieval_rank=rank, retrieved=rank is not None,
+        refused=declined, flags=find_flags(item, ask, declined, titles),
     )
 
 
@@ -102,6 +113,24 @@ def latency_stats(results: list[ItemResult], threshold_ms: float = DEFAULT_SLOW_
 
 
 @dataclass(frozen=True)
+class HallucinationStats:
+    answered: int                                  # answers that made claims: a response that was not a refusal
+    flagged: int                                   # of those, how many carry at least one flag
+    by_kind: dict[str, int]                        # kind -> number of answers carrying it
+    flagged_items: tuple[tuple[str, tuple[str, ...]], ...]   # (question id, its flag kinds), in run order
+
+
+def hallucination_stats(results: list[ItemResult]) -> HallucinationStats:
+    claimed = [r for r in results if r.outcome != ERROR and not r.refused]
+    by_kind: dict[str, int] = {}
+    for r in claimed:
+        for kind in dict.fromkeys(f.kind for f in r.flags):
+            by_kind[kind] = by_kind.get(kind, 0) + 1
+    flagged = [(r.item.id, tuple(dict.fromkeys(f.kind for f in r.flags))) for r in claimed if r.flags]
+    return HallucinationStats(answered=len(claimed), flagged=len(flagged), by_kind=by_kind, flagged_items=tuple(flagged))
+
+
+@dataclass(frozen=True)
 class Summary:
     total: int
     passed: int
@@ -120,6 +149,7 @@ class Summary:
     judge_counts: dict[str, int]
     judge_agrees: int                       # judge said "correct" exactly when the keyword check passed
     latency: Optional[LatencyStats] = None
+    hallucination: Optional[HallucinationStats] = None
 
     @property
     def accuracy(self) -> Optional[float]:
@@ -151,4 +181,5 @@ def summarise(results: list[ItemResult], slow_ms: float = DEFAULT_SLOW_MS) -> Su
         judge_counts=judge_counts,
         judge_agrees=sum((r.judge.verdict == "correct") == r.passed for r in judged),
         latency=latency_stats(results, slow_ms),
+        hallucination=hallucination_stats(results),
     )

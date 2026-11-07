@@ -46,7 +46,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
 | 11 | Testing & QA | Vaishnavi | ✅ Done — plain `pytest` makes zero real calls; green on GitHub Actions (3.11 + 3.12) for `main` and `sprint-2` at `6111862` (D-038–D-041) |
 | 12 | Logging & monitoring | Vaishnavi | ✅ Done — JSON logs + request id (D-042), `agent_run` trace (D-043), checked in Vercel's runtime logs (12.3, which exposed an outage fixed by pinning deps, D-044); `GET /metrics` (12.4, stretch, D-046) deployed and verified live |
-| 13 | AI eval harness | Vaishnavi | 🟡 Partial — 13.1 (golden set, D-047), 13.2 (`python -m evals` runner, keyword scoring + opt-in judge, D-048) and 13.3 (per-question latency + slow flag, D-050) done; accuracy baselines 17–19/19; **every question is over 5 s** (median 5.6 s in-process, 14 s deployed); 13.4–13.5 to do. The older `tests/eval_rag.py` is retrieval-only |
+| 13 | AI eval harness | Vaishnavi | 🟡 Partial — 13.1 (golden set, D-047), 13.2 (`python -m evals` runner, keyword scoring + opt-in judge, D-048) 13.3 (per-question latency + slow flag, D-050) and 13.4 (likely-hallucination flags, D-051) done; accuracy baselines 17–19/19; **every question is over 5 s** (median 5.6 s in-process, 14 s deployed); 13.5 to do. The older `tests/eval_rag.py` is retrieval-only |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
 | 15 | Docs & wrap-up | Vaishnavi | ⬜ Not started |
 
@@ -370,7 +370,7 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   agent did" holds — proven live in 12.3 (request id `kops-12-3-1bfd6d939735`) and again for the 12.2 fixes (`kops-d045-agent-01`).
   12.4 (the guide's optional stretch) is also live and verified, as above.
 
-**Phase 13 — AI evaluation harness** 🟡 in progress (13.1–13.3 done)
+**Phase 13 — AI evaluation harness** 🟡 in progress (13.1–13.4 done)
 - 13.1 Done. New `evals/` package (D-047): `evals/golden_set.json` — **19 items**: 16 in-scope questions covering all 5 runbooks
   (DR 4, Kubernetes 5, incident playbooks 3, on-call 2, API 2; kinds numeric / procedure / command / factual / diagnosis / list)
   and **3 that must be refused** (cookies, the 2022 World Cup, and a near-domain trap: Terraform for EKS). Each in-scope item has
@@ -434,7 +434,25 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   (login, `/ask`, scoring). The slowness is systemic — 3 database connections plus 2 Gemini calls per `/ask` — so it is the database
   investigation's finding seen from the user's side, still unaddressed (see Known issues). Accuracy that run: 18/19; the miss was `g12`,
   answered from the on-call guide's §5.2 instead of the playbook's §5 (both cover pool exhaustion; passed 5/5 when retried).
-- Still to do: 13.4 hallucination flags; 13.5 JSON report / `eval_runs` table (and probably `--repeat N`, since one run is a sample).
+- 13.4 Done. Likely-hallucination flags (D-051; new `evals/hallucination.py`; the client now keeps each source's title and text).
+  Each answer that made claims is checked against what `/ask` retrieved: `answered_out_of_scope`, `no_context`, `uncited` (names none of
+  the retrieved documents), `phantom_citation` (a real runbook that was not retrieved), `unsupported_quantity` (a number with a unit
+  in neither the retrieved text nor the question — "4-hour", "5 mins" and `replicas=5` match their spoken forms) and
+  `unsupported_code` (an inline span or code-block command not in the retrieved text). With `--judge`, the same Gemini call also
+  returns `faithful` + the unsupported claim, which becomes a `judge_unfaithful` flag. Shown per question (`FLAGGED: …`) and in the
+  summary (flagged/answered, counts per kind, which questions, "heuristics, not verdicts"); never changes an outcome, a pass count or
+  the exit code; refusals and errors are never flagged. 43 tests in `tests/test_eval_hallucination.py` (real runbook text as the sources)
+  and `tests/test_eval_runner.py` is now 91. 20 mutation checks each fail them (one exposed a vacuous assertion of mine, now a
+  sentinel test). **Live:** a full run flagged **0 of 16** answers (19/19 correct); an earlier run's one flag was a false positive
+  (`replicas=5` vs "5 replicas"), fixed in the parser. Detection was shown by corrupting real answers with their real sources:
+  `6 hours` → `unsupported_quantity`, an invented `kubectl delete namespace production` → `unsupported_code`, an unretrieved runbook →
+  `phantom_citation`, no citation → `uncited`, and the live judge marked those `faithful: false`. Blind spots (D-051): a contradiction
+  that changes no number or code and a citation of a document that does not exist are caught only by the judge.
+- **A flaky test found and fixed:** `tests/test_ask_integration.py` failed about 1 run in 25 because the rate limiter deletes old
+  rows on a random 1% of writes and the extra `DELETE` changed the statement list the test checks (latent since 11.3). Reproduced by
+  forcing the branch; the test now pins the dice; the whole suite also passes with `random.random` forced to 0.0 and to 0.999.
+  539 passed, 109 live deselected.
+- Still to do: 13.5 JSON report / `eval_runs` table (and probably `--repeat N`, since one run is a sample).
 
 ## Phase log
 
@@ -565,6 +583,9 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - **Tests can't see a changed SQL statement that keeps its matching text** (D-040): `MemoryDB` answers by fragment, so
   e.g. flipping the history query's `ORDER BY` goes unnoticed offline. The `live` variants (`pytest -m live`) catch it;
   run them before a deploy that touches SQL.
+- **The hallucination flags are heuristics (Phase 13.4, D-051):** they miss a contradiction that changes no number or code and a citation of a
+  document that does not exist (only `--judge` notices), and can flag a correct answer that reformats a command or derives a number.
+  Read them as a list of answers worth a look.
 - **Evaluation results vary run to run** (temperature 0.2): treat a single run as a sample. A run with `--judge` takes ~3 minutes
   on the free tier and can hit Gemini's quota (the runner waits and retries). Two runbook sections that cover the same incident
   (e.g. pool exhaustion in the playbooks and the on-call guide) can make the answer's facts differ between runs (`g12`, once).

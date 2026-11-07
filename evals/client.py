@@ -44,7 +44,8 @@ def _to_result(response: httpx.Response, latency_ms: float, request_id: str) -> 
                          request_id=request_id, error=f"HTTP {response.status_code}: {detail[:200]}")
     body = response.json()
     sources = tuple(
-        SourceRef(document=s["document_source"], heading=s["heading"], similarity=float(s["similarity"]))
+        SourceRef(document=s["document_source"], heading=s["heading"], similarity=float(s["similarity"]),
+                  title=s.get("document_title", ""), content=s.get("content", ""))
         for s in body.get("sources", [])
     )
     return AskResult(status=200, answer=body["answer"], sources=sources, latency_ms=latency_ms, request_id=request_id)

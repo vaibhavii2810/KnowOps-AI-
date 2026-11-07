@@ -82,6 +82,16 @@ def fact_present(item: GoldenItem, fact: str, text: str) -> bool:
     return any(normalize(form) in haystack for form in accepted_forms(item, fact))
 
 
+def runbook_titles(docs_dir: Path = DOCS_DIR) -> tuple[str, ...]:
+    """Each runbook's title, as answers cite it: the first heading of the file (the one the app stores as the title)."""
+    titles = []
+    for path in sorted(docs_dir.glob("*.md")):
+        pieces = split_by_headings(path.read_text(encoding="utf-8"))
+        if pieces and pieces[0][0]:
+            titles.append(pieces[0][0])
+    return tuple(titles)
+
+
 def load_runbook_sections(docs_dir: Path = DOCS_DIR) -> dict[str, dict[str, str]]:
     """{file name: {heading: section text}} exactly as the app's chunker splits each runbook."""
     sections: dict[str, dict[str, str]] = {}

@@ -1000,3 +1000,51 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   Overlapping runbooks are a source of run-to-run variation that the exact-phrase facts cannot absorb.
 - **Revisit if:** the threshold should differ by mode (a stricter one in-process, a looser one over HTTP), per-stage times are needed
   (instrument the route or read the logs), or `--repeat N` lands in 13.5 (then report latency per question over several runs).
+
+### D-051 · Likely-hallucination flags: five deterministic checks on each answer, plus the judge's faithfulness view (Phase 13.4)
+- **Date · by · source:** 2026-11-07 · Vaishnavi (with Claude) · Build guide (13.4: "flag likely hallucinations: an answer that cites
+  no retrieved chunk, or contradicts the source doc")
+- **Decision:** Every answer that made claims (not a refusal, not an error) is checked against what `/ask` actually retrieved — each
+  source's title, heading and **text**, which the evaluation client now keeps. `evals/hallucination.py` raises, in a fixed order:
+  `answered_out_of_scope` (a question that should have been refused was answered); `no_context` (answered with nothing retrieved);
+  `uncited` (names none of the retrieved documents, by title or section heading); `phantom_citation` (names a *real* runbook that was
+  not among the retrieved sources, unless the question itself named it; skipped if any source lacks a title); `unsupported_quantity`
+  (a number with a unit — minutes, hours, %, Mi/Gi, replicas, … — in neither the retrieved text nor the question; "4-hour", "5 mins"
+  and "replicas=5" match "4 hours", "5 minutes" and "5 replicas"; bare numbers such as list markers are ignored); `unsupported_code`
+  (an inline code span or a command line of a code block, at least 4 characters, not found in the retrieved text). With `--judge`
+  the same Gemini call also returns `faithful` (does the answer stay within the retrieved text?) and `unsupported` (the claim), shown
+  the retrieved text fenced as untrusted data; `faithful: false` on an answer that made claims becomes a `judge_unfaithful` flag.
+  Flags are shown on each question line (`FLAGGED: …` and one line per flag) and in the summary (answers flagged out of answers with
+  claims, counts per kind, which questions, "heuristics … not verdicts"). **They never change an outcome, a pass/fail count or the
+  exit code.**
+- **Why:** The guide's two clauses map onto two kinds of check. "Cites no retrieved chunk" is checkable: answers do name their source
+  (`Based on the Disaster Recovery Runbook (1. Overview)`, `(*Source: … › …*)`), and the response carries the retrieved text. "Contradicts
+  the source" can only be partly checked without a model: a changed number or an invented command is detectable by comparing with the
+  retrieved text, and a semantic contradiction needs the judge, which already reads the answer. Folding the faithfulness question into
+  the judge's existing call adds no quota. Flags stay separate from correctness because a right answer can be uncited and a wrong one
+  can be neatly cited. Refusals are exempt because they assert nothing.
+- **Checked on real answers (2026-11-07):** a clean full run flagged **0 of 16** answers (19/19 correct). Before the keyed-quantity
+  fix, 1 of 16 was flagged — a false positive: `g07` said "5 replicas" and the runbook writes `--replicas=5`. To test that the flags
+  *catch* things, real answers and their real sources were corrupted by hand: `4 hours` → `6 hours` gave `unsupported_quantity`; an
+  appended `kubectl delete namespace production` gave `unsupported_code`; citing the Kubernetes guide when only the DR runbook was
+  retrieved gave `phantom_citation`; removing the citation gave `uncited`; the untouched answer gave nothing. The live judge marked
+  the first three and the last-but-one `faithful: false`, and the clean answer `true`.
+- **Alternatives considered:** Flagging on any number or any backticked token (list markers and ids would flag nearly every answer);
+  a semantic similarity score between answer and sources (a threshold no one can interpret, and an embedding call per question);
+  a second Gemini call only for faithfulness (the same information from the existing call); making a flagged answer a failure
+  (these are heuristics — see below — and a failing exit code would train people to ignore it).
+- **Tradeoff accepted — blind spots, each shown above or by a test:** (1) a **contradiction that changes no number or code** is
+  invisible to the deterministic flags (the judge caught the added "hard guarantee of zero data loss"); (2) a citation of a document
+  that **does not exist** ("Security Hardening Guide") is not flagged, only real runbook titles are — only the judge noticed;
+  (3) a number written as a word ("four hours") or **derived** from the text (4 hours → 240 minutes) is either not seen or is flagged
+  although right; (4) code that the model reformats (joins two commands, changes quoting) can be flagged though faithful; (5) the judge
+  is the same model family as the assistant, so it can share its blind spots, and it can be wrong in both directions. The
+  flags are therefore a reading list, not a verdict, and one run is a sample.
+- **Also fixed, found while running the suite repeatedly for this change:** `tests/test_ask_integration.py`'s round-trip test failed about
+  one run in 25. The rate limiter deletes old counter rows on a random 1% of writes (`random.random() < 0.01`); that extra `DELETE`
+  appears in the statement list the test checks. Forcing the branch reproduced it every time; the test now pins the dice. It had been
+  latent since 11.3. The whole suite was then run with `random.random` forced to both extremes and passed, so no second instance
+  exists. (A mutation check also exposed a vacuous assertion of mine in the judge-sources test, which now uses a sentinel.)
+- **Revisit if:** flags are mostly false alarms on a bigger golden set (tighten the checks), a known document-name list is wanted for
+  citations ("Source: X ›" could be parsed and compared with the real titles), or `--repeat N` lands (then report how often each flag
+  recurs for the same question).

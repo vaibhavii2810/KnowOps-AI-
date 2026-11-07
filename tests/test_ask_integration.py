@@ -5,9 +5,12 @@ handling, retrieve(), citation formatting, prompt building and message persisten
 Gemini (fake_gemini) and Postgres (fake_db) are fakes. Offline — both fixtures pull in no_network.
 """
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
+from app import ratelimit
 from app.config import settings
 from app.llm import SYSTEM_INSTRUCTION
 from app.main import app
@@ -45,6 +48,9 @@ def client():
 def backend(fake_gemini, fake_db, monkeypatch):
     """The database and model state for a first question; the rate limiter is switched on."""
     monkeypatch.setattr(settings, "rate_limit_ask_per_minute", 10)
+    # The limiter deletes old counter rows on a random 1% of writes; that extra DELETE once made this test's statement
+    # list fail about one run in a hundred. Pin the dice so the list is always the same.
+    monkeypatch.setattr(ratelimit, "random", SimpleNamespace(random=lambda: 1.0))
     fake_db.on("INSERT INTO rate_limits", [(1,)])
     fake_db.on("INSERT INTO conversations", [(101,)])
     fake_db.on("FROM chunks c", CHUNK_ROWS)
