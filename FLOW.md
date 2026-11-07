@@ -299,6 +299,7 @@ app.metrics        → app.config, app.logs (+ psycopg directly: ONE reused plai
 app.guardrails     → (none — stdlib only)
 app.ratelimit      → app.auth, app.config, app.logs (+ psycopg directly: ONE reused plain connection, no pgvector setup — D-036)
 scripts/ingest.py  → app.db, app.llm
+evals/golden.py    → scripts.ingest (DOCS_DIR, split_by_headings — so golden-set sections are the chunker's sections; Phase 13.1, D-047)
 ```
 
 ## 8. Which code touches which table

@@ -46,7 +46,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
 | 11 | Testing & QA | Vaishnavi | ✅ Done — plain `pytest` makes zero real calls; green on GitHub Actions (3.11 + 3.12) for `main` and `sprint-2` at `6111862` (D-038–D-041) |
 | 12 | Logging & monitoring | Vaishnavi | ✅ Done — JSON logs + request id (D-042), `agent_run` trace (D-043), checked in Vercel's runtime logs (12.3, which exposed an outage fixed by pinning deps, D-044); `GET /metrics` (12.4, stretch, D-046) deployed and verified live |
-| 13 | AI eval harness | Vaishnavi | 🟡 Partial — `tests/eval_rag.py` exists |
+| 13 | AI eval harness | Vaishnavi | 🟡 Partial — 13.1 done (golden set: 19 items, every fact checked against the runbooks, D-047); 13.2–13.5 to do. The older `tests/eval_rag.py` is retrieval-only |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
 | 15 | Docs & wrap-up | Vaishnavi | ⬜ Not started |
 
@@ -370,6 +370,24 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   agent did" holds — proven live in 12.3 (request id `kops-12-3-1bfd6d939735`) and again for the 12.2 fixes (`kops-d045-agent-01`).
   12.4 (the guide's optional stretch) is also live and verified, as above.
 
+**Phase 13 — AI evaluation harness** 🟡 in progress (13.1 done)
+- 13.1 Done. New `evals/` package (D-047): `evals/golden_set.json` — **19 items**: 16 in-scope questions covering all 5 runbooks
+  (DR 4, Kubernetes 5, incident playbooks 3, on-call 2, API 2; kinds numeric / procedure / command / factual / diagnosis / list)
+  and **3 that must be refused** (cookies, the 2022 World Cup, and a near-domain trap: Terraform for EKS). Each in-scope item has
+  a `source_doc` + `source_section` (the heading the app's chunker produces, matching `/ask`'s `sources[].heading`), a reference
+  answer and 2–5 `expected_facts` (47 in all) for the keyword scoring in 13.2. `evals/golden.py` loads it and `validate()` proves,
+  offline, that every fact is in the cited section's text and in its own reference answer, that doc/section exist, that ids and
+  questions are unique, that each runbook has ≥2 questions, and that each refusal item's `absent_terms` appear in no runbook.
+  28 tests in `tests/test_golden_set.py` (0.06 s) — the shipped set is valid, `normalize()` ignores Markdown/dash/quote/case
+  differences without making different facts match, and deliberately broken sets show the validator catches each kind of defect (wrong or missing fact, unknown doc or section, duplicates, bad kind/id/question, wrong set size, a thin runbook, a refusal item that became answerable, a malformed refusal item).
+  8 mutation checks — runbook RTO changed, a heading renamed, escalation wording changed, a refused term (`terraform`) added to the
+  docs, a mistyped fact, and the validator's three checks removed — each fail the tests. (My first mutation run silently applied
+  nothing because the helper script had been cleared; it was caught by noticing every result was an unchanged "28 passed", and
+  redone with a helper that fails loudly.) 399 passed, 109 live deselected.
+- Known limit, recorded in D-047: short numeric facts are a weak check (g01's `4 hours` / `1 hour` also appear in the severity table).
+- Still to do: 13.2 a runner that calls the real `/ask` path and scores fact coverage (optional Gemini judge); 13.3 latency and a
+  5 s flag; 13.4 hallucination flags; 13.5 JSON report / `eval_runs` table.
+
 ## Phase log
 
 Append one line per finished phase (newest last).
@@ -460,6 +478,7 @@ static/     web console (index.html, css, js)
 n8n/        incident_triage_workflow.json (alert → ticket → triage → Slack) ·
             workflow.json (escalate_to_human → Slack, Phase 9.4/9.5, D-031)
 tests/      pytest suite + eval_rag.py (conftest.py: offline fakes, MemoryDB; pytest.ini at repo root)
+evals/      AI evaluation harness (Phase 13): golden_set.json + golden.py (loader/validator); runner to come (13.2+, D-047)
 .github/    workflows/tests.yml — CI: plain pytest on every push/PR, Python 3.11 + 3.12 (Phase 11.5, D-041)
 ```
 
@@ -497,6 +516,10 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - **Tests can't see a changed SQL statement that keeps its matching text** (D-040): `MemoryDB` answers by fragment, so
   e.g. flipping the history query's `ORDER BY` goes unnoticed offline. The `live` variants (`pytest -m live`) catch it;
   run them before a deploy that touches SQL.
+- **Runbook text disagrees with the app in places (found reading them for 13.1):** `api_troubleshooting.md` §7 says `POST /ask` is
+  limited to 20 requests/minute and `GET /health` to 100/minute, but the app enforces 10/minute on `/ask` (D-036) and does not
+  limit `/health`; it and `on_call_guide.md` also say the Gemini retry is "up to 3 attempts" where the code makes 4 (D-032). `/ask`
+  answers from these documents, so it repeats them. Not fixed; no golden question depends on these facts.
 - **Phase 9.4:** `n8n/workflow.json`'s Slack URL is a placeholder (`.../mock/webhook/...`); the backend→webhook
   mechanism is verified (D-031) but nobody has actually run `npx n8n` and imported the workflow for real yet.
 

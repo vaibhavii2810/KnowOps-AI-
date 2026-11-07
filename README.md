@@ -43,6 +43,7 @@ data/docs/  runbook knowledge base
 static/     web console
 n8n/        n8n workflow export
 tests/      pytest suite (offline fakes in conftest.py) + RAG eval
+evals/      AI evaluation harness: golden question set (Phase 13)
 .github/    CI workflow: runs pytest on every push
 ```
 

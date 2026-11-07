@@ -1,0 +1,174 @@
+{
+  "version": 1,
+  "description": "Golden question set for the KnowOps AI evaluation harness (Phase 13). Each in-scope item names the runbook section its answer comes from and the short facts a correct answer must contain; evals/golden.py checks that every fact really appears in that section. Items with must_refuse expect the standard refusal.",
+  "items": [
+    {
+      "id": "g01",
+      "question": "What are the RTO and RPO targets for Tier-1 services?",
+      "kind": "numeric",
+      "source_doc": "disaster_recovery_runbook.md",
+      "source_section": "1. Overview",
+      "expected_answer": "The RTO target for Tier-1 services is 4 hours, and the RPO target is 1 hour (the maximum data-loss tolerance).",
+      "expected_facts": ["4 hours", "1 hour"]
+    },
+    {
+      "id": "g02",
+      "question": "Which severity level covers a partial outage affecting more than 50% of users, and what is its recovery time objective?",
+      "kind": "numeric",
+      "source_doc": "disaster_recovery_runbook.md",
+      "source_section": "2. Incident Classification",
+      "expected_answer": "That is P2 – High, which has an RTO of 2 hours.",
+      "expected_facts": ["P2", "2 hours"]
+    },
+    {
+      "id": "g03",
+      "question": "What are the steps of the first response in the first 15 minutes of an incident?",
+      "kind": "procedure",
+      "source_doc": "disaster_recovery_runbook.md",
+      "source_section": "3. First Response (0–15 Minutes)",
+      "expected_answer": "Acknowledge the alert in PagerDuty within 5 minutes, create a War Room in Slack, assign an Incident Commander (the on-call SRE lead), notify stakeholders with the /incident broadcast Slack bot, and begin the timeline log.",
+      "expected_facts": ["PagerDuty", "5 minutes", "War Room", "Incident Commander"]
+    },
+    {
+      "id": "g04",
+      "question": "What command promotes the standby database replica to primary during a manual failover, and which host do I run it on?",
+      "kind": "command",
+      "source_doc": "disaster_recovery_runbook.md",
+      "source_section": "4.2 Manual Failover Steps",
+      "expected_answer": "SSH into the standby host db-replica-01.internal and run pg_ctl promote -D /var/lib/postgresql/16/main.",
+      "expected_facts": ["pg_ctl promote", "db-replica-01"]
+    },
+    {
+      "id": "g05",
+      "question": "What command rolls the knowops-api deployment back to revision 3?",
+      "kind": "command",
+      "source_doc": "kubernetes_operations.md",
+      "source_section": "4.3 Rollback",
+      "expected_answer": "Run kubectl rollout undo deployment/knowops-api --to-revision=3 -n production.",
+      "expected_facts": ["rollout undo", "--to-revision=3"]
+    },
+    {
+      "id": "g06",
+      "question": "How is the Horizontal Pod Autoscaler configured for the API, and what triggers scaling?",
+      "kind": "factual",
+      "source_doc": "kubernetes_operations.md",
+      "source_section": "5.2 HPA Configuration",
+      "expected_answer": "The HPA scales between 3 and 10 replicas when CPU utilization is above 70%, memory utilization is above 80%, or requests per second are above 100.",
+      "expected_facts": ["10 replicas", "70%", "80%", "requests per second"]
+    },
+    {
+      "id": "g07",
+      "question": "How does the canary deployment work, and how long should error rates be monitored?",
+      "kind": "procedure",
+      "source_doc": "kubernetes_operations.md",
+      "source_section": "4.2 Canary Deployment",
+      "expected_answer": "Scale the current deployment down to 80%, deploy a canary with one replica that takes about 20% of traffic, and monitor error rates in Datadog for 30 minutes before proceeding with the full rollout.",
+      "expected_facts": ["20%", "30 minutes", "Datadog"]
+    },
+    {
+      "id": "g08",
+      "question": "How do I safely drain a node for maintenance and put it back into service afterwards?",
+      "kind": "command",
+      "source_doc": "kubernetes_operations.md",
+      "source_section": "6.1 Draining a Node for Maintenance",
+      "expected_answer": "Run kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data, then after maintenance run kubectl uncordon <node-name>.",
+      "expected_facts": ["kubectl drain", "--ignore-daemonsets", "uncordon"]
+    },
+    {
+      "id": "g09",
+      "question": "Where are production secrets stored, and where must they never be stored?",
+      "kind": "factual",
+      "source_doc": "kubernetes_operations.md",
+      "source_section": "8. Secrets Management",
+      "expected_answer": "Secrets are stored in AWS Secrets Manager and injected at pod startup. They must never be stored in Kubernetes ConfigMaps, in environment variables defined in deployment YAML, or in a Git repository.",
+      "expected_facts": ["AWS Secrets Manager", "ConfigMaps", "Git repository"]
+    },
+    {
+      "id": "g10",
+      "question": "A pod is in CrashLoopBackOff with exit code 137. What does that indicate and what is the short-term fix?",
+      "kind": "diagnosis",
+      "source_doc": "common_incident_playbooks.md",
+      "source_section": "2. Pod OOMKilled / CrashLoopBackOff",
+      "expected_answer": "Exit code 137 with Reason OOMKilled means the container exceeded its memory limit. As a short-term fix, raise the memory limit (for example from 512Mi to 1Gi) in the deployment manifest and apply it.",
+      "expected_facts": ["OOMKilled", "memory limit", "1Gi"]
+    },
+    {
+      "id": "g11",
+      "question": "What are the common causes of a sudden spike in 401 responses across all users?",
+      "kind": "diagnosis",
+      "source_doc": "common_incident_playbooks.md",
+      "source_section": "4. JWT Authentication Failures",
+      "expected_answer": "JWT_SECRET was rotated but some pods still run the old value, server clock skew makes new tokens look expired, or clients send the token without the Bearer prefix.",
+      "expected_facts": ["JWT_SECRET", "clock skew", "Bearer"]
+    },
+    {
+      "id": "g12",
+      "question": "How do I fix an exhausted database connection pool, and which connection string should the application use?",
+      "kind": "procedure",
+      "source_doc": "common_incident_playbooks.md",
+      "source_section": "5. Database Connection Pool Exhausted",
+      "expected_answer": "Use the pooled (-pooler) connection string, terminate sessions idle in a transaction for more than 10 minutes, and scale the pooler size before scaling API replicas.",
+      "expected_facts": ["-pooler", "10 minutes", "pooler size"]
+    },
+    {
+      "id": "g13",
+      "question": "When should an on-call engineer escalate immediately without waiting?",
+      "kind": "list",
+      "source_doc": "on_call_guide.md",
+      "source_section": "When to Escalate Immediately (don't wait):",
+      "expected_answer": "Escalate immediately for a full platform outage, detected or suspected data loss, a security breach or unauthorized access, or an imminent SLA breach.",
+      "expected_facts": ["platform outage", "data loss", "security breach", "SLA breach"]
+    },
+    {
+      "id": "g14",
+      "question": "What should I do when the GEMINI_API_503 alert fires?",
+      "kind": "procedure",
+      "source_doc": "on_call_guide.md",
+      "source_section": "5.5 `GEMINI_API_503` — Upstream AI service unavailable",
+      "expected_answer": "Check the Google Cloud Status page. chat_completion() already retries automatically with exponential backoff. If the problem lasts more than 15 minutes, switch to degraded mode (cached answers only) and tell users that AI responses may be delayed.",
+      "expected_facts": ["15 minutes", "degraded mode", "exponential backoff"]
+    },
+    {
+      "id": "g15",
+      "question": "What is the expected total response time target for /ask, and how do I check that vector search is using the index?",
+      "kind": "numeric",
+      "source_doc": "api_troubleshooting.md",
+      "source_section": "5.1 Slow `/ask` Response Times",
+      "expected_answer": "The total P95 target is under 4 seconds. Run EXPLAIN ANALYZE on the vector search query; it must show an Index Scan using chunks_embedding_idx rather than a Seq Scan.",
+      "expected_facts": ["P95", "4 seconds", "EXPLAIN ANALYZE"]
+    },
+    {
+      "id": "g16",
+      "question": "What are the most common causes of a 500 error on POST /ask?",
+      "kind": "diagnosis",
+      "source_doc": "api_troubleshooting.md",
+      "source_section": "4.1 `POST /ask` — 500 Internal Server Error",
+      "expected_answer": "The Gemini API being unavailable, a database connection failure, an empty embedding, or no chunks found because the knowledge base is empty (run scripts/ingest.py to populate it).",
+      "expected_facts": ["Gemini API", "Database Connection", "scripts/ingest.py"]
+    },
+    {
+      "id": "g17",
+      "question": "What is the best recipe for making chocolate chip cookies?",
+      "kind": "refusal",
+      "must_refuse": true,
+      "expected_answer": "I don't have enough information in the knowledge base to answer that.",
+      "absent_terms": ["cookie", "chocolate", "recipe"]
+    },
+    {
+      "id": "g18",
+      "question": "Who won the football World Cup in 2022?",
+      "kind": "refusal",
+      "must_refuse": true,
+      "expected_answer": "I don't have enough information in the knowledge base to answer that.",
+      "absent_terms": ["world cup", "football"]
+    },
+    {
+      "id": "g19",
+      "question": "How do I configure Terraform to provision the EKS cluster?",
+      "kind": "refusal",
+      "must_refuse": true,
+      "expected_answer": "I don't have enough information in the knowledge base to answer that.",
+      "absent_terms": ["terraform"]
+    }
+  ]
+}
