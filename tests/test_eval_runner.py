@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from app.config import settings
+from evals import report as report_module
 from evals import run as run_module
 from evals.client import EvalSetupError, HttpClient, InProcessClient
 from evals.golden import REFUSAL_ANSWER, load_golden_set
@@ -16,13 +17,27 @@ from evals.results import (
     ANSWERED_OUT_OF_SCOPE, ERROR, FALSE_REFUSAL, JUDGE_UNFAITHFUL, MISSING_FACTS, NO_CONTEXT, PASS, PHANTOM_CITATION,
     SHOULD_HAVE_REFUSED, UNCITED, UNSUPPORTED_QUANTITY, AskResult, Flag, Judgement, SourceRef,
 )
-from evals.run import _with_judgement, format_result, format_summary, main, run_eval
+from evals.run import (
+    _with_judgement, format_result, format_run_line, format_stability, format_summary, main, run_eval,
+)
 from evals.scoring import (
     DEFAULT_SLOW_MS, hallucination_stats, is_refusal, is_slow, latency_stats, percentile, retrieval_rank, score_item,
     summarise,
 )
 
 pytestmark = pytest.mark.usefixtures("no_network")
+
+
+@pytest.fixture(autouse=True)
+def reports_go_to_a_temporary_folder(tmp_path, monkeypatch):
+    """main() saves a JSON report by default. Tests must never write into the repo's evals/reports/, so the default
+    folder is redirected here, and the real one is checked at teardown to be exactly as it was."""
+    real = report_module.DEFAULT_REPORT_DIR
+    before = sorted(p.name for p in real.glob("*")) if real.exists() else []
+    monkeypatch.setattr(report_module, "DEFAULT_REPORT_DIR", tmp_path / "reports")
+    yield tmp_path / "reports"
+    after = sorted(p.name for p in real.glob("*")) if real.exists() else []
+    assert after == before, f"a test wrote into the repo's report folder: {set(after) - set(before)}"
 
 ITEMS = {item.id: item for item in load_golden_set()}
 ROLLBACK, HPA, REFUSE_COOKIES, REFUSE_TERRAFORM = ITEMS["g05"], ITEMS["g06"], ITEMS["g17"], ITEMS["g19"]
@@ -813,3 +828,153 @@ def test_the_command_line_reports_flags_and_flags_never_change_the_exit_code(cap
     answers = {ROLLBACK.question: ask_result("Per the Kubernetes Cluster Operations Guide, it takes 9 hours.", [FULL_SOURCE])}
     code, out, _ = run_cli(capsys, ["--only", "g05"], answers)
     assert code == 0 and "FLAGGED: unsupported_quantity" in out and "Likely hallucination: 1/1 answers flagged" in out
+
+
+# --- saving a report, and repeating the run (13.5, D-052) ------------------------------------------------------
+
+import json as _json
+
+
+def saved_reports(folder):
+    return sorted(folder.glob("*.json")) if folder.exists() else []
+
+
+ANSWERS_G05_G17 = lambda: {ROLLBACK.question: ask_result(GOOD, [FULL_SOURCE]),            # noqa: E731
+                           REFUSE_COOKIES.question: ask_result(REFUSAL_ANSWER)}
+
+
+def test_every_run_saves_a_report_in_the_default_folder_and_says_where(capsys, reports_go_to_a_temporary_folder):
+    code, out, _ = run_cli(capsys, ["--only", "g05,g17"], ANSWERS_G05_G17())
+    (path,) = saved_reports(reports_go_to_a_temporary_folder)
+    assert code == 0 and path.name.startswith("run-") and f"Report saved to {path}" in out
+    report = _json.loads(path.read_text(encoding="utf-8"))
+    assert report["complete"] is True and report["target"]["mode"] == "in-process"
+    assert [r["id"] for r in report["runs"][0]["results"]] == ["g05", "g17"]
+    assert report["runs"][0]["summary"]["passed"] == 2 and report["overall"]["accuracy_mean"] == 1.0
+
+
+def test_report_chooses_the_file_and_no_report_saves_nothing(capsys, tmp_path, reports_go_to_a_temporary_folder):
+    target = tmp_path / "mine" / "baseline-test.json"
+    code, out, _ = run_cli(capsys, ["--only", "g17", "--report", str(target)], ANSWERS_G05_G17())
+    assert code == 0 and target.exists() and f"Report saved to {target}" in out
+    assert saved_reports(reports_go_to_a_temporary_folder) == []                     # not also in the default folder
+
+    code, out, _ = run_cli(capsys, ["--only", "g17", "--no-report"], ANSWERS_G05_G17())
+    assert code == 0 and "Report saved" not in out and saved_reports(reports_go_to_a_temporary_folder) == []
+
+
+def test_report_and_no_report_together_are_refused(capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        main(["--report", "x.json", "--no-report"], client_factory=lambda: ScriptedClient({}))
+    assert excinfo.value.code == 2 and "not allowed with" in capsys.readouterr().err
+
+
+def test_the_report_records_how_the_run_was_set_up(capsys, tmp_path, fake_gemini):
+    fake_gemini.reply('{"verdict": "correct", "reason": "r", "faithful": true, "unsupported": ""}')
+    path = tmp_path / "r.json"
+    main(["--url", "https://x.test", "--only", "g17", "--judge", "--top-k", "3", "--slow-seconds", "2", "--delay", "0", "--report", str(path)],
+         client_factory=lambda: ScriptedClient({}))
+    report = _json.loads(path.read_text(encoding="utf-8"))
+    assert report["target"]["mode"] == "http" and report["target"]["url"] == "https://x.test"
+    assert report["options"] == {"judge": True, "top_k": 3, "slow_seconds": 2.0, "delay": 0.0, "repeat": 1,
+                                 "quota_wait": 30.0, "only": ["g17"]}
+
+
+class Alternating(ScriptedClient):
+    """g05 passes on odd calls and is refused on even ones, so repeated runs disagree with each other."""
+
+    def ask(self, question, top_k=None, tag=None):
+        self.asked.append(tag)
+        if tag == "g05" and self.asked.count("g05") % 2 == 0:
+            return ask_result(REFUSAL_ANSWER, [FULL_SOURCE])
+        return self.answers.get(question, ask_result(REFUSAL_ANSWER))
+
+
+def test_repeat_runs_the_set_that_many_times_and_reports_stability_not_a_summary_per_run(capsys, reports_go_to_a_temporary_folder):
+    clients = []
+    factory = lambda: clients.append(Alternating(ANSWERS_G05_G17())) or clients[-1]        # noqa: E731
+    code = main(["--only", "g05,g17", "--repeat", "3"], client_factory=factory)
+    out = capsys.readouterr().out
+    assert code == 0 and len(clients) == 1 and clients[0].asked == ["g05", "g17"] * 3          # one client, three passes
+    assert "--- Run 1/3 ---" in out and "--- Run 3/3 ---" in out and out.count("Run 2/3: 1/2 passed") == 1
+    assert "== Stability over 3 runs ==" in out and "== Accuracy" not in out
+    assert "Accuracy per run   : 2/2, 1/2, 2/2  (mean 83.3%, min 50.0%, max 100.0%)" in out
+    assert "Same outcome every run: 1/2 questions" in out
+    assert "Not the same every run: g05 passed 2/3 (PASS → FALSE_REFUSAL → PASS)" in out
+    (path,) = saved_reports(reports_go_to_a_temporary_folder)
+    report = _json.loads(path.read_text(encoding="utf-8"))
+    assert report["options"]["repeat"] == 3 and len(report["runs"]) == 3 and report["overall"]["unstable_questions"] == ["g05"]
+
+
+def test_a_repeat_of_stable_answers_says_so_and_lists_recurring_flags():
+    runs = [[score_item(ROLLBACK, ask_result("It takes 9 hours.", [FULL_SOURCE], latency_ms=6000))] for _ in range(2)]
+    text = format_stability(runs)
+    assert "Same outcome every run: 1/1 questions" in text and "Not the same every run" not in text
+    assert "Hallucination flags: g05 uncited 2/2; g05 unsupported_quantity 2/2" in text
+    assert "Over 5.0 s      : 1 questions in every run, 0 in some runs" in text
+    assert "Hallucination flags: none in any run" in format_stability([[score_item(REFUSE_COOKIES, ask_result(REFUSAL_ANSWER))]] * 2)
+
+
+def test_one_line_per_run_when_repeating():
+    line = format_run_line(2, 3, [score_item(ROLLBACK, ask_result(GOOD, [FULL_SOURCE], latency_ms=7000)),
+                                  score_item(REFUSE_COOKIES, ask_result(REFUSAL_ANSWER, latency_ms=1000))])
+    assert line == "Run 2/3: 2/2 passed (100.0%) | no response 0 | median 4.0 s, 1 over 5.0 s | flagged 1/1"
+
+
+@pytest.mark.parametrize("bad", ["0", "-1", "11"])
+def test_a_repeat_count_outside_one_to_ten_is_refused_before_anything_runs(capsys, reports_go_to_a_temporary_folder, bad):
+    client = ScriptedClient({})
+    code = main(["--repeat", bad], client_factory=lambda: client)
+    captured = capsys.readouterr()
+    assert code == 2 and "--repeat must be between 1 and 10" in captured.err and client.asked == []
+    assert saved_reports(reports_go_to_a_temporary_folder) == []
+
+
+def test_questions_with_no_response_in_any_repeat_make_the_exit_code_1(capsys):
+    broken = {ROLLBACK.question: ask_result(status=503, error="HTTP 503")}
+    assert main(["--only", "g05", "--repeat", "2"], client_factory=lambda: ScriptedClient(broken)) == 1
+
+
+class InterruptedAt(ScriptedClient):
+    def __init__(self, answers, tag, occurrence):
+        super().__init__(answers)
+        self.tag, self.occurrence, self.calls = tag, occurrence, 0
+
+    def ask(self, question, top_k=None, tag=None):
+        if tag == self.tag:
+            self.calls += 1
+            if self.calls == self.occurrence:
+                raise KeyboardInterrupt
+        return super().ask(question, top_k, tag)
+
+
+def test_ctrl_c_saves_the_questions_that_had_finished_and_marks_the_report_incomplete(capsys, reports_go_to_a_temporary_folder):
+    code = main(["--only", "g05,g17,g18"], client_factory=lambda: InterruptedAt(ANSWERS_G05_G17(), "g18", 1))
+    captured = capsys.readouterr()
+    assert code == 130 and "Interrupted: saving what had finished." in captured.err and "Report saved to" in captured.out
+    (path,) = saved_reports(reports_go_to_a_temporary_folder)
+    report = _json.loads(path.read_text(encoding="utf-8"))
+    assert report["complete"] is False and [r["id"] for r in report["runs"][0]["results"]] == ["g05", "g17"]
+
+
+def test_ctrl_c_during_a_later_repeat_keeps_the_finished_runs_and_the_partial_one(capsys, reports_go_to_a_temporary_folder):
+    code = main(["--only", "g05,g17", "--repeat", "3"], client_factory=lambda: InterruptedAt(ANSWERS_G05_G17(), "g17", 2))
+    capsys.readouterr()
+    (path,) = saved_reports(reports_go_to_a_temporary_folder)
+    report = _json.loads(path.read_text(encoding="utf-8"))
+    assert code == 130 and report["complete"] is False
+    assert [len(run["results"]) for run in report["runs"]] == [2, 1]               # one whole run, then g05 of the second
+
+
+def test_ctrl_c_before_any_question_finished_saves_nothing(capsys, reports_go_to_a_temporary_folder):
+    code = main(["--only", "g05"], client_factory=lambda: InterruptedAt({}, "g05", 1))
+    assert code == 130 and "Report saved" not in capsys.readouterr().out and saved_reports(reports_go_to_a_temporary_folder) == []
+
+
+def test_a_report_that_cannot_be_saved_is_reported_and_the_results_are_still_shown(capsys, monkeypatch):
+    def broken(report, path):
+        raise OSError("read-only file system")
+    monkeypatch.setattr(run_module, "write_report", broken)
+    code, out, err = run_cli(capsys, ["--only", "g05,g17"], ANSWERS_G05_G17())
+    assert code == 1 and "Could not save the report to" in err and "read-only file system" in err
+    assert "== Accuracy" in out and "Overall            : 2/2" in out                  # the run's results were not lost

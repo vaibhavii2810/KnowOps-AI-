@@ -1048,3 +1048,31 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Revisit if:** flags are mostly false alarms on a bigger golden set (tighten the checks), a known document-name list is wanted for
   citations ("Source: X ›" could be parsed and compared with the real titles), or `--repeat N` lands (then report how often each flag
   recurs for the same question).
+
+### D-052 · Every evaluation run is saved as a JSON report; `--repeat N` shows which questions are unstable (Phase 13.5)
+- **Date · by · source:** 2026-11-07 · Vaishnavi (with Claude) · Build guide (13.5: "save results to an `eval_runs` table or a JSON report in the repo")
+- **Decision:** `python -m evals` writes `evals/reports/run-<UTC time>.json` after every run (`--report PATH` chooses the file,
+  `--no-report` skips it; the two cannot be combined). The new `evals/report.py` builds it: `schema_version` 1, whether the run
+  was `complete`, start/finish time, the target (in-process or the URL — never a credential), the options, the chat/embed model,
+  the golden set's SHA-256, the git commit and whether the working tree was dirty, a per-run summary, **every question's result**
+  (outcome, facts found/missing, retrieval rank, latency, slow flag, answer, source references, flags, judge verdict) and a
+  per-question **stability** table. `--repeat N` (1–10) runs the whole set N times and adds, per question, how many runs passed,
+  each run's outcome, which flags recurred and min/median/max latency; `overall.unstable_questions` lists those whose outcome
+  was not the same every time. Scratch reports (`run-*.json`) are git-ignored; a baseline is written on purpose with
+  `--report evals/reports/baseline-….json` and committed. The file is written atomically (temp file, then rename), and Ctrl-C
+  saves what was finished, marked `complete: false` and exiting 130. A failed save exits 1 but still prints the summary.
+- **Why:** the earlier runs lived only in terminal scrollback and in AGENTS.md prose, so "was it better than last week?" had no
+  checkable answer. A JSON file in the repo needs no schema migration, no database and no credentials, and can be diffed in a
+  pull request. Run-to-run variance (temperature 0.2) was already seen several times (`g09`, `g12`, `g16`); one run is a sample,
+  so `--repeat` makes the variance itself the output.
+- **Alternatives considered:** an `eval_runs` table in Postgres (the guide's other option — it would need a migration on both Neon
+  databases, put eval data beside production data, and cannot be diffed or reviewed; revisit if trends over many runs are wanted);
+  committing every run (noise in history and merge conflicts — hence the ignored `run-*.json`); CSV (loses the nested flags and
+  sources); storing the retrieved chunk text (copies the runbooks into every report and bloats it — source references are enough
+  to find the chunk).
+- **Tradeoff accepted:** reports hold answers, so a model that echoed something sensitive would leave it in a file — mitigated by
+  storing no passwords, tokens, headers or request bodies and no retrieved text, with a test that plants sentinel values in every secret setting
+  and checks none reaches a report. `git_dirty` records that a baseline was produced from uncommitted code instead of forbidding it. The schema is versioned
+  but there is no migration tool: a changed schema bumps `schema_version` and old files are simply old.
+- **Revisit if:** a trend across many runs is wanted (then an `eval_runs` table or a small comparison command), reports get large,
+  or a second consumer (CI, a dashboard) needs a stable schema.

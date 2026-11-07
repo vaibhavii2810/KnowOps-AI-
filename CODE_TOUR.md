@@ -203,10 +203,28 @@ Runbooks (.md) ──ingest──▶ Postgres (chunks + numbers) ──search─
 
 ---
 
-## Phases 13–15 (not built yet)
-Add a section here when each phase is done (the `/phase-done` step is a good moment):
-13 AI evaluation · 14 final deployment · 15 docs.
+## Phase 13 — AI evaluation (`evals/`)
+- **The idea:** "does the assistant give right answers?" should be a number you can re-measure, not a feeling. `python -m evals`
+  asks a fixed list of questions through the real `/ask` and scores what comes back. It is separate from `pytest` because it
+  uses real Gemini and the real database.
+- **The questions (`golden_set.json`, `golden.py`):** 19 questions — 16 the runbooks answer, 3 the assistant must refuse. Each
+  answerable one lists the runbook section it comes from and a few short *facts* the answer must contain. `validate()` checks, with
+  no network, that every fact really is in that section, so the test itself cannot be wrong without a failing test.
+- **Asking and scoring (`client.py`, `scoring.py`, `run.py`):** the client calls `/ask` in-process (fast, uses your `.env`) or
+  over HTTP against a deployed URL. An answer passes only if it contains every expected fact; the report also says whether the
+  expected runbook section was among the sources (retrieval), and whether refusals happened when they should.
+- **Judge (`judge.py`):** `--judge` asks Gemini for a second opinion (correct / partial / incorrect) and whether the answer
+  stays within the retrieved text. It never changes the keyword result.
+- **Speed and hallucination flags (`scoring.py`, `hallucination.py`):** each question's time is shown and anything over 5 s is
+  marked `SLOW`. Answers with a number, command or citation that the retrieved text does not support are flagged for a human
+  to look at — heuristics, not verdicts.
+- **Reports (`report.py`):** every run is saved as JSON in `evals/reports/` (scratch runs are git-ignored; a baseline is
+  committed on purpose). `--repeat N` runs the set N times, because the model's answers vary a little and one run is only a sample.
+- **Try it:** `python -m evals --only g01,g05`, then open the file it names at the end. Full run:
+  `python -m evals --repeat 3 --judge`.
+- **Not built yet:** 14 final deployment · 15 docs. Add a section here when each is done.
 
 ## How to read the code yourself (suggested order)
 `config.py` → `db.py` → `schemas.py` → `rag.py` → `llm.py` → the `/ask` route in `main.py` → `crm.py` → `agent.py`
-→ then the shields and eyes: `retry.py` → `guardrails.py` → `ratelimit.py` → `logs.py` → `metrics.py`.
+→ then the shields and eyes: `retry.py` → `guardrails.py` → `ratelimit.py` → `logs.py` → `metrics.py`
+→ then the evaluation: `evals/golden.py` → `scoring.py` → `client.py` → `run.py` → `report.py`.

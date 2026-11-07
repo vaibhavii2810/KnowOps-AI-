@@ -13,5 +13,9 @@ venv/
 *.key
 .vercel/
 
+# Evaluation reports (Phase 13.5): scratch runs stay local; a baseline is committed on purpose as baseline-*.json
+evals/reports/run-*.json
+evals/reports/*.tmp
+
 # macOS
 .DS_Store

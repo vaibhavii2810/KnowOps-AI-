@@ -46,7 +46,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
 | 11 | Testing & QA | Vaishnavi | ✅ Done — plain `pytest` makes zero real calls; green on GitHub Actions (3.11 + 3.12) for `main` and `sprint-2` at `6111862` (D-038–D-041) |
 | 12 | Logging & monitoring | Vaishnavi | ✅ Done — JSON logs + request id (D-042), `agent_run` trace (D-043), checked in Vercel's runtime logs (12.3, which exposed an outage fixed by pinning deps, D-044); `GET /metrics` (12.4, stretch, D-046) deployed and verified live |
-| 13 | AI eval harness | Vaishnavi | 🟡 Partial — 13.1 (golden set, D-047), 13.2 (`python -m evals` runner, keyword scoring + opt-in judge, D-048) 13.3 (per-question latency + slow flag, D-050) and 13.4 (likely-hallucination flags, D-051) done; accuracy baselines 17–19/19; **every question is over 5 s** (median 5.6 s in-process, 14 s deployed); 13.5 to do. The older `tests/eval_rag.py` is retrieval-only |
+| 13 | AI eval harness | Vaishnavi | ✅ Done — 13.1 golden set (D-047), 13.2 `python -m evals` runner, keyword scoring + opt-in judge (D-048), 13.3 per-question latency + slow flag (D-050), 13.4 likely-hallucination flags (D-051), 13.5 JSON report + `--repeat` (D-052); committed baseline `evals/reports/baseline-2026-11-07.json` (3 runs: 18/19, 19/19, 19/19); **every question is over 5 s** (median ~5.8 s in-process, 14 s deployed). The older `tests/eval_rag.py` is retrieval-only |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
 | 15 | Docs & wrap-up | Vaishnavi | ⬜ Not started |
 
@@ -370,7 +370,7 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   agent did" holds — proven live in 12.3 (request id `kops-12-3-1bfd6d939735`) and again for the 12.2 fixes (`kops-d045-agent-01`).
   12.4 (the guide's optional stretch) is also live and verified, as above.
 
-**Phase 13 — AI evaluation harness** 🟡 in progress (13.1–13.4 done)
+**Phase 13 — AI evaluation harness** ✅
 - 13.1 Done. New `evals/` package (D-047): `evals/golden_set.json` — **19 items**: 16 in-scope questions covering all 5 runbooks
   (DR 4, Kubernetes 5, incident playbooks 3, on-call 2, API 2; kinds numeric / procedure / command / factual / diagnosis / list)
   and **3 that must be refused** (cookies, the 2022 World Cup, and a near-domain trap: Terraform for EKS). Each in-scope item has
@@ -452,7 +452,29 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   rows on a random 1% of writes and the extra `DELETE` changed the statement list the test checks (latent since 11.3). Reproduced by
   forcing the branch; the test now pins the dice; the whole suite also passes with `random.random` forced to 0.0 and to 0.999.
   539 passed, 109 live deselected.
-- Still to do: 13.5 JSON report / `eval_runs` table (and probably `--repeat N`, since one run is a sample).
+- 13.5 Done. Every run is saved as JSON (D-052; new `evals/report.py`): `evals/reports/run-<UTC time>.json` by default (git-ignored),
+  `--report PATH` to choose the file (e.g. a committed `baseline-*.json`), `--no-report` to skip. A report holds `schema_version`, `complete`,
+  times, target, options, models, the golden set's SHA-256, git commit + dirty flag, a summary per run, every question's result (outcome,
+  facts, retrieval rank, latency, answer, source references — not their text —, flags, judge) and a per-question stability table.
+  `--repeat N` (1–10) repeats the whole set and prints/records which questions did not come out the same every time. Written atomically;
+  Ctrl-C saves what finished (`complete: false`, exit 130); a failed save exits 1 but the summary is still printed. Offline tests:
+  `tests/test_eval_report.py` (20) and the new CLI tests in `tests/test_eval_runner.py` (126 together); 18 mutation checks (tuples left in the
+  data, retrieved text stored, wrong pass counts, nothing ever unstable, flags counted per flag, failed calls in timing, temp file left,
+  unicode escaped, interrupted run called complete, scratch reports no longer ignored, git flag inverted, repeat unchecked, `--no-report`
+  ignored, Ctrl-C losing the run under way, interrupted exit 0, failed save not exit 1, repeat ignored) each fail them. A bug found on the
+  way: my first tests wrote a stray report into the repo's `evals/reports/`; an autouse fixture now redirects reports to a temp folder and
+  checks at teardown. 574 passed, 109 live deselected.
+- **Live baseline (2026-11-07, `73c4023` + uncommitted 13.5 code, so `git_dirty: true`; `--repeat 3 --judge`, in-process, 13 min):**
+  accuracy **18/19, 19/19, 19/19** (mean 98.2%); the one miss was not a wrong answer but `g09` in run 1: **no response** — Gemini's read
+  timed out (`HTTP 503 … The read operation timed out`, 28.5 s), the first time the 25 s timeout from D-045 fired live, and it did what it
+  should (a clear 503 instead of a ~90 s hang); `g09` passed in runs 2 and 3. The command exits 1 when any question has no response, so this run
+  exited 1. Flags: 0/15, 0/16 and 1/16 answers; the one flag (`g06`, run 3, `unsupported_quantity: 3 replicas`) is a **false positive** — the
+  runbook says "between 3 and 10 replicas" and the answer repeated it; the quantity parser only reads "N replicas", not ranges
+  ("3 and 10 replicas"). Left as is so the baseline matches the code that produced it. Judge: every answer `correct` and `faithful` in
+  the lines checked. Latency: 18 questions over 5 s in every run, medians 6.0 / 6.1 / 5.8 s. The scan for `.env` secret values in the report found none
+  (only the two non-secret model names).
+- **Phase 13 done-when check (2026-11-07):** one command (`python -m evals`) runs the golden set and prints an accuracy / latency /
+  hallucination-flag summary, and saves it as JSON — shown live above. Accuracy is a sample (temperature 0.2), not a guarantee.
 
 ## Phase log
 
@@ -473,6 +495,7 @@ Append one line per finished phase (newest last).
 | 2026-11-03 | 9 | Vaishnavi (with Claude) | Closed the last open item: scheduled `/cron/reindex` run confirmed in the Vercel Cron Jobs dashboard (per Vaishnavi); Phase 9 now ✅ |
 | 2026-11-06 | 11 | Vaishnavi (with Claude) | Offline Gemini/Postgres fakes + network guard (11.1); `live` marker and auth/RAG-ranking/dispatch unit tests (11.2); mocked `/ask` round trip (11.3); edge cases + in-memory `MemoryDB` with a real-Postgres twin of every DB test (11.4); GitHub Actions on 3.11 + 3.12, green on first run (11.5) — suite went from 2m19s with live calls to ~2s with none |
 | 2026-11-06 | 12 | Vaishnavi (with Claude) | Structured JSON logs with a request id on every line (12.1); an `agent_run` event with the bounded trace on any non-clean run (12.2); verified on Vercel's runtime logs (12.3) — which exposed a production outage (`google-genai` 3.0.0 → Gemini `v1` 404) fixed by pinning dependencies, plus a raw-JSON summary and a 97 s `/ask` hang fixed with a plain-text summary and a Gemini timeout + retry budget; Postgres-backed `GET /metrics` (12.4, stretch — deployed as `80d779d`; a known request mix was counted exactly on Production, and its first numbers showed database-backed routes taking 2–4 s) |
+| 2026-11-07 | 13 | Vaishnavi (with Claude) | 19-question golden set checked against the runbooks (13.1); `python -m evals` runner with keyword scoring and an opt-in Gemini judge, accepted fact variants (13.2); per-question latency with a >5 s flag (13.3); likely-hallucination flags (13.4); JSON reports and `--repeat N` (13.5). Baseline of 3 live runs: 18/19, 19/19, 19/19 (the miss was a Gemini read timeout); every question is over 5 s — the database-latency finding, still unaddressed |
 
 ## Deployment
 
@@ -544,7 +567,7 @@ static/     web console (index.html, css, js)
 n8n/        incident_triage_workflow.json (alert → ticket → triage → Slack) ·
             workflow.json (escalate_to_human → Slack, Phase 9.4/9.5, D-031)
 tests/      pytest suite + eval_rag.py (conftest.py: offline fakes, MemoryDB; pytest.ini at repo root)
-evals/      AI evaluation harness (Phase 13): golden_set.json + golden.py (D-047) · run.py, client.py, scoring.py, judge.py — `python -m evals` (D-048)
+evals/      AI evaluation harness (Phase 13): golden_set.json + golden.py (D-047) · run.py, client.py, scoring.py, judge.py, hallucination.py, report.py — `python -m evals` (D-048–D-052) · reports/ (baseline-*.json committed, run-*.json ignored)
 .github/    workflows/tests.yml — CI: plain pytest on every push/PR, Python 3.11 + 3.12 (Phase 11.5, D-041)
 ```
 
@@ -583,7 +606,7 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - **Tests can't see a changed SQL statement that keeps its matching text** (D-040): `MemoryDB` answers by fragment, so
   e.g. flipping the history query's `ORDER BY` goes unnoticed offline. The `live` variants (`pytest -m live`) catch it;
   run them before a deploy that touches SQL.
-- **The hallucination flags are heuristics (Phase 13.4, D-051):** they miss a contradiction that changes no number or code and a citation of a
+- **The hallucination flags are heuristics (Phase 13.4, D-051):** a number written as a range ("between 3 and 10 replicas") is flagged as `3 replicas` although right (seen live, 13.5 baseline); they miss a contradiction that changes no number or code and a citation of a
   document that does not exist (only `--judge` notices), and can flag a correct answer that reformats a command or derives a number.
   Read them as a list of answers worth a look.
 - **Evaluation results vary run to run** (temperature 0.2): treat a single run as a sample. A run with `--judge` takes ~3 minutes
@@ -602,7 +625,7 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - Tests: `pytest` (offline, ~2s; tests marked `live` are skipped). `pytest -m live` runs the ones that need the real
   Neon DB and Gemini, including the real-Postgres variant of every `db_backend` test (D-039, D-040). New tests should use
   `fake_gemini`, `fake_db` or `memory_db` (D-038, D-040); a test needing a new SQL statement must add it to `MemoryDB`.
-- Evaluation: `python -m evals` (in-process, real Gemini, ~1–3 min; `--judge`, `--only g01,g05`, `--slow-seconds 3`, `--url https://… ` for a
+- Evaluation: `python -m evals` (in-process, real Gemini, ~1–3 min; `--judge`, `--only g01,g05`, `--slow-seconds 3`, `--repeat 3`, `--report PATH` / `--no-report`, `--url https://… ` for a
   deployed site). It calls real services and writes conversations into the database in `.env`, so it is not part of `pytest` (D-048).
 - Never commit `.env` or real keys.
 

@@ -6,7 +6,7 @@ An AI-powered technical support backend for DevOps/SRE teams. It answers support
 runbook knowledge base with citations (RAG), and runs an agent that can search the knowledge base,
 create, check and triage incident tickets, and escalate to a human.
 
-**Progress:** Phases 1–12 of 15 complete. Live status of every phase: [AGENTS.md](AGENTS.md#phase-status). New to the code? Start with [CODE_TOUR.md](CODE_TOUR.md).
+**Progress:** Phases 1–13 of 15 complete. Live status of every phase: [AGENTS.md](AGENTS.md#phase-status). New to the code? Start with [CODE_TOUR.md](CODE_TOUR.md).
 
 ## Stack (free tier)
 
@@ -34,7 +34,7 @@ create, check and triage incident tickets, and escalate to a human.
 Tests: `pytest` (skips tests marked `live`) · `pytest -m live` (tests that need the real database and Gemini)
 
 Evaluation: `python -m evals` runs 19 golden questions through the real `/ask` and prints accuracy (add `--judge` for a Gemini
-second opinion, `--url https://…` to test a deployed site). Each question's time is shown and anything over 5 s is flagged `SLOW`; answers that look unsupported by the retrieved runbook text are flagged too. It uses real services, so it is separate from `pytest`.
+second opinion, `--url https://…` to test a deployed site). Each question's time is shown and anything over 5 s is flagged `SLOW`; answers that look unsupported by the retrieved runbook text are flagged too. Every run is saved to `evals/reports/run-<time>.json` (git-ignored; `--report PATH` / `--no-report`), and `--repeat 3` runs the set three times and shows which questions are unstable. It uses real services, so it is separate from `pytest`.
 
 ## Project layout
 
@@ -46,7 +46,7 @@ data/docs/  runbook knowledge base
 static/     web console
 n8n/        n8n workflow export
 tests/      pytest suite (offline fakes in conftest.py) + RAG eval
-evals/      AI evaluation harness: golden question set and the `python -m evals` runner (Phase 13)
+evals/      AI evaluation harness: golden question set and the `python -m evals` runner and its JSON reports (Phase 13)
 .github/    CI workflow: runs pytest on every push
 ```
 

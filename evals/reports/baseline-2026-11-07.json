@@ -1,0 +1,4023 @@
+{
+  "schema_version": 1,
+  "tool": "python -m evals",
+  "complete": true,
+  "started_at": "2026-11-07T17:32:14+00:00",
+  "finished_at": "2026-11-07T17:45:22+00:00",
+  "target": {
+    "mode": "in-process",
+    "url": null,
+    "latency_note": "measured in this process on this machine, with the database and Gemini from .env — not on a deployed site"
+  },
+  "options": {
+    "judge": true,
+    "top_k": null,
+    "slow_seconds": 5.0,
+    "delay": 0.0,
+    "repeat": 3,
+    "quota_wait": 30.0,
+    "only": null
+  },
+  "environment": {
+    "chat_model": "gemini-flash-lite-latest",
+    "embed_model": "gemini-embedding-001",
+    "golden_set_sha256": "d99ce5dc2009d9c833a79a0cdc72e7fcccbb175f2e83521e45e44393bd247065",
+    "git_commit": "73c4023",
+    "git_dirty": true
+  },
+  "overall": {
+    "runs": 3,
+    "accuracy_per_run": [
+      0.9473684210526315,
+      1.0,
+      1.0
+    ],
+    "accuracy_mean": 0.9824561403508771,
+    "accuracy_min": 0.9473684210526315,
+    "accuracy_max": 1.0,
+    "unstable_questions": [
+      "g09"
+    ]
+  },
+  "runs": [
+    {
+      "index": 1,
+      "summary": {
+        "total": 19,
+        "passed": 18,
+        "errors": 1,
+        "in_scope_total": 16,
+        "in_scope_passed": 15,
+        "false_refusals": 0,
+        "mean_coverage": 1.0,
+        "retrieval_hits": 15,
+        "retrieval_total": 15,
+        "mrr": 0.888888888888889,
+        "refusal_total": 3,
+        "refusals_correct": 3,
+        "answered_out_of_scope": 0,
+        "judged": 18,
+        "judge_counts": {
+          "correct": 18
+        },
+        "judge_agrees": 18,
+        "latency": {
+          "count": 18,
+          "mean_ms": 6604.278247666646,
+          "median_ms": 6002.166541499946,
+          "p95_ms": 17514.493166999728,
+          "max_ms": 17514.493166999728,
+          "threshold_ms": 5000.0,
+          "slow": [
+            [
+              "g08",
+              17514.493166999728
+            ],
+            [
+              "g01",
+              6932.748209000238
+            ],
+            [
+              "g10",
+              6813.386249999894
+            ],
+            [
+              "g05",
+              6536.493000000064
+            ],
+            [
+              "g16",
+              6343.665500000043
+            ],
+            [
+              "g12",
+              6340.683582999645
+            ],
+            [
+              "g14",
+              6246.195166999769
+            ],
+            [
+              "g11",
+              6177.762166000321
+            ],
+            [
+              "g06",
+              6175.364582999919
+            ],
+            [
+              "g15",
+              5828.968499999974
+            ],
+            [
+              "g03",
+              5733.982124999784
+            ],
+            [
+              "g04",
+              5662.964957999975
+            ],
+            [
+              "g02",
+              5567.412416000025
+            ],
+            [
+              "g19",
+              5540.688042000056
+            ],
+            [
+              "g13",
+              5508.36020800034
+            ],
+            [
+              "g18",
+              5453.799166999943
+            ],
+            [
+              "g17",
+              5419.305249999979
+            ],
+            [
+              "g07",
+              5080.736166999941
+            ]
+          ]
+        },
+        "hallucination": {
+          "answered": 15,
+          "flagged": 0,
+          "by_kind": {},
+          "flagged_items": []
+        },
+        "accuracy": 0.9473684210526315
+      },
+      "results": [
+        {
+          "id": "g01",
+          "question": "What are the RTO and RPO targets for Tier-1 services?",
+          "kind": "numeric",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "4 hours",
+            "1 hour"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 2,
+          "refused": false,
+          "latency_ms": 6932.7,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g01",
+          "answer": "Based on the Disaster Recovery Runbook (1. Overview), the targets for Tier-1 services are:\n\n* **RTO Target:** 4 hours\n* **RPO Target:** 1 hour (maximum data loss tolerance)",
+          "sources": [
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "2. Incident Classification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.729517
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "1. Overview",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.728335
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "When to Escalate Immediately (don't wait):",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.667295
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "8. Contact Escalation Matrix",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.644648
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.3 Verification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.629097
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately states both the RTO and RPO targets for Tier-1 services as found in the reference and retrieved text.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g02",
+          "question": "Which severity level covers a partial outage affecting more than 50% of users, and what is its recovery time objective?",
+          "kind": "numeric",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "P2",
+            "2 hours"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5567.4,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g02",
+          "answer": "According to the Disaster Recovery Runbook (2. Incident Classification), a partial outage affecting more than 50% of users is classified as **P2 – High**, and its Recovery Time Objective (RTO) is **2 hours**.",
+          "sources": [
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "2. Incident Classification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.743683
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "When to Escalate Immediately (don't wait):",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.69893
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "1. Overview",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.677249
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "3. HTTP 502 Bad Gateway",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.642043
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "3. HTTP 502 Bad Gateway",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.641305
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately provides the severity level (P2 – High) and the recovery time objective (2 hours) based on the reference text.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g03",
+          "question": "What are the steps of the first response in the first 15 minutes of an incident?",
+          "kind": "procedure",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "PagerDuty",
+            "5 minutes",
+            "War Room",
+            "Incident Commander"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5734.0,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g03",
+          "answer": "According to the *Disaster Recovery Runbook*, the steps for the first response (0–15 minutes) are:\n\n1. **Acknowledge the alert** in PagerDuty within 5 minutes.\n2. **Create a War Room** in Slack: `#incident-<date>-<service>`.\n3. **Assign an Incident Commander (IC)** — the on-call SRE lead.\n4. **Notify stakeholders** using the `/incident broadcast` Slack bot.\n5. **Begin the timeline log** in the incident management portal.\n\nSource: Disaster Recovery Runbook › 3. First Response (0–15 Minutes)",
+          "sources": [
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "3. First Response (0–15 Minutes)",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.736923
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "7. Post-Incident Actions",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.694077
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "4. Alert Triage Decision Tree",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.691755
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "2. On-Call Responsibilities",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.687868
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "How to Escalate:",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.681862
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer provides all the correct steps and key facts from the reference text without any contradictions.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g04",
+          "question": "What command promotes the standby database replica to primary during a manual failover, and which host do I run it on?",
+          "kind": "command",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "pg_ctl promote",
+            "db-replica-01"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5663.0,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g04",
+          "answer": "To promote the standby database replica to primary, you run the following command:\n\n`pg_ctl promote -D /var/lib/postgresql/16/main`\n\nYou run this command on the standby replica host (`db-replica-01.internal`), which you access by SSHing into it first (`ssh ops@db-replica-01.internal`).\n\nSource: Disaster Recovery Runbook",
+          "sources": [
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.2 Manual Failover Steps",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.7701
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.1 Detecting Primary Database Failure",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.645667
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.3 Verification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.64138
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.2 Manual Failover Steps",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.609326
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.3 `GET /health` — 503",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.578243
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer provides the correct command and host as requested by the reference.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g05",
+          "question": "What command rolls the knowops-api deployment back to revision 3?",
+          "kind": "command",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "rollout undo",
+            "--to-revision=3"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 6536.5,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g05",
+          "answer": "To roll the `knowops-api` deployment back to revision 3 in the production namespace, use the following command:\n\n```bash\nkubectl rollout undo deployment/knowops-api --to-revision=3 -n production\n```\n\nSource: Kubernetes Cluster Operations Guide",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.3 Rollback",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.799685
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "5.2 Rollback to Previous Version",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.770887
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.1 Deploy a New Version",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.735166
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "5.1 Kubernetes Pod Recovery",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.714854
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.2 Canary Deployment",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.707181
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer provides the exact command required to roll back to revision 3.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g06",
+          "question": "How is the Horizontal Pod Autoscaler configured for the API, and what triggers scaling?",
+          "kind": "factual",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "10 replicas",
+            "70%",
+            "80%",
+            "requests per second"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 6175.4,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g06",
+          "answer": "Based on the provided documentation, the Horizontal Pod Autoscaler (HPA) is configured to scale between 3 and 10 replicas. \n\nIt is triggered to scale based on the following metrics:\n* CPU utilization > 70%\n* Memory utilization > 80%\n* Custom metric: requests per second > 100\n\nSource: *Kubernetes Cluster Operations Guide › 5.2 HPA Configuration*",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "5.2 HPA Configuration",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.759348
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "5.1 Manual Scaling",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.752636
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "5.2 HPA Configuration",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.737558
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.1 `HIGH_CPU_USAGE` — Pod CPU > 85%",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.657402
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "5. Database Connection Pool Exhausted",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.653787
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer includes all key facts and accurately reflects the reference text and reference answer.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g07",
+          "question": "How does the canary deployment work, and how long should error rates be monitored?",
+          "kind": "procedure",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "20%",
+            "30 minutes",
+            "Datadog"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5080.7,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g07",
+          "answer": "For risk-sensitive releases, a canary deployment works by deploying to 20% of traffic first using the following steps:\n1. Scale down the current deployment to 80% (`kubectl scale deployment/knowops-api --replicas=4 -n production`)\n2. Deploy the canary with the new image (`kubectl apply -f k8s/canary-deployment.yaml -n production`, where 1 replica equals ~20% traffic)\n\nError rates should be monitored in Datadog for 30 minutes. If healthy, you proceed with a full rollout by scaling the deployment to 5 replicas and deleting the canary deployment.\n\nSource: *Kubernetes Cluster Operations Guide › 4.2 Canary Deployment*",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.2 Canary Deployment",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.745544
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.2 Canary Deployment",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.708348
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "4. Alert Triage Decision Tree",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.646025
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.3 Verification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.638779
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.1 Deploy a New Version",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.629799
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately captures all key facts and steps from the reference text regarding canary deployments and error rate monitoring.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g08",
+          "question": "How do I safely drain a node for maintenance and put it back into service afterwards?",
+          "kind": "command",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "kubectl drain",
+            "--ignore-daemonsets",
+            "uncordon"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 17514.5,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g08",
+          "answer": "To safely drain a node for maintenance and put it back into service afterwards, follow these steps:\n\n1. **Safely drain the node (evict all pods):**\n   ```bash\n   kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data\n   ```\n\n2. **Verify the node is cordoned:**\n   ```bash\n   kubectl get nodes\n   ```\n\n3. **After maintenance, uncordon the node:**\n   ```bash\n   kubectl uncordon <node-name>\n   ```\n\n*Source: Kubernetes Cluster Operations Guide › 6.1 Draining a Node for Maintenance*",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "6.1 Draining a Node for Maintenance",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.778731
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.2 Manual Failover Steps",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.65958
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "5.2 High Memory Usage in API Pods",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.652092
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.2 Canary Deployment",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.639952
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.3 Verification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.639472
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer includes all key facts and steps from the reference text accurately.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g09",
+          "question": "Where are production secrets stored, and where must they never be stored?",
+          "kind": "factual",
+          "outcome": "ERROR",
+          "passed": false,
+          "facts_found": [],
+          "facts_missing": [],
+          "coverage": null,
+          "retrieved": null,
+          "retrieval_rank": null,
+          "refused": false,
+          "latency_ms": 28499.6,
+          "slow": false,
+          "status": 503,
+          "error": "HTTP 503: AI generation failed — Gemini API error: The read operation timed out",
+          "request_id": "kops-eval-g09",
+          "answer": "",
+          "sources": [],
+          "flags": [],
+          "judge": null
+        },
+        {
+          "id": "g10",
+          "question": "A pod is in CrashLoopBackOff with exit code 137. What does that indicate and what is the short-term fix?",
+          "kind": "diagnosis",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "OOMKilled",
+            "memory limit",
+            "1Gi"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 6813.4,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g10",
+          "answer": "Based on the knowledge base:\n\n* **Indication:** Exit code 137 combined with `CrashLoopBackOff` and `Reason: OOMKilled` indicates that the container exceeded its memory limit (*Source: Common Incident Playbooks › 2. Pod OOMKilled / CrashLoopBackOff*).\n* **Short-term fix:** Raise the memory limit (for example, from `512Mi` to `1Gi`) in the deployment manifest and apply it (*Source: Common Incident Playbooks › 2. Pod OOMKilled / CrashLoopBackOff*).",
+          "sources": [
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "2. Pod OOMKilled / CrashLoopBackOff",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.820202
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "2. Pod OOMKilled / CrashLoopBackOff",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.735483
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "5.1 Kubernetes Pod Recovery",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.701643
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.1 `HIGH_CPU_USAGE` — Pod CPU > 85%",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.690583
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "3. HTTP 502 Bad Gateway",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.687486
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately identifies the cause as OOMKilled/exceeding memory limit and provides the correct short-term fix of raising the memory limit to 1Gi.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g11",
+          "question": "What are the common causes of a sudden spike in 401 responses across all users?",
+          "kind": "diagnosis",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "JWT_SECRET",
+            "clock skew",
+            "Bearer"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 6177.8,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g11",
+          "answer": "According to the *Common Incident Playbooks*, the common causes for a sudden spike of HTTP 401 responses across all users are:\n\n* `JWT_SECRET` was rotated, but some pods are still running with the old value, causing tokens signed by one pod to fail on another.\n* Server clock skew makes freshly issued tokens look expired.\n* Clients are sending the token without the `Bearer ` prefix.\n\nSource: *Common Incident Playbooks*",
+          "sources": [
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "4. JWT Authentication Failures",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.827527
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "3.2 Token Not Accepted After Password Reset",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.735237
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "2. Common HTTP Error Codes",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.69109
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "3.1 `401 Unauthorized` — \"Could not validate credentials\"",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.68843
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "3.1 `401 Unauthorized` — \"Could not validate credentials\"",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.679612
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "All key facts from the reference answer are accurately included without any contradictions.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g12",
+          "question": "How do I fix an exhausted database connection pool, and which connection string should the application use?",
+          "kind": "procedure",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "-pooler",
+            "10 minutes",
+            "pooler size"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 6340.7,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g12",
+          "answer": "To fix an exhausted database connection pool, you can take the following steps:\n\n1. Terminate sessions that are idle in a transaction for more than 10 minutes using the following query (Source: *On-Call Guide & Incident Response Playbook*):\n   ```sql\n   SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle' AND query_start < now() - interval '10 minutes';\n   ```\n2. Restart the API pods to flush the connection pool (Source: *On-Call Guide & Incident Response Playbook*).\n3. If traffic is legitimately higher, scale the pooler size before scaling API replicas (Source: *Common Incident Playbooks*).\n\nAdditionally, make sure the application uses the pooled (`-pooler`) connection string, not the direct one (Source: *Common Incident Playbooks*).",
+          "sources": [
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "5. Database Connection Pool Exhausted",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.709923
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.2 `DB_CONNECTION_POOL_EXHAUSTED` — No available DB connections",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.698968
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "5. Database Connection Pool Exhausted",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.689502
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.2 `DB_CONNECTION_POOL_EXHAUSTED` — No available DB connections",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.688633
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.1 `POST /ask` — 500 Internal Server Error",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.657753
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately captures all key facts and steps from the reference answer and retrieved text without any contradictions.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g13",
+          "question": "When should an on-call engineer escalate immediately without waiting?",
+          "kind": "list",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "platform outage",
+            "data loss",
+            "security breach",
+            "SLA breach"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5508.4,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g13",
+          "answer": "Based on the \"On-Call Guide & Incident Response Playbook,\" an on-call engineer should escalate immediately without waiting in the following situations:\n\n- Full platform outage (all API endpoints returning 5xx)\n- Data loss detected or suspected\n- Security breach or unauthorized access\n- SLA breach imminent (<1 hour to SLA violation)\n\nSource: On-Call Guide & Incident Response Playbook",
+          "sources": [
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "When to Escalate Immediately (don't wait):",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.774205
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "2. On-Call Responsibilities",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.759835
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "How to Escalate:",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.743228
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "8. On-Call Health & Wellness",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.741644
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "1. Purpose",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.734451
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately lists all the conditions for immediate escalation matching the reference and key facts.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g14",
+          "question": "What should I do when the GEMINI_API_503 alert fires?",
+          "kind": "procedure",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "15 minutes",
+            "degraded mode",
+            "exponential backoff"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 3,
+          "refused": false,
+          "latency_ms": 6246.2,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g14",
+          "answer": "When the `GEMINI_API_503` alert fires (indicating that the upstream AI service is unavailable due to high demand or an outage), take the following immediate actions:\n\n* Check the Google Cloud Status at `status.cloud.google.com`.\n* Note that the `chat_completion()` function includes automatic retry logic with exponential backoff (up to 3 attempts).\n* If the issue persists for more than 15 minutes, switch to degraded mode (returning cached answers only).\n* Notify users with the message: \"AI responses may be delayed\".\n\nSource: *On-Call Guide & Incident Response Playbook*",
+          "sources": [
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.1 `POST /ask` — 500 Internal Server Error",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.773807
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "2. Common HTTP Error Codes",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.740888
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.5 `GEMINI_API_503` — Upstream AI service unavailable",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.731414
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.3 `GET /health` — 503",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.704938
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "5.1 Slow `/ask` Response Times",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.700499
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer includes all key facts from the reference and accurately reflects the retrieved text.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g15",
+          "question": "What is the expected total response time target for /ask, and how do I check that vector search is using the index?",
+          "kind": "numeric",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "P95",
+            "4 seconds",
+            "EXPLAIN ANALYZE"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5829.0,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g15",
+          "answer": "Based on the KnowOps knowledge base:\n\n* **Expected total P95 target for `/ask`:** < 4 seconds (Source: *API Troubleshooting Guide › 5.1 Slow `/ask` Response Times*).\n* **How to check that vector search is using the index:** Run the following `EXPLAIN ANALYZE` query, which must show `\"Index Scan using chunks_embedding_idx\"` (if `\"Seq Scan\"` appears, the index may be missing):\n\n```sql\nEXPLAIN ANALYZE\nSELECT content, 1 - (embedding <=> '[...]'::vector) AS similarity\nFROM chunks\nORDER BY embedding <=> '[...]'::vector\nLIMIT 5;\n```\n*(Source: API Troubleshooting Guide › 5.1 Slow `/ask` Response Times)*",
+          "sources": [
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "5.1 Slow `/ask` Response Times",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.796066
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "5.1 Slow `/ask` Response Times",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.751525
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "6. Knowledge Base Returns No Results",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.731258
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.4 `API_LATENCY_HIGH` — P99 latency > 2s",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.731151
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.1 `POST /ask` — 500 Internal Server Error",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.706326
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer provides all required key facts accurately and matches the reference.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g16",
+          "question": "What are the most common causes of a 500 error on POST /ask?",
+          "kind": "diagnosis",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "Gemini API",
+            "Database Connection",
+            "Empty Embedding"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 2,
+          "refused": false,
+          "latency_ms": 6343.7,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g16",
+          "answer": "Based on the knowledge base, the most common causes of a 500 Internal Server Error on `POST /ask` are:\n\n1. **Gemini API Unavailable (503)** (Source: *API Troubleshooting Guide › 4.1 `POST /ask` — 500 Internal Server Error*)\n2. **Database Connection Failure** (Source: *API Troubleshooting Guide › 4.1 `POST /ask` — 500 Internal Server Error*)\n3. **Empty Embedding Returned** (caused by passing an empty string to `embed_query()`) (Source: *API Troubleshooting Guide › 4.1 `POST /ask` — 500 Internal Server Error*)\n4. **No Chunks Found (no RAG context)** (happens when the knowledge base is empty and no documents have been ingested) (Source: *API Troubleshooting Guide › 4.1 `POST /ask` — 500 Internal Server Error*)",
+          "sources": [
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "2. Common HTTP Error Codes",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.699374
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.1 `POST /ask` — 500 Internal Server Error",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.696527
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.1 `POST /ask` — 500 Internal Server Error",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.691407
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "6. Knowledge Base Returns No Results",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.688261
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.3 `GET /health` — 503",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.677082
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately lists all key facts from the reference answer and retrieved text without any contradictions.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g17",
+          "question": "What is the best recipe for making chocolate chip cookies?",
+          "kind": "refusal",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [],
+          "facts_missing": [],
+          "coverage": null,
+          "retrieved": null,
+          "retrieval_rank": null,
+          "refused": true,
+          "latency_ms": 5419.3,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g17",
+          "answer": "I don't have enough information in the knowledge base to answer that.",
+          "sources": [],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The assistant correctly declined to answer due to lack of information.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g18",
+          "question": "Who won the football World Cup in 2022?",
+          "kind": "refusal",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [],
+          "facts_missing": [],
+          "coverage": null,
+          "retrieved": null,
+          "retrieval_rank": null,
+          "refused": true,
+          "latency_ms": 5453.8,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g18",
+          "answer": "I don't have enough information in the knowledge base to answer that.",
+          "sources": [],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The assistant correctly declined to answer due to lack of information.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g19",
+          "question": "How do I configure Terraform to provision the EKS cluster?",
+          "kind": "refusal",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [],
+          "facts_missing": [],
+          "coverage": null,
+          "retrieved": null,
+          "retrieval_rank": null,
+          "refused": true,
+          "latency_ms": 5540.7,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g19",
+          "answer": "I don't have enough information in the knowledge base to answer that.",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "2. Connecting to the Cluster",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.670838
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "1. Overview",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.661202
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "3. Key Namespaces",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.645843
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "6.2 Adding Nodes (EKS Node Group)",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.635133
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "Kubernetes Cluster Operations Guide",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.627656
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The assistant correctly declined to answer since the required information is missing from the retrieved text.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "summary": {
+        "total": 19,
+        "passed": 19,
+        "errors": 0,
+        "in_scope_total": 16,
+        "in_scope_passed": 16,
+        "false_refusals": 0,
+        "mean_coverage": 1.0,
+        "retrieval_hits": 16,
+        "retrieval_total": 16,
+        "mrr": 0.8958333333333334,
+        "refusal_total": 3,
+        "refusals_correct": 3,
+        "answered_out_of_scope": 0,
+        "judged": 19,
+        "judge_counts": {
+          "correct": 19
+        },
+        "judge_agrees": 19,
+        "latency": {
+          "count": 19,
+          "mean_ms": 10741.345916526252,
+          "median_ms": 6144.563999999718,
+          "p95_ms": 86020.89804199977,
+          "max_ms": 86020.89804199977,
+          "threshold_ms": 5000.0,
+          "slow": [
+            [
+              "g05",
+              86020.89804199977
+            ],
+            [
+              "g06",
+              11804.848124999808
+            ],
+            [
+              "g19",
+              8041.362959000253
+            ],
+            [
+              "g02",
+              8033.16841700007
+            ],
+            [
+              "g04",
+              7791.605832999721
+            ],
+            [
+              "g12",
+              6394.389333000163
+            ],
+            [
+              "g14",
+              6361.447207999845
+            ],
+            [
+              "g10",
+              6190.1892079999925
+            ],
+            [
+              "g16",
+              6167.288416000247
+            ],
+            [
+              "g18",
+              6144.563999999718
+            ],
+            [
+              "g08",
+              6119.326540999737
+            ],
+            [
+              "g03",
+              6047.924375000093
+            ],
+            [
+              "g01",
+              5881.10608299985
+            ],
+            [
+              "g13",
+              5826.231499999722
+            ],
+            [
+              "g07",
+              5754.831249999825
+            ],
+            [
+              "g11",
+              5573.100000000068
+            ],
+            [
+              "g15",
+              5461.442124999849
+            ],
+            [
+              "g09",
+              5417.647540999951
+            ],
+            [
+              "g17",
+              5054.20145800008
+            ]
+          ]
+        },
+        "hallucination": {
+          "answered": 16,
+          "flagged": 0,
+          "by_kind": {},
+          "flagged_items": []
+        },
+        "accuracy": 1.0
+      },
+      "results": [
+        {
+          "id": "g01",
+          "question": "What are the RTO and RPO targets for Tier-1 services?",
+          "kind": "numeric",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "4 hours",
+            "1 hour"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 2,
+          "refused": false,
+          "latency_ms": 5881.1,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g01",
+          "answer": "Based on the Disaster Recovery Runbook (1. Overview), the targets for Tier-1 services are:\n\n* **RTO Target:** 4 hours\n* **RPO Target:** 1 hour (maximum data loss tolerance)",
+          "sources": [
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "2. Incident Classification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.729517
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "1. Overview",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.728335
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "When to Escalate Immediately (don't wait):",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.667295
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "8. Contact Escalation Matrix",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.644648
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.3 Verification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.629097
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately states both the RTO and RPO targets for Tier-1 services as found in the reference text.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g02",
+          "question": "Which severity level covers a partial outage affecting more than 50% of users, and what is its recovery time objective?",
+          "kind": "numeric",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "P2",
+            "2 hours"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 8033.2,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g02",
+          "answer": "A partial outage affecting more than 50% of users is classified as **P2 – High**, and its Recovery Time Objective (RTO) is **2 hours** (Source: Disaster Recovery Runbook › 2. Incident Classification).",
+          "sources": [
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "2. Incident Classification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.743683
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "When to Escalate Immediately (don't wait):",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.69893
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "1. Overview",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.677249
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "3. HTTP 502 Bad Gateway",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.642043
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "3. HTTP 502 Bad Gateway",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.641305
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer correctly identifies the severity level as P2 – High and the RTO as 2 hours, matching all key facts.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g03",
+          "question": "What are the steps of the first response in the first 15 minutes of an incident?",
+          "kind": "procedure",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "PagerDuty",
+            "5 minutes",
+            "War Room",
+            "Incident Commander"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 6047.9,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g03",
+          "answer": "Based on the Disaster Recovery Runbook, the steps for the first response (0–15 minutes) are:\n\n1. **Acknowledge the alert** in PagerDuty within 5 minutes.\n2. **Create a War Room** in Slack: `#incident-<date>-<service>`.\n3. **Assign an Incident Commander (IC)** — the on-call SRE lead.\n4. **Notify stakeholders** using the `/incident broadcast` Slack bot.\n5. **Begin the timeline log** in the incident management portal.\n\nSource: Disaster Recovery Runbook",
+          "sources": [
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "3. First Response (0–15 Minutes)",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.736923
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "7. Post-Incident Actions",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.694077
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "4. Alert Triage Decision Tree",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.691755
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "2. On-Call Responsibilities",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.687868
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "How to Escalate:",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.681862
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately lists all steps for the first 15 minutes of an incident based on the runbook.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g04",
+          "question": "What command promotes the standby database replica to primary during a manual failover, and which host do I run it on?",
+          "kind": "command",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "pg_ctl promote",
+            "db-replica-01"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 7791.6,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g04",
+          "answer": "To promote the standby database replica to primary, you run the following command:\n\n`pg_ctl promote -D /var/lib/postgresql/16/main`\n\nYou run this on the standby replica host (`db-replica-01.internal`), which you access via SSH (`ssh ops@db-replica-01.internal`).\n\nSource: Disaster Recovery Runbook › 4.2 Manual Failover Steps",
+          "sources": [
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.2 Manual Failover Steps",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.7701
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.1 Detecting Primary Database Failure",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.645667
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.3 Verification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.64138
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.2 Manual Failover Steps",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.609326
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.3 `GET /health` — 503",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.578243
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer provides the correct command and host as requested by the reference.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g05",
+          "question": "What command rolls the knowops-api deployment back to revision 3?",
+          "kind": "command",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "rollout undo",
+            "--to-revision=3"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 86020.9,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g05",
+          "answer": "To roll the `knowops-api` deployment back to revision 3 in the production namespace, use the following command:\n\n```bash\nkubectl rollout undo deployment/knowops-api --to-revision=3 -n production\n```\n\nSource: Kubernetes Cluster Operations Guide",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.3 Rollback",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.799685
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "5.2 Rollback to Previous Version",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.770887
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.1 Deploy a New Version",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.735166
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "5.1 Kubernetes Pod Recovery",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.714854
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.2 Canary Deployment",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.707181
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer provides the exact correct command matching all key facts from the reference.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g06",
+          "question": "How is the Horizontal Pod Autoscaler configured for the API, and what triggers scaling?",
+          "kind": "factual",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "10 replicas",
+            "70%",
+            "80%",
+            "requests per second"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 11804.8,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g06",
+          "answer": "Based on the provided documentation, the Horizontal Pod Autoscaler (HPA) is configured to scale between 3 and 10 replicas. \n\nIt triggers scaling based on the following metrics:\n- CPU utilization > 70%\n- Memory utilization > 80%\n- Custom metric: requests per second > 100\n\nSource: *Kubernetes Cluster Operations Guide › 5.2 HPA Configuration*",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "5.2 HPA Configuration",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.759348
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "5.1 Manual Scaling",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.752636
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "5.2 HPA Configuration",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.737558
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.1 `HIGH_CPU_USAGE` — Pod CPU > 85%",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.657402
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "5. Database Connection Pool Exhausted",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.653787
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "All key facts from the reference are present and accurately reflect the provided text.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g07",
+          "question": "How does the canary deployment work, and how long should error rates be monitored?",
+          "kind": "procedure",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "20%",
+            "30 minutes",
+            "Datadog"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5754.8,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g07",
+          "answer": "Based on the **Kubernetes Cluster Operations Guide › 4.2 Canary Deployment**, a canary deployment for risk-sensitive releases works as follows:\n\n1. Scale down the current deployment to 80% (4 replicas):\n   ```bash\n   kubectl scale deployment/knowops-api --replicas=4 -n production\n   ```\n2. Deploy the canary with the new image using 1 replica, which handles approximately 20% of the traffic:\n   ```bash\n   kubectl apply -f k8s/canary-deployment.yaml -n production\n   ```\n\nError rates should be monitored in Datadog for **30 minutes**. If the deployment is healthy after this period, you can proceed with the full rollout by scaling the main deployment and deleting the canary.\n\nSource: *Kubernetes Cluster Operations Guide › 4.2 Canary Deployment*",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.2 Canary Deployment",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.745544
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.2 Canary Deployment",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.708348
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "4. Alert Triage Decision Tree",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.646025
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.3 Verification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.638779
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.1 Deploy a New Version",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.629799
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately includes all key facts and aligns with the reference answer without introducing unsupported information.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g08",
+          "question": "How do I safely drain a node for maintenance and put it back into service afterwards?",
+          "kind": "command",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "kubectl drain",
+            "--ignore-daemonsets",
+            "uncordon"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 6119.3,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g08",
+          "answer": "To safely drain a node for maintenance and put it back into service afterwards, follow these steps:\n\n1. Safely drain the node (evict all pods):\n   ```bash\n   kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data\n   ```\n\n2. Verify that the node is cordoned:\n   ```bash\n   kubectl get nodes\n   ```\n\n3. After maintenance is complete, uncordon the node to put it back into service:\n   ```bash\n   kubectl uncordon <node-name>\n   ```\n\n*Source: Kubernetes Cluster Operations Guide › 6.1 Draining a Node for Maintenance*",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "6.1 Draining a Node for Maintenance",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.778731
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.2 Manual Failover Steps",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.65958
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "5.2 High Memory Usage in API Pods",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.652092
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.2 Canary Deployment",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.639952
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.3 Verification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.639472
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer includes all key facts and steps from the reference text accurately.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g09",
+          "question": "Where are production secrets stored, and where must they never be stored?",
+          "kind": "factual",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "AWS Secrets Manager",
+            "ConfigMaps",
+            "Git repository"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5417.6,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g09",
+          "answer": "All secrets are stored in **AWS Secrets Manager** (Kubernetes Cluster Operations Guide › 8. Secrets Management).\n\nYou must **never** store secrets in:\n- Kubernetes ConfigMaps\n- Environment variables defined in deployment YAML\n- Git repository (even private)\n\n*(Source: Kubernetes Cluster Operations Guide › 8. Secrets Management)*",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "8. Secrets Management",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.765188
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "4. JWT Authentication Failures",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.620708
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "3. Key Namespaces",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.616689
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "3.2 Token Not Accepted After Password Reset",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.610001
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "7.1 Investigating CrashLoopBackOff",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.604475
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "All key facts from the reference answer are present and supported by the retrieved text.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g10",
+          "question": "A pod is in CrashLoopBackOff with exit code 137. What does that indicate and what is the short-term fix?",
+          "kind": "diagnosis",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "OOMKilled",
+            "memory limit",
+            "1Gi"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 6190.2,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g10",
+          "answer": "Based on the knowledge base:\n\n* **Indication:** Exit code 137, combined with `CrashLoopBackOff` and `Reason: OOMKilled`, indicates that the container exceeded its memory limit (*Source: Common Incident Playbooks › 2. Pod OOMKilled / CrashLoopBackOff*).\n* **Short-term fix:** Raise the memory limit (for example, from `512Mi` to `1Gi`) in the deployment manifest and apply it (*Source: Common Incident Playbooks › 2. Pod OOMKilled / CrashLoopBackOff*).",
+          "sources": [
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "2. Pod OOMKilled / CrashLoopBackOff",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.820202
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "2. Pod OOMKilled / CrashLoopBackOff",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.735483
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "5.1 Kubernetes Pod Recovery",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.701643
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.1 `HIGH_CPU_USAGE` — Pod CPU > 85%",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.690583
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "3. HTTP 502 Bad Gateway",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.687486
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "All key facts are present and correctly matched to the reference answer.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g11",
+          "question": "What are the common causes of a sudden spike in 401 responses across all users?",
+          "kind": "diagnosis",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "JWT_SECRET",
+            "clock skew",
+            "Bearer"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5573.1,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g11",
+          "answer": "Based on the \"Common Incident Playbooks\", the common causes of a sudden spike of HTTP 401 responses across all users are:\n\n* `JWT_SECRET` was rotated, but some pods are still running with the old value, causing tokens signed by one pod to fail on another.\n* Server clock skew makes freshly issued tokens look expired.\n* Clients are sending the token without the `Bearer ` prefix.\n\nSource: Common Incident Playbooks › 4. JWT Authentication Failures",
+          "sources": [
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "4. JWT Authentication Failures",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.827527
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "3.2 Token Not Accepted After Password Reset",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.735237
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "2. Common HTTP Error Codes",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.69109
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "3.1 `401 Unauthorized` — \"Could not validate credentials\"",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.68843
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "3.1 `401 Unauthorized` — \"Could not validate credentials\"",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.679612
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately and completely covers all key facts from the reference answer.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g12",
+          "question": "How do I fix an exhausted database connection pool, and which connection string should the application use?",
+          "kind": "procedure",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "-pooler",
+            "10 minutes",
+            "pooler size"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 6394.4,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g12",
+          "answer": "To fix an exhausted database connection pool, follow these steps and resolutions from the knowledge base:\n\n1. **Immediate Action & Termination:** Terminate sessions that have been idle in a transaction for more than 10 minutes using the following query:\n   ```sql\n   SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle' AND query_start < now() - interval '10 minutes';\n   ```\n   *(Source: On-Call Guide & Incident Response Playbook)*\n2. **Resolution:** Restart the API pods to flush the connection pool. *(Source: On-Call Guide & Incident Response Playbook)*\n3. **Scaling:** If traffic is legitimately higher, scale the pooler size before scaling API replicas, as more replicas mean more connections. *(Source: Common Incident Playbooks)*\n\n**Connection String:**\nThe application must use the pooled (`-pooler`) connection string, not the direct one. *(Source: Common Incident Playbooks)*",
+          "sources": [
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "5. Database Connection Pool Exhausted",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.709923
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.2 `DB_CONNECTION_POOL_EXHAUSTED` — No available DB connections",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.698968
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "5. Database Connection Pool Exhausted",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.689502
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.2 `DB_CONNECTION_POOL_EXHAUSTED` — No available DB connections",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.688633
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.1 `POST /ask` — 500 Internal Server Error",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.657753
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately includes all key facts and details from the reference and retrieved text.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g13",
+          "question": "When should an on-call engineer escalate immediately without waiting?",
+          "kind": "list",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "platform outage",
+            "data loss",
+            "security breach",
+            "SLA breach"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5826.2,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g13",
+          "answer": "An on-call engineer should escalate immediately without waiting under the following conditions:\n\n- Full platform outage (all API endpoints returning 5xx)\n- Data loss detected or suspected\n- Security breach or unauthorized access\n- SLA breach imminent (<1 hour to SLA violation)\n\nSource: *On-Call Guide & Incident Response Playbook*",
+          "sources": [
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "When to Escalate Immediately (don't wait):",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.774205
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "2. On-Call Responsibilities",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.759835
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "How to Escalate:",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.743228
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "8. On-Call Health & Wellness",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.741644
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "1. Purpose",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.734451
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "All key facts from the reference answer are present and accurately reflect the retrieved text.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g14",
+          "question": "What should I do when the GEMINI_API_503 alert fires?",
+          "kind": "procedure",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "15 minutes",
+            "degraded mode",
+            "exponential backoff"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 3,
+          "refused": false,
+          "latency_ms": 6361.4,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g14",
+          "answer": "When the `GEMINI_API_503` alert fires, take the following immediate actions:\n\n* Check the Google Cloud Status at `status.cloud.google.com`.\n* Note that the `chat_completion()` function includes automatic retry logic with exponential backoff for up to 3 attempts.\n* If the issue persists for more than 15 minutes, switch to degraded mode (returning cached answers only).\n* Notify users by stating: \"AI responses may be delayed\".\n\nSource: On-Call Guide & Incident Response Playbook › 5.5 `GEMINI_API_503` — Upstream AI service unavailable",
+          "sources": [
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.1 `POST /ask` — 500 Internal Server Error",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.773807
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "2. Common HTTP Error Codes",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.740888
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.5 `GEMINI_API_503` — Upstream AI service unavailable",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.731414
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.3 `GET /health` — 503",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.704938
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "5.1 Slow `/ask` Response Times",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.700499
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer covers all key facts and accurately reflects the reference guide.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g15",
+          "question": "What is the expected total response time target for /ask, and how do I check that vector search is using the index?",
+          "kind": "numeric",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "P95",
+            "4 seconds",
+            "EXPLAIN ANALYZE"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5461.4,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g15",
+          "answer": "Based on the KnowOps knowledge base:\n\n* **Expected Total P95 Target for `/ask`:** Less than 4 seconds (*API Troubleshooting Guide › 5.1 Slow `/ask` Response Times*).\n* **How to check that vector search is using the index:** Run the following SQL query using `EXPLAIN ANALYZE` (*API Troubleshooting Guide › 5.1 Slow `/ask` Response Times*):\n\n```sql\nEXPLAIN ANALYZE\nSELECT content, 1 - (embedding <=> '[...]'::vector) AS similarity\nFROM chunks\nORDER BY embedding <=> '[...]'::vector\nLIMIT 5;\n```\nIt must show `\"Index Scan using chunks_embedding_idx\"`. If `\"Seq Scan\"` appears, the index may be missing.",
+          "sources": [
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "5.1 Slow `/ask` Response Times",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.796066
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "5.1 Slow `/ask` Response Times",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.751525
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "6. Knowledge Base Returns No Results",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.731258
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.4 `API_LATENCY_HIGH` — P99 latency > 2s",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.731151
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.1 `POST /ask` — 500 Internal Server Error",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.706326
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer provides the correct response time target and explains how to check the index using EXPLAIN ANALYZE.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g16",
+          "question": "What are the most common causes of a 500 error on POST /ask?",
+          "kind": "diagnosis",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "Gemini API",
+            "Database Connection",
+            "Empty Embedding"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 2,
+          "refused": false,
+          "latency_ms": 6167.3,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g16",
+          "answer": "Based on the *API Troubleshooting Guide*, the most common causes of a 500 Internal Server Error on `POST /ask` are:\n\n1. **Gemini API Unavailable (503):** The Gemini API is unreachable. (Note: The API has built-in retry logic with 3 attempts and exponential backoff; if it persists, check application logs.)\n2. **Database Connection Failure:** Issues connecting to the database.\n3. **Empty Embedding Returned:** Caused by passing an empty string to `embed_query()` (though the `/ask` endpoint validates that the question is not empty and returns a 400 response).\n4. **No Chunks Found (no RAG context):** Happens when the knowledge base is empty because no documents have been ingested. (Source: *API Troubleshooting Guide › 4.1 `POST /ask` — 500 Internal Server Error*)",
+          "sources": [
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "2. Common HTTP Error Codes",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.699374
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.1 `POST /ask` — 500 Internal Server Error",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.696527
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.1 `POST /ask` — 500 Internal Server Error",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.691407
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "6. Knowledge Base Returns No Results",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.688261
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.3 `GET /health` — 503",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.677082
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer includes all key facts and accurately reflects the reference source.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g17",
+          "question": "What is the best recipe for making chocolate chip cookies?",
+          "kind": "refusal",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [],
+          "facts_missing": [],
+          "coverage": null,
+          "retrieved": null,
+          "retrieval_rank": null,
+          "refused": true,
+          "latency_ms": 5054.2,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g17",
+          "answer": "I don't have enough information in the knowledge base to answer that.",
+          "sources": [],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The assistant correctly declined to answer since there was no information in the knowledge base.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g18",
+          "question": "Who won the football World Cup in 2022?",
+          "kind": "refusal",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [],
+          "facts_missing": [],
+          "coverage": null,
+          "retrieved": null,
+          "retrieval_rank": null,
+          "refused": true,
+          "latency_ms": 6144.6,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g18",
+          "answer": "I don't have enough information in the knowledge base to answer that.",
+          "sources": [],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The assistant correctly declined to answer due to a lack of information.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g19",
+          "question": "How do I configure Terraform to provision the EKS cluster?",
+          "kind": "refusal",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [],
+          "facts_missing": [],
+          "coverage": null,
+          "retrieved": null,
+          "retrieval_rank": null,
+          "refused": true,
+          "latency_ms": 8041.4,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g19",
+          "answer": "I don't have enough information in the knowledge base to answer that.",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "2. Connecting to the Cluster",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.670838
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "1. Overview",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.661202
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "3. Key Namespaces",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.645843
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "6.2 Adding Nodes (EKS Node Group)",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.635133
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "Kubernetes Cluster Operations Guide",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.627656
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The assistant correctly declined to answer because the knowledge base lacks information on configuring Terraform.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "summary": {
+        "total": 19,
+        "passed": 19,
+        "errors": 0,
+        "in_scope_total": 16,
+        "in_scope_passed": 16,
+        "false_refusals": 0,
+        "mean_coverage": 1.0,
+        "retrieval_hits": 16,
+        "retrieval_total": 16,
+        "mrr": 0.8958333333333334,
+        "refusal_total": 3,
+        "refusals_correct": 3,
+        "answered_out_of_scope": 0,
+        "judged": 19,
+        "judge_counts": {
+          "correct": 19
+        },
+        "judge_agrees": 19,
+        "latency": {
+          "count": 19,
+          "mean_ms": 5767.916550578991,
+          "median_ms": 5794.303791999937,
+          "p95_ms": 6660.257667000224,
+          "max_ms": 6660.257667000224,
+          "threshold_ms": 5000.0,
+          "slow": [
+            [
+              "g02",
+              6660.257667000224
+            ],
+            [
+              "g03",
+              6215.176083000188
+            ],
+            [
+              "g08",
+              5957.971041999826
+            ],
+            [
+              "g14",
+              5911.775208000108
+            ],
+            [
+              "g18",
+              5874.670333999802
+            ],
+            [
+              "g10",
+              5820.6700830000955
+            ],
+            [
+              "g11",
+              5813.454833999913
+            ],
+            [
+              "g05",
+              5796.103084000151
+            ],
+            [
+              "g16",
+              5795.285167000202
+            ],
+            [
+              "g19",
+              5794.303791999937
+            ],
+            [
+              "g12",
+              5733.659792000253
+            ],
+            [
+              "g07",
+              5711.5386249997755
+            ],
+            [
+              "g01",
+              5708.34133299968
+            ],
+            [
+              "g06",
+              5601.220375000139
+            ],
+            [
+              "g15",
+              5587.99183300016
+            ],
+            [
+              "g09",
+              5577.149209000254
+            ],
+            [
+              "g13",
+              5491.715708999891
+            ],
+            [
+              "g04",
+              5392.405166000117
+            ],
+            [
+              "g17",
+              5146.725125000103
+            ]
+          ]
+        },
+        "hallucination": {
+          "answered": 16,
+          "flagged": 1,
+          "by_kind": {
+            "unsupported_quantity": 1
+          },
+          "flagged_items": [
+            [
+              "g06",
+              [
+                "unsupported_quantity"
+              ]
+            ]
+          ]
+        },
+        "accuracy": 1.0
+      },
+      "results": [
+        {
+          "id": "g01",
+          "question": "What are the RTO and RPO targets for Tier-1 services?",
+          "kind": "numeric",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "4 hours",
+            "1 hour"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 2,
+          "refused": false,
+          "latency_ms": 5708.3,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g01",
+          "answer": "Based on the Disaster Recovery Runbook (1. Overview), the targets for Tier-1 services are:\n\n* **RTO Target:** 4 hours\n* **RPO Target:** 1 hour (maximum data loss tolerance)",
+          "sources": [
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "2. Incident Classification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.729517
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "1. Overview",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.728335
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "When to Escalate Immediately (don't wait):",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.667295
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "8. Contact Escalation Matrix",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.644648
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.3 Verification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.629097
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately states both the RTO and RPO targets for Tier-1 services as found in the reference and retrieved text.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g02",
+          "question": "Which severity level covers a partial outage affecting more than 50% of users, and what is its recovery time objective?",
+          "kind": "numeric",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "P2",
+            "2 hours"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 6660.3,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g02",
+          "answer": "Based on the **Disaster Recovery Runbook**, a partial outage affecting more than 50% of users is classified as **P2 – High**, and its Recovery Time Objective (RTO) is **2 hours**.",
+          "sources": [
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "2. Incident Classification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.743683
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "When to Escalate Immediately (don't wait):",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.69893
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "1. Overview",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.677249
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "3. HTTP 502 Bad Gateway",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.642043
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "3. HTTP 502 Bad Gateway",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.641305
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer correctly identifies the severity level as P2 - High and the RTO as 2 hours.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g03",
+          "question": "What are the steps of the first response in the first 15 minutes of an incident?",
+          "kind": "procedure",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "PagerDuty",
+            "5 minutes",
+            "War Room",
+            "Incident Commander"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 6215.2,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g03",
+          "answer": "According to the Disaster Recovery Runbook (Section 3. First Response (0–15 Minutes)), the steps are:\n\n1. **Acknowledge the alert** in PagerDuty within 5 minutes.\n2. **Create a War Room** in Slack: `#incident-<date>-<service>`.\n3. **Assign an Incident Commander (IC)** — the on-call SRE lead.\n4. **Notify stakeholders** using the `/incident broadcast` Slack bot.\n5. **Begin the timeline log** in the incident management portal.",
+          "sources": [
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "3. First Response (0–15 Minutes)",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.736923
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "7. Post-Incident Actions",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.694077
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "4. Alert Triage Decision Tree",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.691755
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "2. On-Call Responsibilities",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.687868
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "How to Escalate:",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.681862
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "All key facts and steps from the reference are fully and accurately included.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g04",
+          "question": "What command promotes the standby database replica to primary during a manual failover, and which host do I run it on?",
+          "kind": "command",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "pg_ctl promote",
+            "db-replica-01"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5392.4,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g04",
+          "answer": "To promote the standby database replica to primary, you must run the following command:\n\n```bash\npg_ctl promote -D /var/lib/postgresql/16/main\n```\n\nYou run this command on the standby replica host (`db-replica-01.internal`), which you access by running:\n```bash\nssh ops@db-replica-01.internal\n```\n\n*(Source: Disaster Recovery Runbook)*",
+          "sources": [
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.2 Manual Failover Steps",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.7701
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.1 Detecting Primary Database Failure",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.645667
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.3 Verification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.64138
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.2 Manual Failover Steps",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.609326
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.3 `GET /health` — 503",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.578243
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer provides the correct command and host as requested by the reference answer.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g05",
+          "question": "What command rolls the knowops-api deployment back to revision 3?",
+          "kind": "command",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "rollout undo",
+            "--to-revision=3"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5796.1,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g05",
+          "answer": "To roll the knowops-api deployment back to revision 3 in the production namespace, use the following command:\n\n```bash\nkubectl rollout undo deployment/knowops-api --to-revision=3 -n production\n```\n\nSource: *Kubernetes Cluster Operations Guide › 4.3 Rollback*",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.3 Rollback",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.799685
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "5.2 Rollback to Previous Version",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.770887
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.1 Deploy a New Version",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.735166
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "5.1 Kubernetes Pod Recovery",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.714854
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.2 Canary Deployment",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.707181
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer provides the exact correct command and key facts from the reference text.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g06",
+          "question": "How is the Horizontal Pod Autoscaler configured for the API, and what triggers scaling?",
+          "kind": "factual",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "10 replicas",
+            "70%",
+            "80%",
+            "requests per second"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5601.2,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g06",
+          "answer": "Based on the provided documentation, the Horizontal Pod Autoscaler (HPA) is configured to scale between a minimum of 3 replicas and a maximum of 10 replicas. \n\nIt is triggered to scale based on the following metrics:\n- CPU utilization > 70%\n- Memory utilization > 80%\n- Custom metric: requests per second > 100\n\n*(Source: Kubernetes Cluster Operations Guide › 5.2 HPA Configuration)*",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "5.2 HPA Configuration",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.759348
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "5.1 Manual Scaling",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.752636
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "5.2 HPA Configuration",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.737558
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.1 `HIGH_CPU_USAGE` — Pod CPU > 85%",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.657402
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "5. Database Connection Pool Exhausted",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.653787
+            }
+          ],
+          "flags": [
+            {
+              "kind": "unsupported_quantity",
+              "detail": "3 replicas"
+            }
+          ],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately states all key facts regarding the HPA configuration and triggers based on the retrieved text.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g07",
+          "question": "How does the canary deployment work, and how long should error rates be monitored?",
+          "kind": "procedure",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "20%",
+            "30 minutes",
+            "Datadog"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5711.5,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g07",
+          "answer": "Based on the provided knowledge base, for risk-sensitive releases, a canary deployment works by deploying to 20% of traffic first using the following steps:\n1. Scale down the current deployment to 80% (`kubectl scale deployment/knowops-api --replicas=4 -n production`)\n2. Deploy the canary with the new image, where 1 replica equals approximately 20% of traffic (`kubectl apply -f k8s/canary-deployment.yaml -n production`)\n\nError rates should be monitored in Datadog for **30 minutes**. If the deployment is healthy after this time, you proceed with the full rollout by scaling the main deployment and deleting the canary.\n\nSource: *Kubernetes Cluster Operations Guide › 4.2 Canary Deployment*",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.2 Canary Deployment",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.745544
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.2 Canary Deployment",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.708348
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "4. Alert Triage Decision Tree",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.646025
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.3 Verification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.638779
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.1 Deploy a New Version",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.629799
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately captures all key facts from the reference and retrieved text without any contradictions.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g08",
+          "question": "How do I safely drain a node for maintenance and put it back into service afterwards?",
+          "kind": "command",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "kubectl drain",
+            "--ignore-daemonsets",
+            "uncordon"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5958.0,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g08",
+          "answer": "To safely drain a node for maintenance and put it back into service afterwards, run the following commands:\n\n1. Safely drain the node (evict all pods):\n   ```bash\n   kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data\n   ```\n\n2. Verify the node is cordoned:\n   ```bash\n   kubectl get nodes\n   ```\n\n3. After maintenance is complete, uncordon the node to put it back into service:\n   ```bash\n   kubectl uncordon <node-name>\n   ```\n\n*(Source: Kubernetes Cluster Operations Guide › 6.1 Draining a Node for Maintenance)*",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "6.1 Draining a Node for Maintenance",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.778731
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.2 Manual Failover Steps",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.65958
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "5.2 High Memory Usage in API Pods",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.652092
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "4.2 Canary Deployment",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.639952
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "4.3 Verification",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.639472
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately includes all key facts and steps from the reference answer and retrieved text.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g09",
+          "question": "Where are production secrets stored, and where must they never be stored?",
+          "kind": "factual",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "AWS Secrets Manager",
+            "ConfigMaps",
+            "Git repository"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5577.1,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g09",
+          "answer": "Based on the **Kubernetes Cluster Operations Guide › 8. Secrets Management**:\n\n* **Where they are stored:** All secrets are stored in **AWS Secrets Manager** and injected at pod startup via the AWS Secrets CSI Driver.\n* **Where they must never be stored:**\n  * Kubernetes ConfigMaps\n  * Environment variables defined in deployment YAML\n  * Git repositories (even private ones)",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "8. Secrets Management",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.765188
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "4. JWT Authentication Failures",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.620708
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "3. Key Namespaces",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.616689
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "3.2 Token Not Accepted After Password Reset",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.610001
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "7.1 Investigating CrashLoopBackOff",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.604475
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately captures where secrets are stored and where they must never be stored based on the retrieved text.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g10",
+          "question": "A pod is in CrashLoopBackOff with exit code 137. What does that indicate and what is the short-term fix?",
+          "kind": "diagnosis",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "OOMKilled",
+            "memory limit",
+            "1Gi"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5820.7,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g10",
+          "answer": "Based on the knowledge base:\n\n* **Indication:** Exit code 137 combined with `CrashLoopBackOff` and `Reason: OOMKilled` indicates that the container exceeded its memory limit (Common Incident Playbooks › 2. Pod OOMKilled / CrashLoopBackOff).\n* **Short-term fix:** Raise the memory limit (for example, from `512Mi` to `1Gi`) in the deployment manifest and apply it (Common Incident Playbooks › 2. Pod OOMKilled / CrashLoopBackOff).",
+          "sources": [
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "2. Pod OOMKilled / CrashLoopBackOff",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.820202
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "2. Pod OOMKilled / CrashLoopBackOff",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.735483
+            },
+            {
+              "document": "data/docs/disaster_recovery_runbook.md",
+              "heading": "5.1 Kubernetes Pod Recovery",
+              "title": "Disaster Recovery Runbook",
+              "similarity": 0.701643
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.1 `HIGH_CPU_USAGE` — Pod CPU > 85%",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.690583
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "3. HTTP 502 Bad Gateway",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.687486
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately identifies the cause as exceeding the memory limit (OOMKilled) and provides the correct short-term fix to raise the memory limit to 1Gi.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g11",
+          "question": "What are the common causes of a sudden spike in 401 responses across all users?",
+          "kind": "diagnosis",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "JWT_SECRET",
+            "clock skew",
+            "Bearer"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5813.5,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g11",
+          "answer": "Based on the knowledge base, the common causes of a sudden spike in HTTP 401 responses across all users are:\n\n* `JWT_SECRET` was rotated, but some pods are still running with the old value, causing tokens signed by one pod to fail on another (*Common Incident Playbooks › 4. JWT Authentication Failures*).\n* Server clock skew makes freshly issued tokens look expired (*Common Incident Playbooks › 4. JWT Authentication Failures*).\n* Clients are sending the token without the `Bearer ` prefix (*Common Incident Playbooks › 4. JWT Authentication Failures*).",
+          "sources": [
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "4. JWT Authentication Failures",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.827527
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "3.2 Token Not Accepted After Password Reset",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.735237
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "2. Common HTTP Error Codes",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.69109
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "3.1 `401 Unauthorized` — \"Could not validate credentials\"",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.68843
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "3.1 `401 Unauthorized` — \"Could not validate credentials\"",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.679612
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "All key facts from the reference answer are accurately included.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g12",
+          "question": "How do I fix an exhausted database connection pool, and which connection string should the application use?",
+          "kind": "procedure",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "-pooler",
+            "10 minutes",
+            "pooler size"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5733.7,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g12",
+          "answer": "To fix a database connection pool exhaustion issue:\n\n1. Terminate sessions idle in a transaction for more than 10 minutes using the following command (Source: *On-Call Guide & Incident Response Playbook* / *Common Incident Playbooks*):\n   ```sql\n   SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle' AND query_start < now() - interval '10 minutes';\n   ```\n2. Restart the API pods to flush the connection pool (Source: *On-Call Guide & Incident Response Playbook*).\n3. If traffic is legitimately higher, scale the pooler size before scaling API replicas (Source: *Common Incident Playbooks*).\n\nThe application should use the pooled (`-pooler`) connection string, not the direct one (Source: *Common Incident Playbooks*).",
+          "sources": [
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "5. Database Connection Pool Exhausted",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.709923
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.2 `DB_CONNECTION_POOL_EXHAUSTED` — No available DB connections",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.698968
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "5. Database Connection Pool Exhausted",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.689502
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.2 `DB_CONNECTION_POOL_EXHAUSTED` — No available DB connections",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.688633
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.1 `POST /ask` — 500 Internal Server Error",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.657753
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer covers all key facts and steps accurately without introducing contradictions.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g13",
+          "question": "When should an on-call engineer escalate immediately without waiting?",
+          "kind": "list",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "platform outage",
+            "data loss",
+            "security breach",
+            "SLA breach"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5491.7,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g13",
+          "answer": "Based on the *On-Call Guide & Incident Response Playbook*, an on-call engineer should escalate immediately without waiting in the following situations:\n\n- Full platform outage (all API endpoints returning 5xx)\n- Data loss detected or suspected\n- Security breach or unauthorized access\n- SLA breach imminent (<1 hour to SLA violation)\n\nSource: On-Call Guide & Incident Response Playbook",
+          "sources": [
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "When to Escalate Immediately (don't wait):",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.774205
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "2. On-Call Responsibilities",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.759835
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "How to Escalate:",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.743228
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "8. On-Call Health & Wellness",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.741644
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "1. Purpose",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.734451
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately captures all key facts from the reference and retrieved text without any contradictions.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g14",
+          "question": "What should I do when the GEMINI_API_503 alert fires?",
+          "kind": "procedure",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "15 minutes",
+            "degraded mode",
+            "exponential backoff"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 3,
+          "refused": false,
+          "latency_ms": 5911.8,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g14",
+          "answer": "When the `GEMINI_API_503` alert fires, you should take the following immediate actions:\n\n1. **Check Google Cloud Status:** Visit status.cloud.google.com to check for outages or high demand.\n2. **Understand the retry behavior:** Note that the `chat_completion()` function has automatic retry logic with exponential backoff (up to 3 attempts).\n3. **Switch to degraded mode:** If the issue persists for more than 15 minutes, switch to degraded mode (return cached answers only).\n4. **Notify users:** Inform users with the message: \"AI responses may be delayed\".\n\n*Source: On-Call Guide & Incident Response Playbook › 5.5 `GEMINI_API_503` — Upstream AI service unavailable*",
+          "sources": [
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.1 `POST /ask` — 500 Internal Server Error",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.773807
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "2. Common HTTP Error Codes",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.740888
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.5 `GEMINI_API_503` — Upstream AI service unavailable",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.731414
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.3 `GET /health` — 503",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.704938
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "5.1 Slow `/ask` Response Times",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.700499
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer includes all key facts and accurately reflects the reference answer.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g15",
+          "question": "What is the expected total response time target for /ask, and how do I check that vector search is using the index?",
+          "kind": "numeric",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "P95",
+            "4 seconds",
+            "EXPLAIN ANALYZE"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 1,
+          "refused": false,
+          "latency_ms": 5588.0,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g15",
+          "answer": "Based on the knowledge base:\n\n* **Expected Total P95 Target for `/ask`:** < 4 seconds (Source: *API Troubleshooting Guide › 5.1 Slow `/ask` Response Times*).\n* **How to check that vector search is using the index:** Run the following SQL query using `EXPLAIN ANALYZE`:\n\n```sql\nEXPLAIN ANALYZE\nSELECT content, 1 - (embedding <=> '[...]'::vector) AS similarity\nFROM chunks\nORDER BY embedding <=> '[...]'::vector\nLIMIT 5;\n```\nIt must show `\"Index Scan using chunks_embedding_idx\"`. If `\"Seq Scan\"` appears, the index may be missing (Source: *API Troubleshooting Guide › 5.1 Slow `/ask` Response Times*).",
+          "sources": [
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "5.1 Slow `/ask` Response Times",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.796066
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "5.1 Slow `/ask` Response Times",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.751525
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "6. Knowledge Base Returns No Results",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.731258
+            },
+            {
+              "document": "data/docs/on_call_guide.md",
+              "heading": "5.4 `API_LATENCY_HIGH` — P99 latency > 2s",
+              "title": "On-Call Guide & Incident Response Playbook",
+              "similarity": 0.731151
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.1 `POST /ask` — 500 Internal Server Error",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.706326
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately provides the P95 target and the EXPLAIN ANALYZE command as specified in the reference and key facts.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g16",
+          "question": "What are the most common causes of a 500 error on POST /ask?",
+          "kind": "diagnosis",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [
+            "Gemini API",
+            "Database Connection",
+            "Empty Embedding"
+          ],
+          "facts_missing": [],
+          "coverage": 1.0,
+          "retrieved": true,
+          "retrieval_rank": 2,
+          "refused": false,
+          "latency_ms": 5795.3,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g16",
+          "answer": "Based on the *API Troubleshooting Guide* (Section 4.1 `POST /ask` — 500 Internal Server Error), the most common causes of a 500 error on `POST /ask` are:\n\n1. **Gemini API Unavailable (503)** (Note: Although listed under 503, it is noted as a cause for `/ask` failures with built-in retry logic).\n2. **Database Connection Failure**.\n3. **Empty Embedding Returned** (caused by passing an empty string to `embed_query()`, though the endpoint validates for this).\n4. **No Chunks Found (no RAG context)** (happens when the knowledge base is empty and no documents have been ingested).\n\nSource: API Troubleshooting Guide",
+          "sources": [
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "2. Common HTTP Error Codes",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.699374
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.1 `POST /ask` — 500 Internal Server Error",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.696527
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.1 `POST /ask` — 500 Internal Server Error",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.691407
+            },
+            {
+              "document": "data/docs/common_incident_playbooks.md",
+              "heading": "6. Knowledge Base Returns No Results",
+              "title": "Common Incident Playbooks",
+              "similarity": 0.688261
+            },
+            {
+              "document": "data/docs/api_troubleshooting.md",
+              "heading": "4.3 `GET /health` — 503",
+              "title": "API Troubleshooting Guide",
+              "similarity": 0.677082
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The answer accurately lists all the common causes of a 500 error on POST /ask as stated in the reference and retrieved text.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g17",
+          "question": "What is the best recipe for making chocolate chip cookies?",
+          "kind": "refusal",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [],
+          "facts_missing": [],
+          "coverage": null,
+          "retrieved": null,
+          "retrieval_rank": null,
+          "refused": true,
+          "latency_ms": 5146.7,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g17",
+          "answer": "I don't have enough information in the knowledge base to answer that.",
+          "sources": [],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The assistant correctly declined to answer due to a lack of information.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g18",
+          "question": "Who won the football World Cup in 2022?",
+          "kind": "refusal",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [],
+          "facts_missing": [],
+          "coverage": null,
+          "retrieved": null,
+          "retrieval_rank": null,
+          "refused": true,
+          "latency_ms": 5874.7,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g18",
+          "answer": "I don't have enough information in the knowledge base to answer that.",
+          "sources": [],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The assistant correctly declined to answer due to a lack of information in the knowledge base.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        },
+        {
+          "id": "g19",
+          "question": "How do I configure Terraform to provision the EKS cluster?",
+          "kind": "refusal",
+          "outcome": "PASS",
+          "passed": true,
+          "facts_found": [],
+          "facts_missing": [],
+          "coverage": null,
+          "retrieved": null,
+          "retrieval_rank": null,
+          "refused": true,
+          "latency_ms": 5794.3,
+          "slow": true,
+          "status": 200,
+          "error": null,
+          "request_id": "kops-eval-g19",
+          "answer": "I don't have enough information in the knowledge base to answer that.",
+          "sources": [
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "2. Connecting to the Cluster",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.670838
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "1. Overview",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.661202
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "3. Key Namespaces",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.645843
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "6.2 Adding Nodes (EKS Node Group)",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.635133
+            },
+            {
+              "document": "data/docs/kubernetes_operations.md",
+              "heading": "Kubernetes Cluster Operations Guide",
+              "title": "Kubernetes Cluster Operations Guide",
+              "similarity": 0.627656
+            }
+          ],
+          "flags": [],
+          "judge": {
+            "verdict": "correct",
+            "reason": "The assistant correctly declined to answer because the knowledge base lacks information on configuring Terraform for the EKS cluster.",
+            "faithful": true,
+            "unsupported": ""
+          }
+        }
+      ]
+    }
+  ],
+  "stability": [
+    {
+      "id": "g01",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5708.3,
+        "median": 5881.1,
+        "max": 6932.7
+      }
+    },
+    {
+      "id": "g02",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5567.4,
+        "median": 6660.3,
+        "max": 8033.2
+      }
+    },
+    {
+      "id": "g03",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5734.0,
+        "median": 6047.9,
+        "max": 6215.2
+      }
+    },
+    {
+      "id": "g04",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5392.4,
+        "median": 5663.0,
+        "max": 7791.6
+      }
+    },
+    {
+      "id": "g05",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5796.1,
+        "median": 6536.5,
+        "max": 86020.9
+      }
+    },
+    {
+      "id": "g06",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {
+        "unsupported_quantity": 1
+      },
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5601.2,
+        "median": 6175.4,
+        "max": 11804.8
+      }
+    },
+    {
+      "id": "g07",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5080.7,
+        "median": 5711.5,
+        "max": 5754.8
+      }
+    },
+    {
+      "id": "g08",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5958.0,
+        "median": 6119.3,
+        "max": 17514.5
+      }
+    },
+    {
+      "id": "g09",
+      "runs": 3,
+      "passes": 2,
+      "outcomes": [
+        "ERROR",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": false,
+      "flag_runs": {},
+      "slow_runs": 2,
+      "latency_ms": {
+        "min": 5417.6,
+        "median": 5497.4,
+        "max": 5577.1
+      }
+    },
+    {
+      "id": "g10",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5820.7,
+        "median": 6190.2,
+        "max": 6813.4
+      }
+    },
+    {
+      "id": "g11",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5573.1,
+        "median": 5813.5,
+        "max": 6177.8
+      }
+    },
+    {
+      "id": "g12",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5733.7,
+        "median": 6340.7,
+        "max": 6394.4
+      }
+    },
+    {
+      "id": "g13",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5491.7,
+        "median": 5508.4,
+        "max": 5826.2
+      }
+    },
+    {
+      "id": "g14",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5911.8,
+        "median": 6246.2,
+        "max": 6361.4
+      }
+    },
+    {
+      "id": "g15",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5461.4,
+        "median": 5588.0,
+        "max": 5829.0
+      }
+    },
+    {
+      "id": "g16",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5795.3,
+        "median": 6167.3,
+        "max": 6343.7
+      }
+    },
+    {
+      "id": "g17",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5054.2,
+        "median": 5146.7,
+        "max": 5419.3
+      }
+    },
+    {
+      "id": "g18",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5453.8,
+        "median": 5874.7,
+        "max": 6144.6
+      }
+    },
+    {
+      "id": "g19",
+      "runs": 3,
+      "passes": 3,
+      "outcomes": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ],
+      "same_outcome_every_run": true,
+      "flag_runs": {},
+      "slow_runs": 3,
+      "latency_ms": {
+        "min": 5540.7,
+        "median": 5794.3,
+        "max": 8041.4
+      }
+    }
+  ]
+}

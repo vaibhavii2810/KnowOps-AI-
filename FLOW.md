@@ -16,7 +16,7 @@ Notation: `→` calls · `[DB]` opens a Postgres connection via `app.db.get_conn
 | Ingestion | `python scripts/ingest.py` | `main()` in `scripts/ingest.py` → `reindex_knowledge_base()` (§5) |
 | DB setup | `scripts/init_db.sql`, run by hand in Neon | Creates the `vector` extension, 5 tables and the HNSW index |
 | CI | push or pull request on GitHub | `.github/workflows/tests.yml` → plain `pytest` on Python 3.11 + 3.12, no secrets, full git history (Phase 11.5, D-041) |
-| Evaluation | `python -m evals` (`--url`, `--judge`, `--only`, …; Phase 13.2, D-048) | `evals.run.main()` → `golden.validate()` (exit 2 if unsound) → a client: `InProcessClient` (the real `/ask` route via `TestClient`, §4) or `HttpClient` (`/auth/login` then `/ask` over HTTP) → `scoring.score_item()` per answer (a fact is matched by `golden.fact_present()`: the fact or an accepted variant, D-049; `hallucination.find_flags()` compares the answer with the retrieved sources' titles and text, D-051) → optionally `judge.judge_answer()` ([Gemini] once per answer) → `format_summary()` (each question's latency is printed and flagged `SLOW` if over `--slow-seconds`; mean/median/p95/max over answered questions — Phase 13.3, D-050) |
+| Evaluation | `python -m evals` (`--url`, `--judge`, `--only`, …; Phase 13.2, D-048) | `evals.run.main()` → `golden.validate()` (exit 2 if unsound) → a client: `InProcessClient` (the real `/ask` route via `TestClient`, §4) or `HttpClient` (`/auth/login` then `/ask` over HTTP) → `scoring.score_item()` per answer (a fact is matched by `golden.fact_present()`: the fact or an accepted variant, D-049; `hallucination.find_flags()` compares the answer with the retrieved sources' titles and text, D-051) → optionally `judge.judge_answer()` ([Gemini] once per answer) → `format_summary()` (each question's latency is printed and flagged `SLOW` if over `--slow-seconds`; mean/median/p95/max over answered questions — Phase 13.3, D-050); the whole loop runs `--repeat` times, then `format_stability()` and `report.build_report()` → `report.write_report()` (atomic JSON file in `evals/reports/`, also written on Ctrl-C with `complete: false` — Phase 13.5, D-052) |
 | Tests | `pytest` (`pytest.ini` skips `live`-marked tests; `pytest -m live` runs them, D-039) | `tests/*.py`; offline tests use `tests/conftest.py`'s `fake_gemini` / `fake_db` / `no_network`, which replace `genai.Client` and `psycopg.connect` at the root so `get_conn()`, `get_client()` and the rate limiter never reach a real server (Phase 11.1, D-038); `memory_db` keeps the app's tables in memory behind `fake_db`, and `db_backend` runs DB tests on it and (as `live`) on real Postgres (Phase 11.4, D-040) |
 
 ## 2. Startup (cold start) — import order
@@ -301,7 +301,8 @@ app.guardrails     → (none — stdlib only)
 app.ratelimit      → app.auth, app.config, app.logs (+ psycopg directly: ONE reused plain connection, no pgvector setup — D-036)
 scripts/ingest.py  → app.db, app.llm
 evals/golden.py    → scripts.ingest (DOCS_DIR, split_by_headings — so golden-set sections are the chunker's sections; Phase 13.1, D-047)
-evals/run.py       → evals.client, evals.golden, evals.judge, evals.results, evals.scoring
+evals/run.py       → evals.client, evals.golden, evals.judge, evals.report, evals.results, evals.scoring
+evals/report.py    → app.config, evals.golden, evals.results, evals.scoring (+ git via subprocess for the commit hash — Phase 13.5, D-052)
 evals/client.py    → app.config (+ app.main, app.auth imported lazily by InProcessClient) · httpx for HttpClient
 evals/judge.py     → app.config, app.guardrails, app.llm, app.retry   (Phase 13.2, D-048)
 ```

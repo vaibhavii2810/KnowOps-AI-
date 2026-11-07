@@ -7,9 +7,12 @@ One command runs the golden set through /ask and prints how it did:
     python -m evals --judge              # also ask Gemini to grade each answer (extra quota, reported separately)
     python -m evals --only g01,g05       # just those questions
     python -m evals --slow-seconds 3     # flag questions slower than 3 s (default 5); flagged, never failed
+    python -m evals --repeat 3           # run the set 3 times and show which questions are not stable (answers vary)
+    python -m evals --report path.json   # save the JSON report there (default evals/reports/run-<time>.json); --no-report skips
 
-Exit code: 0 finished, 1 finished but some questions got no response, 2 could not start (bad option, invalid golden set,
-login rejected). A run that finds wrong answers still exits 0: finding them is its job. It calls real services, so it is
+Every run saves a JSON report (evals/report.py); Ctrl-C saves what had finished. Exit code: 0 finished, 1 finished but some
+questions got no response or the report could not be saved, 2 could not start (bad option, invalid golden set, login
+rejected), 130 interrupted. A run that finds wrong answers still exits 0: finding them is its job. It calls real services, so it is
 never part of `pytest`.
 """
 
@@ -19,11 +22,14 @@ import argparse
 import sys
 import time
 from dataclasses import replace
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable, Optional
 
 from evals.client import EvalSetupError, HttpClient, InProcessClient
 from evals.golden import GoldenItem, load_golden_set, validate
 from evals.judge import judge_answer
+from evals.report import build_report, default_report_path, question_stability, write_report
 from evals.results import ERROR, JUDGE_UNFAITHFUL, AskResult, Flag, ItemResult
 from evals.scoring import DEFAULT_SLOW_MS, is_slow, score_item, summarise
 
@@ -33,6 +39,7 @@ DEFAULT_QUOTA_WAIT_SECONDS = 30.0
 EXCERPT_CHARS = 220
 SLOWEST_SHOWN = 3
 FLAGGED_SHOWN = 6
+MAX_REPEAT = 10                    # each run costs real Gemini quota; more than this is almost certainly a typo
 
 
 def _ask_once(client, item: GoldenItem, top_k: Optional[int]) -> AskResult:
@@ -174,6 +181,42 @@ def format_summary(results: list[ItemResult], slow_ms: float = DEFAULT_SLOW_MS, 
     return "\n".join(lines)
 
 
+def format_run_line(index: int, total: int, results: list[ItemResult], slow_ms: float = DEFAULT_SLOW_MS) -> str:
+    """One line per run when a run is repeated (the full summary would be repeated N times)."""
+    s = summarise(results, slow_ms)
+    parts = [f"Run {index}/{total}: {s.passed}/{s.total} passed ({_pct(s.passed, s.total)})", f"no response {s.errors}"]
+    if s.latency is not None:
+        parts.append(f"median {_secs(s.latency.median_ms)}, {s.latency.slow_count} over {_limit(slow_ms)}")
+    if s.hallucination is not None and s.hallucination.answered:
+        parts.append(f"flagged {s.hallucination.flagged}/{s.hallucination.answered}")
+    return " | ".join(parts)
+
+
+def format_stability(runs: list[list[ItemResult]], slow_ms: float = DEFAULT_SLOW_MS) -> str:
+    """After repeated runs: accuracy per run, and the questions that did not come out the same every time."""
+    stability, total = question_stability(runs, slow_ms), len(runs)
+    summaries = [summarise(run, slow_ms) for run in runs]
+    rates = [s.accuracy for s in summaries if s.accuracy is not None]
+    lines = [f"== Stability over {total} runs ==",
+             "Accuracy per run   : " + ", ".join(f"{s.passed}/{s.total}" for s in summaries)
+             + (f"  (mean {100 * sum(rates) / len(rates):.1f}%, min {100 * min(rates):.1f}%, max {100 * max(rates):.1f}%)"
+                if rates else "")]
+    unstable = [q for q in stability if not q["same_outcome_every_run"]]
+    steady = len(stability) - len(unstable)
+    lines.append(f"Same outcome every run: {steady}/{len(stability)} questions")
+    if unstable:
+        shown = "; ".join(f"{q['id']} passed {q['passes']}/{q['runs']} ({' → '.join(q['outcomes'])})" for q in unstable[:FLAGGED_SHOWN])
+        more = f"; and {len(unstable) - FLAGGED_SHOWN} more" if len(unstable) > FLAGGED_SHOWN else ""
+        lines.append(f"Not the same every run: {shown}{more}")
+    recurring = [f"{q['id']} {kind} {n}/{q['runs']}" for q in stability for kind, n in q["flag_runs"].items()]
+    lines.append("Hallucination flags: " + ("; ".join(recurring[:FLAGGED_SHOWN]) + (f"; and {len(recurring) - FLAGGED_SHOWN} more"
+                                            if len(recurring) > FLAGGED_SHOWN else "") if recurring else "none in any run"))
+    always_slow = sum(q["slow_runs"] == q["runs"] for q in stability)
+    sometimes = sum(0 < q["slow_runs"] < q["runs"] for q in stability)
+    lines.append(f"Over {_limit(slow_ms)}      : {always_slow} questions in every run, {sometimes} in some runs")
+    return "\n".join(lines)
+
+
 def _parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="python -m evals", description="Run the golden question set through /ask.")
     parser.add_argument("--url", help="base URL of a deployed site (default: run the route in this process)")
@@ -187,6 +230,11 @@ def _parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
     parser.add_argument("--quota-wait", type=float, default=DEFAULT_QUOTA_WAIT_SECONDS,
                         help="seconds to wait before retrying a question that hit Gemini's quota (retried up to "
                              f"{QUOTA_RETRIES} times; default %(default)g)")
+    parser.add_argument("--repeat", type=int, default=1,
+                        help=f"run the whole set this many times (1-{MAX_REPEAT}) and show which questions are not stable")
+    saving = parser.add_mutually_exclusive_group()
+    saving.add_argument("--report", type=Path, help="where to save the JSON report (default evals/reports/run-<time>.json)")
+    saving.add_argument("--no-report", action="store_true", help="do not save a report")
     return parser.parse_args(argv)
 
 
@@ -196,6 +244,9 @@ def main(argv: Optional[list[str]] = None, client_factory: Optional[Callable] = 
         print("--slow-seconds must be greater than 0", file=sys.stderr)
         return 2
     slow_ms = args.slow_seconds * 1000
+    if not 1 <= args.repeat <= MAX_REPEAT:
+        print(f"--repeat must be between 1 and {MAX_REPEAT}", file=sys.stderr)
+        return 2
     items = load_golden_set()
     problems = validate(items)
     if problems:
@@ -214,18 +265,61 @@ def main(argv: Optional[list[str]] = None, client_factory: Optional[Callable] = 
     factory = client_factory or (lambda: HttpClient(args.url) if args.url else InProcessClient())
 
     target = args.url or "this process (real route, database and Gemini from .env)"
-    print(f"Running {len(items)} question(s) against {target}{' with the Gemini judge' if args.judge else ''}\n", flush=True)
+    times = f", {args.repeat} times" if args.repeat > 1 else ""
+    print(f"Running {len(items)} question(s) against {target}{' with the Gemini judge' if args.judge else ''}{times}\n", flush=True)
+
+    started_at = datetime.now(timezone.utc)
+    runs: list[list[ItemResult]] = []
+    in_progress: Optional[list[ItemResult]] = None
+    interrupted = False
     try:
         with factory() as client:
-            results = run_eval(items, client, judge=args.judge, top_k=args.top_k, delay=delay,
-                               quota_wait=args.quota_wait, on_result=lambda r: print(format_result(r, slow_ms), flush=True))
+            for index in range(1, args.repeat + 1):
+                if args.repeat > 1:
+                    print(f"--- Run {index}/{args.repeat} ---", flush=True)
+                bucket: list[ItemResult] = []
+                in_progress = bucket
+
+                def show(result: ItemResult, bucket: list[ItemResult] = bucket) -> None:
+                    bucket.append(result)
+                    print(format_result(result, slow_ms), flush=True)
+
+                runs.append(run_eval(items, client, judge=args.judge, top_k=args.top_k, delay=delay,
+                                     quota_wait=args.quota_wait, on_result=show))
+                in_progress = None
+                if args.repeat > 1:
+                    print(format_run_line(index, args.repeat, runs[-1], slow_ms) + "\n", flush=True)
     except EvalSetupError as exc:
         print(f"Could not start: {exc}", file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        interrupted = True
+        if in_progress:                                  # keep the questions of the run that was under way
+            runs.append(in_progress)
+        print("\nInterrupted: saving what had finished.", file=sys.stderr)
+
     note = (f"measured over HTTP from this machine to {args.url}" if args.url else
             "measured in this process on this machine, with the database and Gemini from .env — not on a deployed site")
-    print("\n" + format_summary(results, slow_ms, note))
-    return 1 if any(r.outcome == ERROR for r in results) else 0
+    if runs:
+        print("\n" + (format_summary(runs[0], slow_ms, note) if len(runs) == 1 else format_stability(runs, slow_ms)))
+
+    save_failed = False
+    if runs and not args.no_report:
+        report = build_report(
+            runs, started_at=started_at, finished_at=datetime.now(timezone.utc), slow_ms=slow_ms, complete=not interrupted,
+            target={"mode": "http" if args.url else "in-process", "url": args.url, "latency_note": note},
+            options={"judge": args.judge, "top_k": args.top_k, "slow_seconds": args.slow_seconds, "delay": delay,
+                     "repeat": args.repeat, "quota_wait": args.quota_wait, "only": [i.id for i in items] if args.only else None},
+        )
+        path = args.report or default_report_path()
+        try:
+            print(f"\nReport saved to {write_report(report, path)}")
+        except OSError as exc:
+            print(f"\nCould not save the report to {path}: {exc}", file=sys.stderr)
+            save_failed = True
+    if interrupted:
+        return 130
+    return 1 if save_failed or any(r.outcome == ERROR for run in runs for r in run) else 0
 
 
 if __name__ == "__main__":
