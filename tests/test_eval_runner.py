@@ -55,6 +55,26 @@ def test_a_paraphrase_of_a_fact_is_a_miss_which_is_why_the_judge_exists():
     assert score_item(HPA, ask_result("Between 3 and ten replicas, at seventy percent CPU.")).outcome == MISSING_FACTS
 
 
+GIT = ITEMS["g09"]
+SECRETS_ANSWER = "Secrets live in AWS Secrets Manager. Never keep them in Kubernetes ConfigMaps or in {git}."
+
+
+@pytest.mark.parametrize("git", ["a Git repository (even private)", "Git repositories (even private ones)",
+                                 "**Git repositories**"])
+def test_an_accepted_variant_of_a_fact_counts_exactly_like_the_fact(git):
+    result = score_item(GIT, ask_result(SECRETS_ANSWER.format(git=git)))
+    assert (result.outcome, result.coverage, result.facts_missing) == (PASS, 1.0, ())
+    assert result.facts_found == GIT.expected_facts                  # reported under the canonical wording
+
+
+def test_a_variant_does_not_loosen_anything_beyond_its_own_fact():
+    result = score_item(GIT, ask_result("Never keep them in Git repositories or in GitOps tooling."))
+    assert result.outcome == MISSING_FACTS
+    assert result.facts_found == ("Git repository",)                  # found through its variant, and only that
+    assert result.facts_missing == ("AWS Secrets Manager", "ConfigMaps")
+    assert result.coverage == pytest.approx(1 / 3)
+
+
 def test_a_wrong_answer_that_happens_to_contain_the_keywords_passes_the_keyword_check():
     """The known blind spot (D-047/D-048): keywords cannot see that this contradicts the runbook."""
     wrong = "Never run kubectl rollout undo; it is --to-revision=3 only for staging."

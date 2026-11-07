@@ -46,7 +46,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
 | 11 | Testing & QA | Vaishnavi | ✅ Done — plain `pytest` makes zero real calls; green on GitHub Actions (3.11 + 3.12) for `main` and `sprint-2` at `6111862` (D-038–D-041) |
 | 12 | Logging & monitoring | Vaishnavi | ✅ Done — JSON logs + request id (D-042), `agent_run` trace (D-043), checked in Vercel's runtime logs (12.3, which exposed an outage fixed by pinning deps, D-044); `GET /metrics` (12.4, stretch, D-046) deployed and verified live |
-| 13 | AI eval harness | Vaishnavi | 🟡 Partial — 13.1 (golden set, D-047) and 13.2 (`python -m evals` runner, keyword scoring + opt-in judge, D-048) done; first live baseline 18/19; 13.3–13.5 to do. The older `tests/eval_rag.py` is retrieval-only |
+| 13 | AI eval harness | Vaishnavi | 🟡 Partial — 13.1 (golden set, D-047) and 13.2 (`python -m evals` runner, keyword scoring + opt-in judge, D-048) done; live baselines 17–18/19 over three runs, then 19/19 after two golden-set fixes (`g16`, and accepted fact variants for `g09`, D-049); 13.3–13.5 to do. The older `tests/eval_rag.py` is retrieval-only |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
 | 15 | Docs & wrap-up | Vaishnavi | ⬜ Not started |
 
@@ -407,7 +407,16 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   check on 18. The recurring miss in those runs, `g16`, was a **flaw in the golden set** (a remedy fact attached to a question about
   causes); its third fact is now the cause `Empty Embedding` and it passed **5 of 5** live runs (1 of 4 before). A fourth full run
   after the fix (judge on) was **18/19** again, but the miss had moved to `g09` — a brittle exact-phrase fact, see Known issues — so
-  results still vary run to run (temperature 0.2).
+  results still vary run to run (temperature 0.2). **Then `g09` was fixed too (D-049, below), and the next full run (judge on) was
+  19/19 with the judge agreeing on 19/19** — one run after two golden-set fixes, so a sample, not proof.
+- Follow-up to 13.2 (D-049): **accepted fact variants.** `g09`'s fact `Git repository` missed in 4 of 6 live tries because the model
+  wrote "Git repositories" — right answer, exact-phrase miss. An item can now carry `fact_variants` (`{fact: [other wordings]}`, 1–3 per
+  fact); a fact counts as present if the answer has it or a variant (`golden.fact_present`), reported under the canonical fact. The
+  canonical fact must still appear in the runbook section and the reference answer; variants must belong to an expected fact, be ≥2
+  characters and not repeat anything; refusal items carry none; the rule is wording differences only, added only after a run shows
+  a correct answer missed for that reason. Used once (`g09`). `tests/test_golden_set.py` now has 34 tests and
+  `tests/test_eval_runner.py` 56. 7 mutation checks (variants ignored, loader dropping them, "all" instead of "any", three validator
+  rules removed, scoring bypassing them) each fail the tests. `g09` passed 6/6 live tries (2/6 before); full suite 461 passed.
 - Still to do: 13.3 latency per question and a flag over 5 s; 13.4 hallucination flags; 13.5 JSON report / `eval_runs` table
   (and probably `--repeat N`, since one run is a sample).
 
@@ -539,10 +548,6 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - **Tests can't see a changed SQL statement that keeps its matching text** (D-040): `MemoryDB` answers by fragment, so
   e.g. flipping the history query's `ORDER BY` goes unnoticed offline. The `live` variants (`pytest -m live`) catch it;
   run them before a deploy that touches SQL.
-- **Golden question `g09` has a brittle fact (found while fixing `g16`, D-048):** its fact `Git repository` misses whenever the model
-  writes the plural "Git repositories" (4 of 6 tries in one check; it passed the first three full runs). The answers are right and
-  the judge says so. Not changed yet: the clean fix is to let a fact list accepted variants (the canonical one must still appear in
-  the section) or match a stem, which would help any phrase that inflects.
 - **Evaluation results vary run to run** (temperature 0.2): treat a single run as a sample. A run with `--judge` takes ~3 minutes
   on the free tier and can hit Gemini's quota (the runner waits and retries).
 - **Runbook text disagrees with the app in places (found reading them for 13.1):** `api_troubleshooting.md` §7 says `POST /ask` is

@@ -81,7 +81,8 @@
       "source_doc": "kubernetes_operations.md",
       "source_section": "8. Secrets Management",
       "expected_answer": "Secrets are stored in AWS Secrets Manager and injected at pod startup. They must never be stored in Kubernetes ConfigMaps, in environment variables defined in deployment YAML, or in a Git repository.",
-      "expected_facts": ["AWS Secrets Manager", "ConfigMaps", "Git repository"]
+      "expected_facts": ["AWS Secrets Manager", "ConfigMaps", "Git repository"],
+      "fact_variants": {"Git repository": ["Git repositories"]}
     },
     {
       "id": "g10",

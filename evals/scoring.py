@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from evals.golden import GoldenItem, normalize
+from evals.golden import GoldenItem, fact_present, normalize
 from evals.results import (
     ERROR, FALSE_REFUSAL, MISSING_FACTS, PASS, SHOULD_HAVE_REFUSED, AskResult, ItemResult,
 )
@@ -48,8 +48,7 @@ def score_item(item: GoldenItem, ask: AskResult) -> ItemResult:
         return ItemResult(item=item, ask=ask, outcome=PASS if refused else SHOULD_HAVE_REFUSED)
 
     rank = retrieval_rank(item, ask)
-    answer = normalize(ask.answer)
-    found = tuple(f for f in item.expected_facts if normalize(f) in answer)
+    found = tuple(f for f in item.expected_facts if fact_present(item, f, ask.answer))
     missing = tuple(f for f in item.expected_facts if f not in found)
     # A hedge followed by the real answer ("I don't have enough information about X, but ...") is an answer, not a
     # refusal: it is a false refusal only if it declined and contains none of the expected facts.

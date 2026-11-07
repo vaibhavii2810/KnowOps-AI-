@@ -938,3 +938,31 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   plural "Git repositories", which does not contain it, though every answer was right (the judge agreed on all 19). So exact-phrase
   facts are brittle to inflection, and a rate like 94.7% is partly a measure of phrasing luck. Not changed in this step: the clean fix
   is for a fact to list accepted variants (the canonical one must still appear in the section), or to match a stem.
+  **Resolved by D-049.**
+
+### D-049 · Golden-set facts can list accepted variants (`fact_variants`) (Phase 13.2 follow-up)
+- **Date · by · source:** 2026-11-07 · Vaishnavi (with Claude) · User ("add accepted variants to facts") + Agent (the evidence: `g09`)
+- **Decision:** An item in `evals/golden_set.json` may carry an optional `fact_variants` map, `{fact: [other wordings]}`. A fact counts
+  as present if the answer contains the fact **or any listed variant** (`golden.fact_present`, used by `scoring.score_item`); results
+  are still reported under the canonical fact, so coverage denominators do not change. `validate()` keeps the set honest: the
+  *canonical* fact must still appear in the cited runbook section and in the reference answer (a variant need not — it is a way
+  of saying the same thing, not a new claim); every key must be one of the item's `expected_facts`; 1–3 variants per fact; each at
+  least 2 characters and not a repeat of the fact or of another variant (after `normalize()`); refusal items carry none.
+  **Rule for adding one:** only for a difference in wording (plural, hyphenation, number format), and only after a run showed a
+  correct answer missing that fact for that reason. Never to widen what counts as correct. Used once so far: `g09`,
+  `Git repository` → `Git repositories`.
+- **Why:** The evidence was a live check of `g09`: its fact `Git repository` missed in 4 of 6 tries because the model wrote
+  "Git repositories", which does not contain it, although every answer was right and the judge agreed. The exact-phrase check had turned
+  a wording coin-flip into a pass rate. Changing a fact would only have moved the same problem to another question.
+- **Alternatives considered:** Matching a stem (`Git repo`): it also matches "Git report" and "Git repo-sync", so it silently
+  accepts wrong answers; word-level stemming (a dependency, and surprising matches); regular expressions per fact (powerful but
+  hard to read and review, and an invalid pattern breaks a run); leaving it to the judge (non-deterministic, costs quota — the
+  judge stays the second opinion, not the gate); adding variants proactively to every fact (loosens the check with no evidence,
+  and would hide genuine misses); nesting variants inside `expected_facts` (changes the type every consumer reads).
+- **Tradeoff accepted:** The check is slightly looser for a listed fact, and a variant is not verified against the runbook, so it
+  relies on the rule above being followed by whoever adds one. Inflection is only one source of brittleness: a true paraphrase
+  ("four hours") is still a miss. If variants pile up (more than a handful across the set), the facts are too phrase-like and
+  the answer is better facts or stem matching, not more variants.
+- **Checked live (2026-11-07):** `g09` passed 6 of 6 tries after the change (before: 2 of 6); only one of the six happened to use the
+  plural, so the offline tests are what pin the behaviour. The next full run, with the judge on, was **19/19** and the judge
+  agreed on 19/19 — one run after two golden-set fixes (`g16` and this), a sample, not proof: earlier runs scattered between 17 and 18.

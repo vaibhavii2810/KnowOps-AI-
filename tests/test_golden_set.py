@@ -11,14 +11,14 @@ import pytest
 
 from app.llm import SYSTEM_INSTRUCTION
 from evals.golden import (
-    GOLDEN_PATH, KINDS, MAX_ITEMS, MIN_ITEMS, REFUSAL_ANSWER, GoldenItem, load_golden_set,
-    load_runbook_sections, normalize, validate,
+    GOLDEN_PATH, KINDS, MAX_ITEMS, MAX_VARIANTS_PER_FACT, MIN_ITEMS, REFUSAL_ANSWER, GoldenItem, accepted_forms,
+    fact_present, load_golden_set, load_runbook_sections, normalize, validate,
 )
 
 pytestmark = pytest.mark.usefixtures("no_network")
 
 ALLOWED_KEYS = {"id", "question", "kind", "expected_answer", "expected_facts", "source_doc", "source_section",
-                "must_refuse", "absent_terms"}
+                "must_refuse", "absent_terms", "fact_variants"}
 
 
 @pytest.fixture(scope="module")
@@ -185,6 +185,68 @@ def test_a_set_with_no_refusal_items_is_caught(items, sections):
     keep = [i for i in items if not i.must_refuse]
     assert contains(validate(keep + [replace(keep[0], id="g90", question="Padding question one?")], sections),
                     "no question that must be refused")
+
+
+# --- accepted variants (D-049) -------------------------------------------------------------------------
+
+def item_g09(items):
+    return next(n for n, i in enumerate(items) if i.id == "g09")
+
+
+def test_a_fact_is_satisfied_by_itself_or_by_any_accepted_variant(items):
+    g09 = items[item_g09(items)]
+    assert accepted_forms(g09, "Git repository") == ("Git repository", "Git repositories")
+    assert accepted_forms(g09, "ConfigMaps") == ("ConfigMaps",)                       # no variants listed
+    for wording in ("in a Git repository (even private)", "in **Git repositories**, even private ones"):
+        assert fact_present(g09, "Git repository", wording)
+    assert not fact_present(g09, "Git repository", "use GitOps tooling")             # a different thing
+    assert not fact_present(g09, "ConfigMaps", "never in a Git repositories")         # variants are per fact
+
+
+def test_the_shipped_set_uses_variants_only_for_a_wording_difference():
+    """g09's variant is the plural of its fact (D-049); every variant in the set must stay that modest."""
+    for item in load_golden_set():
+        for fact, forms in item.fact_variants.items():
+            assert fact in item.expected_facts and 1 <= len(forms) <= MAX_VARIANTS_PER_FACT
+    g09 = next(i for i in load_golden_set() if i.id == "g09")
+    assert g09.fact_variants == {"Git repository": ("Git repositories",)}
+
+
+def test_the_canonical_fact_is_still_checked_against_the_runbook_even_when_variants_exist(items, sections):
+    """A variant never has to appear in the runbook, but the fact it stands for does."""
+    g09 = item_g09(items)
+    assert "git repositories" not in normalize(sections["kubernetes_operations.md"]["8. Secrets Management"])
+    assert validate(items, sections) == []
+    problems = problems_after(items, sections, g09, expected_facts=("AWS Secrets Manager", "ConfigMaps", "Git repo"),
+                              fact_variants={"Git repo": ("Git repositories",)},
+                              expected_answer=items[g09].expected_answer.replace("Git repository", "Git repo"))
+    assert problems == []                                                             # "Git repo" is in the section
+    problems = problems_after(items, sections, g09, fact_variants={"Git repository": ("Git repositories",)},
+                              expected_facts=("AWS Secrets Manager", "ConfigMaps", "Svn repository"))
+    assert contains(problems, "fact 'Svn repository' does not appear in kubernetes_operations.md")
+
+
+def test_a_variant_for_a_fact_the_item_does_not_have_is_caught(items, sections):
+    problems = problems_after(items, sections, item_g09(items), fact_variants={"Mercurial": ("Hg",)})
+    assert contains(problems, "g09: fact_variants has an entry for 'Mercurial', which is not one of its expected_facts")
+
+
+def test_empty_too_many_repeated_and_too_short_variants_are_caught(items, sections):
+    g09 = item_g09(items)
+    assert contains(problems_after(items, sections, g09, fact_variants={"Git repository": ()}), "must have 1-3 variants")
+    four = ("Git repos", "Git repositories", "git-repositories", "Git trees")
+    assert contains(problems_after(items, sections, g09, fact_variants={"Git repository": four}), "must have 1-3 variants")
+    assert contains(problems_after(items, sections, g09, fact_variants={"Git repository": ("GIT  REPOSITORY",)}),
+                    "repeats the fact or another variant")
+    assert contains(problems_after(items, sections, g09, fact_variants={"Git repository": ("Git repos", "git repos")}),
+                    "repeats the fact or another variant")
+    assert contains(problems_after(items, sections, g09, fact_variants={"Git repository": ("g",)}), "too short")
+
+
+def test_a_refusal_item_cannot_carry_variants(items, sections):
+    refusal = next(n for n, i in enumerate(items) if i.must_refuse)
+    problems = problems_after(items, sections, refusal, fact_variants={"anything": ("else",)})
+    assert contains(problems, "has no source_doc, source_section, expected_facts or fact_variants")
 
 
 def test_the_dataclass_is_immutable():

@@ -1,5 +1,5 @@
 """
-evals/golden.py  –  Phase 13.1 (D-047)
+evals/golden.py  –  Phase 13.1 (D-047), accepted variants added in D-049
 The golden question set: load it, and check that it is still grounded in the runbooks it came from.
 
 Every in-scope item names the runbook section its answer comes from, lists the short facts a correct answer must
@@ -8,6 +8,10 @@ each fact really appears in that section (so the set cannot drift from the docs)
 reference answer (so a perfect answer scores 100%), and each section name is one the app's own chunker produces
 (so it can be compared with the `heading` of a source returned by /ask). Items that must be refused name terms
 that must NOT appear in any runbook, so they stay out of scope if the docs change.
+
+A fact is an exact phrase, which makes a correct answer miss it when the wording differs ("Git repository" vs
+"Git repositories"). `fact_variants` maps a fact to other wordings that count as the same fact. The fact itself is
+still the one checked against the runbook; a variant is only ever an alternative way to say it, never a new claim.
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ REFUSAL_ANSWER = "I don't have enough information in the knowledge base to answe
 KINDS = frozenset({"numeric", "procedure", "command", "factual", "diagnosis", "list", "refusal"})
 MIN_ITEMS, MAX_ITEMS = 15, 20          # the build guide: "a golden set of 15–20 Q&A pairs"
 MIN_ITEMS_PER_DOC = 2
+MAX_VARIANTS_PER_FACT = 3
 
 _PUNCTUATION = str.maketrans({"–": "-", "—": "-", "‑": "-", "’": "'", "‘": "'", "“": '"', "”": '"'})
 
@@ -49,6 +54,7 @@ class GoldenItem:
     source_section: Optional[str] = None    # the heading the chunker gives the section
     must_refuse: bool = False
     absent_terms: tuple[str, ...] = field(default=())   # refusal items only: terms no runbook may contain
+    fact_variants: dict[str, tuple[str, ...]] = field(default_factory=dict)   # fact -> other wordings that count as it
 
 
 def load_golden_set(path: Path = GOLDEN_PATH) -> list[GoldenItem]:
@@ -59,9 +65,21 @@ def load_golden_set(path: Path = GOLDEN_PATH) -> list[GoldenItem]:
             expected_facts=tuple(item.get("expected_facts", [])), source_doc=item.get("source_doc"),
             source_section=item.get("source_section"), must_refuse=item.get("must_refuse", False),
             absent_terms=tuple(item.get("absent_terms", [])),
+            fact_variants={fact: tuple(forms) for fact, forms in item.get("fact_variants", {}).items()},
         )
         for item in data["items"]
     ]
+
+
+def accepted_forms(item: GoldenItem, fact: str) -> tuple[str, ...]:
+    """The fact itself, then any wordings the golden set accepts in its place."""
+    return (fact, *item.fact_variants.get(fact, ()))
+
+
+def fact_present(item: GoldenItem, fact: str, text: str) -> bool:
+    """True if `text` contains the fact or one of its accepted variants (compared with normalize())."""
+    haystack = normalize(text)
+    return any(normalize(form) in haystack for form in accepted_forms(item, fact))
 
 
 def load_runbook_sections(docs_dir: Path = DOCS_DIR) -> dict[str, dict[str, str]]:
@@ -105,8 +123,8 @@ def validate(items: list[GoldenItem], sections: Optional[dict[str, dict[str, str
                 problems.append(f"{where}: a must_refuse item must have kind 'refusal'")
             if item.expected_answer != REFUSAL_ANSWER:
                 problems.append(f"{where}: expected_answer must be the standard refusal")
-            if item.source_doc or item.source_section or item.expected_facts:
-                problems.append(f"{where}: a refusal item has no source_doc, source_section or expected_facts")
+            if item.source_doc or item.source_section or item.expected_facts or item.fact_variants:
+                problems.append(f"{where}: a refusal item has no source_doc, source_section, expected_facts or fact_variants")
             if not item.absent_terms:
                 problems.append(f"{where}: a refusal item needs absent_terms")
             for term in item.absent_terms:
@@ -134,6 +152,19 @@ def validate(items: list[GoldenItem], sections: Optional[dict[str, dict[str, str
                 problems.append(f"{where}: fact {fact!r} does not appear in {item.source_doc} > {item.source_section}")
             if normalize(fact) not in normalize(item.expected_answer):
                 problems.append(f"{where}: fact {fact!r} is missing from its own expected_answer")
+        for fact, forms in item.fact_variants.items():
+            if fact not in item.expected_facts:
+                problems.append(f"{where}: fact_variants has an entry for {fact!r}, which is not one of its expected_facts")
+                continue
+            if not 1 <= len(forms) <= MAX_VARIANTS_PER_FACT:
+                problems.append(f"{where}: fact {fact!r} must have 1-{MAX_VARIANTS_PER_FACT} variants, found {len(forms)}")
+            seen = {normalize(fact)}
+            for form in forms:
+                if len(form.strip()) < 2:
+                    problems.append(f"{where}: variant {form!r} of {fact!r} is too short to be a meaningful check")
+                elif normalize(form) in seen:
+                    problems.append(f"{where}: variant {form!r} of {fact!r} repeats the fact or another variant")
+                seen.add(normalize(form))
 
     for doc in sections:
         if per_doc.get(doc, 0) < MIN_ITEMS_PER_DOC:
