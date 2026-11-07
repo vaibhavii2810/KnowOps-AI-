@@ -33,6 +33,9 @@ create, check and triage incident tickets, and escalate to a human.
 
 Tests: `pytest` (skips tests marked `live`) · `pytest -m live` (tests that need the real database and Gemini)
 
+Evaluation: `python -m evals` runs 19 golden questions through the real `/ask` and prints accuracy (add `--judge` for a Gemini
+second opinion, `--url https://…` to test a deployed site). It uses real services, so it is separate from `pytest`.
+
 ## Project layout
 
 ```
@@ -43,7 +46,7 @@ data/docs/  runbook knowledge base
 static/     web console
 n8n/        n8n workflow export
 tests/      pytest suite (offline fakes in conftest.py) + RAG eval
-evals/      AI evaluation harness: golden question set (Phase 13)
+evals/      AI evaluation harness: golden question set and the `python -m evals` runner (Phase 13)
 .github/    CI workflow: runs pytest on every push
 ```
 

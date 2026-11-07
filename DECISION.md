@@ -890,3 +890,51 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   facts are machine-checked. `evals.golden` imports `scripts.ingest` (for the chunker), so the validator inherits its imports.
 - **Revisit if:** Runbooks grow beyond what 16 questions cover (add items — the validator keeps them honest), keyword scoring
   produces too many false misses (add the judge, or accept alternatives per fact), or the chunker changes how it names sections.
+
+### D-048 · The evaluation runner: `python -m evals` sends the golden set through the real `/ask` and scores it by keyword (Phase 13.2)
+- **Date · by · source:** 2026-11-07 · Vaishnavi (with Claude) · Build guide (13.2: "an eval script that runs each question
+  through `/ask` and scores relevance/accuracy (keyword match or Gemini-as-judge)") + User (keyword first, judge opt-in)
+- **Decision:** `python -m evals` loads the golden set, **refuses to run if `validate()` finds a problem** (exit 2), and asks each
+  question through `/ask` by one of two clients that return the same result: `InProcessClient` (default) calls the real route
+  inside the process via FastAPI's `TestClient` — auth, retrieval, Gemini, citations — using the database and key from `.env`,
+  with the rate limiter and request counter switched off and the app's loggers silenced *only while it is open*;
+  `HttpClient` (`--url`) logs in to a deployed site, waits 7 s between questions to stay under `/ask`'s 10/minute, and honours
+  `Retry-After` on a 429. **Scoring is deterministic.** An in-scope answer **passes only if it contains every expected fact**
+  (compared after `normalize()`); the softer **coverage** (share of facts found) is reported next to it. A refusal item passes
+  if the assistant declined. Outcomes: `PASS`, `MISSING_FACTS`, `FALSE_REFUSAL` (declined *and* none of the facts present —
+  a hedge followed by the real answer counts as an answer), `SHOULD_HAVE_REFUSED`, `ERROR` (no response). Alongside, **retrieval**:
+  whether the expected runbook section was among the cited `sources` and at what rank (hit rate and mean reciprocal rank).
+  `--judge` additionally asks Gemini (temperature 0, JSON) for correct / partial / incorrect plus a reason; the answer is fenced as
+  untrusted data; it is shown beside the keyword verdict and never changes it. A question that hits **Gemini's own quota**
+  (a 503 whose detail names 429/RESOURCE_EXHAUSTED) is retried twice after `--quota-wait` (30 s). Exit codes: 0 finished,
+  1 some questions got no response, 2 could not start. It is not part of `pytest`: it needs real services.
+- **Why:** In-process exercises everything except the network hop with no credentials, no rate-limit pacing and no writes to the
+  production database; `--url` is there for 13.3, where latency must come from the deployed site. Strict pass (all facts) keeps
+  the verdict binary and reproducible; coverage shows how close the misses are. Reading citations from the real response
+  (rather than calling `retrieve()` separately) tests what a user is shown. Refusing to score an unsound golden set stops a
+  stale expected fact from being reported as a regression. The quota retry exists because the first live run died on it (below).
+- **Alternatives considered:** Calling `llm.chat_completion()` directly (skips the route, citations and auth wiring); HTTP only
+  (needs the password, paces at 7 s per question, and writes 19 conversations into whichever database it hits); a 75% coverage
+  threshold (inconsistent across 2-fact and 4-fact items); judge-as-primary (non-deterministic, costs quota, and the judge can be
+  talked round — here it is the same model family as the assistant, so it can share its blind spots); a `--repeat N` mode (see below).
+- **Tradeoff accepted:** *Results vary from run to run*, because the chat call runs at temperature 0.2. Three full live runs
+  (dev database, real Gemini; the same code and runbooks): run 1 **17/19** (one `ERROR` from the quota, one miss), run 2 **18/19**
+  (judge on; 0 errors; retrieval 16/16, MRR 0.90, coverage 97.9%; the judge rated all 19 correct and agreed with the keyword check
+  on 18/19), run 3 **18/19** (the only miss was `g16`). `g16` missed in runs 1 and 3 and passed when run alone, so a single run is a
+  sample, not a measurement. `g16` is also a **flaw in the golden set, not the assistant**: it asks for the *causes* of a 500, but the
+  fact `scripts/ingest.py` belongs to a *remedy*; the model usually lists causes only, and the judge (reading for meaning) calls it
+  correct. Left unchanged so the baseline is honest; the fix is to replace that fact with a cause (for example `Empty Embedding`).
+  Keyword blind spots, each pinned by a test: a paraphrase is a miss; a wrong answer that contains the keywords passes; a refusal
+  that goes on to invent content still passes (only the opening is checked). A run with the judge on takes ~3 minutes on the free
+  tier (three Gemini calls per question, plus quota waits). In-process runs write one conversation per question into the database
+  in `.env`. In-process latency is this machine's, not production's (13.3).
+- **Revisit if:** run-to-run variance hides real changes (add `--repeat N` with per-question pass rates), the judge is trusted
+  enough to gate on (then compare it against hand grading first), or `/ask`'s response shape changes (the client reads
+  `answer`, `sources[].document_source` and `sources[].heading`).
+- **Update 2026-11-07 — `g16` fixed, and what that showed.** `g16`'s third fact was changed from the remedy `scripts/ingest.py` to the
+  cause `Empty Embedding` (chosen on the section's list of causes before any new result was seen), and its reference answer no longer
+  mentions the remedy. Run alone five times it passed **5 of 5** (it had passed 1 of 4). A full run afterwards (judge on) was **18/19**
+  again, but the miss moved to `g09`: its fact `Git repository` is an exact phrase, and in 4 of 6 follow-up tries the model wrote the
+  plural "Git repositories", which does not contain it, though every answer was right (the judge agreed on all 19). So exact-phrase
+  facts are brittle to inflection, and a rate like 94.7% is partly a measure of phrasing luck. Not changed in this step: the clean fix
+  is for a fact to list accepted variants (the canonical one must still appear in the section), or to match a stem.

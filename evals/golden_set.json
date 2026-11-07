@@ -143,8 +143,8 @@
       "kind": "diagnosis",
       "source_doc": "api_troubleshooting.md",
       "source_section": "4.1 `POST /ask` — 500 Internal Server Error",
-      "expected_answer": "The Gemini API being unavailable, a database connection failure, an empty embedding, or no chunks found because the knowledge base is empty (run scripts/ingest.py to populate it).",
-      "expected_facts": ["Gemini API", "Database Connection", "scripts/ingest.py"]
+      "expected_answer": "The Gemini API being unavailable, a database connection failure, an empty embedding, or no chunks found because the knowledge base is empty.",
+      "expected_facts": ["Gemini API", "Database Connection", "Empty Embedding"]
     },
     {
       "id": "g17",

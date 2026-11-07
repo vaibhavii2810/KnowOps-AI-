@@ -16,6 +16,7 @@ Notation: `→` calls · `[DB]` opens a Postgres connection via `app.db.get_conn
 | Ingestion | `python scripts/ingest.py` | `main()` in `scripts/ingest.py` → `reindex_knowledge_base()` (§5) |
 | DB setup | `scripts/init_db.sql`, run by hand in Neon | Creates the `vector` extension, 5 tables and the HNSW index |
 | CI | push or pull request on GitHub | `.github/workflows/tests.yml` → plain `pytest` on Python 3.11 + 3.12, no secrets, full git history (Phase 11.5, D-041) |
+| Evaluation | `python -m evals` (`--url`, `--judge`, `--only`, …; Phase 13.2, D-048) | `evals.run.main()` → `golden.validate()` (exit 2 if unsound) → a client: `InProcessClient` (the real `/ask` route via `TestClient`, §4) or `HttpClient` (`/auth/login` then `/ask` over HTTP) → `scoring.score_item()` per answer → optionally `judge.judge_answer()` ([Gemini] once per answer) → `format_summary()` |
 | Tests | `pytest` (`pytest.ini` skips `live`-marked tests; `pytest -m live` runs them, D-039) | `tests/*.py`; offline tests use `tests/conftest.py`'s `fake_gemini` / `fake_db` / `no_network`, which replace `genai.Client` and `psycopg.connect` at the root so `get_conn()`, `get_client()` and the rate limiter never reach a real server (Phase 11.1, D-038); `memory_db` keeps the app's tables in memory behind `fake_db`, and `db_backend` runs DB tests on it and (as `live`) on real Postgres (Phase 11.4, D-040) |
 
 ## 2. Startup (cold start) — import order
@@ -300,6 +301,9 @@ app.guardrails     → (none — stdlib only)
 app.ratelimit      → app.auth, app.config, app.logs (+ psycopg directly: ONE reused plain connection, no pgvector setup — D-036)
 scripts/ingest.py  → app.db, app.llm
 evals/golden.py    → scripts.ingest (DOCS_DIR, split_by_headings — so golden-set sections are the chunker's sections; Phase 13.1, D-047)
+evals/run.py       → evals.client, evals.golden, evals.judge, evals.results, evals.scoring
+evals/client.py    → app.config (+ app.main, app.auth imported lazily by InProcessClient) · httpx for HttpClient
+evals/judge.py     → app.config, app.guardrails, app.llm, app.retry   (Phase 13.2, D-048)
 ```
 
 ## 8. Which code touches which table
@@ -309,7 +313,7 @@ evals/golden.py    → scripts.ingest (DOCS_DIR, split_by_headings — so golden
 | `documents` | `scripts/ingest.py` | `rag.retrieve` (join); counted by `/health`, `/cron/reindex`, agent diagnostics |
 | `chunks` | `scripts/ingest.py` | `rag.retrieve` (vector search); counted as above |
 | `tickets` | `crm.py` (via `/tickets*` and agent tools) | `crm.py` |
-| `conversations` | `/ask`, `POST /conversations` | `/ask`, `GET /conversations*` |
+| `conversations` | `/ask` (including each question of an in-process `python -m evals` run), `POST /conversations` | `/ask`, `GET /conversations*` |
 | `messages` | `/ask` | `/ask` (history), `GET /conversations*` |
 | `rate_limits` | `app.ratelimit` (upsert per request on `/ask`, `/agent/*`; self-creates the table) | `app.ratelimit` |
 | `request_metrics` | `app.metrics` (one upsert per counted API request, from `RequestMetricsMiddleware`; self-creates the table; ~1% of writes prune rows older than 30 days) | `GET /metrics` |

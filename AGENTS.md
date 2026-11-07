@@ -46,7 +46,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
 | 11 | Testing & QA | Vaishnavi | ✅ Done — plain `pytest` makes zero real calls; green on GitHub Actions (3.11 + 3.12) for `main` and `sprint-2` at `6111862` (D-038–D-041) |
 | 12 | Logging & monitoring | Vaishnavi | ✅ Done — JSON logs + request id (D-042), `agent_run` trace (D-043), checked in Vercel's runtime logs (12.3, which exposed an outage fixed by pinning deps, D-044); `GET /metrics` (12.4, stretch, D-046) deployed and verified live |
-| 13 | AI eval harness | Vaishnavi | 🟡 Partial — 13.1 done (golden set: 19 items, every fact checked against the runbooks, D-047); 13.2–13.5 to do. The older `tests/eval_rag.py` is retrieval-only |
+| 13 | AI eval harness | Vaishnavi | 🟡 Partial — 13.1 (golden set, D-047) and 13.2 (`python -m evals` runner, keyword scoring + opt-in judge, D-048) done; first live baseline 18/19; 13.3–13.5 to do. The older `tests/eval_rag.py` is retrieval-only |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
 | 15 | Docs & wrap-up | Vaishnavi | ⬜ Not started |
 
@@ -370,7 +370,7 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   agent did" holds — proven live in 12.3 (request id `kops-12-3-1bfd6d939735`) and again for the 12.2 fixes (`kops-d045-agent-01`).
   12.4 (the guide's optional stretch) is also live and verified, as above.
 
-**Phase 13 — AI evaluation harness** 🟡 in progress (13.1 done)
+**Phase 13 — AI evaluation harness** 🟡 in progress (13.1–13.2 done)
 - 13.1 Done. New `evals/` package (D-047): `evals/golden_set.json` — **19 items**: 16 in-scope questions covering all 5 runbooks
   (DR 4, Kubernetes 5, incident playbooks 3, on-call 2, API 2; kinds numeric / procedure / command / factual / diagnosis / list)
   and **3 that must be refused** (cookies, the 2022 World Cup, and a near-domain trap: Terraform for EKS). Each in-scope item has
@@ -385,8 +385,31 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   nothing because the helper script had been cleared; it was caught by noticing every result was an unchanged "28 passed", and
   redone with a helper that fails loudly.) 399 passed, 109 live deselected.
 - Known limit, recorded in D-047: short numeric facts are a weak check (g01's `4 hours` / `1 hour` also appear in the severity table).
-- Still to do: 13.2 a runner that calls the real `/ask` path and scores fact coverage (optional Gemini judge); 13.3 latency and a
-  5 s flag; 13.4 hallucination flags; 13.5 JSON report / `eval_runs` table.
+- 13.2 Done. `python -m evals` (D-048; new `evals/run.py`, `client.py`, `scoring.py`, `judge.py`, `results.py`, `__main__.py`). It
+  validates the golden set first (an unsound one is never scored), then asks each question through the real `/ask` — **in-process**
+  by default (the route via `TestClient`, database and Gemini key from `.env`, limiter and request counter off only while open) or
+  over HTTP with `--url` (logs in, waits 7 s between questions, honours `Retry-After`). An in-scope answer **passes only if it contains
+  every expected fact**; coverage, whether the expected runbook section was cited (hit rate, mean reciprocal rank), false refusals
+  and answered-when-it-should-refuse are reported; `--judge` adds a Gemini verdict (correct / partial / incorrect, answer fenced
+  as untrusted data) beside the keyword one without changing it; `--only g01,g05`, `--top-k`, `--delay`, `--quota-wait`. A question
+  that hits Gemini's quota is retried twice after 30 s. Exit 0 finished / 1 some questions had no response / 2 could not start.
+  52 offline tests in `tests/test_eval_runner.py` (0.15 s): scoring rules with exact numbers, the in-process client running the
+  real route against the fakes, the HTTP client on a mock transport (login, 429 wait and cap, no password in errors), the judge,
+  the runner and the command line. 15 mutation checks (lenient pass, inverted refusal, a hedged answer scored as a refusal, section ignored, errors in the
+  means, settings or log levels not restored, request counter left on, wait not capped, answer unfenced, no pacing, unsound set still scored, judge on errors, quota
+  retry removed or too broad) each fail them. **A bug found by the full suite, not the new tests:** the in-process client silenced
+  the app's loggers and never restored them, which hid the JSON log lines from 12 later tests (they passed alone); now restored,
+  with a regression test. 451 passed, 109 live deselected.
+- **First live baseline (2026-11-07, dev database + real Gemini; three full runs):** **18/19** in runs 2 and 3 (17/19 in run 1,
+  where one question hit Gemini's free-tier quota — which is why the runner now retries those). Retrieval cited the expected
+  section for **16/16** in-scope questions every complete run (mean reciprocal rank 0.90); 3/3 out-of-scope questions refused,
+  including the Terraform trap; no false refusals; mean fact coverage 97.9%; judge: all 19 correct, agreeing with the keyword
+  check on 18. The recurring miss in those runs, `g16`, was a **flaw in the golden set** (a remedy fact attached to a question about
+  causes); its third fact is now the cause `Empty Embedding` and it passed **5 of 5** live runs (1 of 4 before). A fourth full run
+  after the fix (judge on) was **18/19** again, but the miss had moved to `g09` — a brittle exact-phrase fact, see Known issues — so
+  results still vary run to run (temperature 0.2).
+- Still to do: 13.3 latency per question and a flag over 5 s; 13.4 hallucination flags; 13.5 JSON report / `eval_runs` table
+  (and probably `--repeat N`, since one run is a sample).
 
 ## Phase log
 
@@ -478,7 +501,7 @@ static/     web console (index.html, css, js)
 n8n/        incident_triage_workflow.json (alert → ticket → triage → Slack) ·
             workflow.json (escalate_to_human → Slack, Phase 9.4/9.5, D-031)
 tests/      pytest suite + eval_rag.py (conftest.py: offline fakes, MemoryDB; pytest.ini at repo root)
-evals/      AI evaluation harness (Phase 13): golden_set.json + golden.py (loader/validator); runner to come (13.2+, D-047)
+evals/      AI evaluation harness (Phase 13): golden_set.json + golden.py (D-047) · run.py, client.py, scoring.py, judge.py — `python -m evals` (D-048)
 .github/    workflows/tests.yml — CI: plain pytest on every push/PR, Python 3.11 + 3.12 (Phase 11.5, D-041)
 ```
 
@@ -516,6 +539,12 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - **Tests can't see a changed SQL statement that keeps its matching text** (D-040): `MemoryDB` answers by fragment, so
   e.g. flipping the history query's `ORDER BY` goes unnoticed offline. The `live` variants (`pytest -m live`) catch it;
   run them before a deploy that touches SQL.
+- **Golden question `g09` has a brittle fact (found while fixing `g16`, D-048):** its fact `Git repository` misses whenever the model
+  writes the plural "Git repositories" (4 of 6 tries in one check; it passed the first three full runs). The answers are right and
+  the judge says so. Not changed yet: the clean fix is to let a fact list accepted variants (the canonical one must still appear in
+  the section) or match a stem, which would help any phrase that inflects.
+- **Evaluation results vary run to run** (temperature 0.2): treat a single run as a sample. A run with `--judge` takes ~3 minutes
+  on the free tier and can hit Gemini's quota (the runner waits and retries).
 - **Runbook text disagrees with the app in places (found reading them for 13.1):** `api_troubleshooting.md` §7 says `POST /ask` is
   limited to 20 requests/minute and `GET /health` to 100/minute, but the app enforces 10/minute on `/ask` (D-036) and does not
   limit `/health`; it and `on_call_guide.md` also say the Gemini retry is "up to 3 attempts" where the code makes 4 (D-032). `/ask`
@@ -529,6 +558,8 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - Tests: `pytest` (offline, ~2s; tests marked `live` are skipped). `pytest -m live` runs the ones that need the real
   Neon DB and Gemini, including the real-Postgres variant of every `db_backend` test (D-039, D-040). New tests should use
   `fake_gemini`, `fake_db` or `memory_db` (D-038, D-040); a test needing a new SQL statement must add it to `MemoryDB`.
+- Evaluation: `python -m evals` (in-process, real Gemini, ~1–3 min; `--judge`, `--only g01,g05`, `--url https://… ` for a deployed
+  site). It calls real services and writes conversations into the database in `.env`, so it is not part of `pytest` (D-048).
 - Never commit `.env` or real keys.
 
 ## Rules for every code change
