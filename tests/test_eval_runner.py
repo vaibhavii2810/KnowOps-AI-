@@ -16,7 +16,9 @@ from evals.results import (
     ERROR, FALSE_REFUSAL, MISSING_FACTS, PASS, SHOULD_HAVE_REFUSED, AskResult, Judgement, SourceRef,
 )
 from evals.run import format_result, format_summary, main, run_eval
-from evals.scoring import is_refusal, retrieval_rank, score_item, summarise
+from evals.scoring import (
+    DEFAULT_SLOW_MS, is_refusal, is_slow, latency_stats, percentile, retrieval_rank, score_item, summarise,
+)
 
 pytestmark = pytest.mark.usefixtures("no_network")
 
@@ -170,6 +172,121 @@ def test_the_summary_adds_up_exactly():
 def test_an_empty_run_summarises_without_dividing_by_zero():
     s = summarise([])
     assert (s.total, s.accuracy, s.mean_coverage, s.mrr) == (0, None, None, None)
+
+
+# --- latency (13.3, D-050) -------------------------------------------------------------------------------------
+
+def timed(item_id, ms, answer=REFUSAL_ANSWER, **kwargs):
+    """A scored result for golden item `item_id` whose /ask call took `ms` (the outcome is irrelevant to latency)."""
+    return score_item(ITEMS[item_id], ask_result(answer, latency_ms=ms, **kwargs))
+
+
+FIVE = [timed("g01", 1000), timed("g02", 2000), timed("g03", 3000), timed("g04", 6000), timed("g05", 9000)]
+
+
+def test_the_default_threshold_is_the_guides_five_seconds():
+    assert DEFAULT_SLOW_MS == 5000.0
+
+
+def test_percentile_is_the_nearest_rank_value():
+    assert percentile(list(range(1, 21)), 95) == 19 and percentile(list(range(1, 21)), 50) == 10
+    assert percentile([5, 1, 3], 95) == 5 and percentile([5, 1, 3], 50) == 3     # input order does not matter
+    assert percentile([7], 95) == 7 and percentile([4, 8], 95) == 8
+    nineteen = [float(n) for n in range(1, 20)]
+    assert percentile(nineteen, 95) == 19.0       # with 19 questions p95 IS the slowest one; documented in D-050
+
+
+def test_slow_means_strictly_over_the_threshold():
+    assert not is_slow(timed("g01", 5000.0), 5000.0)
+    assert is_slow(timed("g01", 5000.1), 5000.0)
+    assert is_slow(timed("g01", 2500.0), 2000.0) and not is_slow(timed("g01", 2500.0), 3000.0)
+
+
+def test_a_question_with_no_response_is_never_flagged_slow_however_long_it_took():
+    assert not is_slow(timed("g01", 90_000, status=0, error="ReadTimeout: timed out"), 5000.0)
+
+
+def test_latency_statistics_are_exact():
+    lat = latency_stats(FIVE)
+    assert (lat.count, lat.mean_ms, lat.median_ms, lat.p95_ms, lat.max_ms) == (5, 4200.0, 3000.0, 9000.0, 9000.0)
+    assert lat.threshold_ms == 5000.0 and lat.slow == (("g05", 9000.0), ("g04", 6000.0)) and lat.slow_count == 2
+
+
+def test_questions_without_a_response_are_left_out_of_the_statistics():
+    failed = timed("g06", 30_000, status=503, error="HTTP 503")
+    assert latency_stats(FIVE + [failed]) == latency_stats(FIVE)
+    assert latency_stats([failed]) is None and latency_stats([]) is None
+
+
+def test_the_summary_uses_the_threshold_it_is_given_and_slowness_never_changes_correctness():
+    default, strict = summarise(FIVE), summarise(FIVE, slow_ms=2000.0)
+    assert default.latency.slow_count == 2 and strict.latency.slow_count == 3
+    assert (default.passed, default.total, default.accuracy) == (strict.passed, strict.total, strict.accuracy)
+    slow_but_right = score_item(ROLLBACK, ask_result(GOOD, [ROLLBACK_SOURCE], latency_ms=60_000))
+    assert slow_but_right.outcome == PASS and is_slow(slow_but_right, 5000.0)
+
+
+def test_each_question_line_shows_its_time_and_only_slow_ones_are_marked():
+    assert "  1.0 s" in format_result(FIVE[0]) and "SLOW" not in format_result(FIVE[0])
+    assert "  6.0 s  SLOW (over 5.0 s)" in format_result(FIVE[3])
+    assert "SLOW (over 2.5 s)" in format_result(FIVE[2], slow_ms=2500.0) and "SLOW" not in format_result(FIVE[2])
+    assert "SLOW (over 0.25 s)" in format_result(FIVE[0], slow_ms=250.0)          # shown exactly, not rounded to 0.2
+    broken = timed("g06", 30_000, status=503, error="HTTP 503")
+    assert "no response" in format_result(broken) and "30.0 s" in format_result(broken) and "SLOW" not in format_result(broken)
+
+
+def test_the_summary_prints_the_latency_statistics_and_names_the_slowest_questions():
+    text = format_summary(FIVE, latency_note="measured somewhere")
+    assert "Latency            : mean 4.2 s | median 3.0 s | p95 9.0 s | max 9.0 s  (5 answered questions)" in text
+    assert "over 5.0 s: 2/5 (40.0%) — slowest g05 9.0 s, g04 6.0 s" in text
+    assert "(measured somewhere)" in text
+
+
+def test_the_summary_lists_at_most_the_three_slowest_and_says_so_when_none_are_slow():
+    many = [timed(f"g0{n}", 6000 + n * 1000) for n in range(1, 6)]
+    assert "5/5 (100.0%) — slowest g05 11.0 s, g04 10.0 s, g03 9.0 s" in format_summary(many)
+    assert "over 5.0 s: none of 3" in format_summary(FIVE[:3])
+    assert "Latency" not in format_summary([timed("g01", 1000, status=503, error="HTTP 503")])
+
+
+def test_the_http_clients_rate_limit_wait_is_not_part_of_the_latency_it_reports():
+    calls, sleeps = [], []
+
+    def handler(request):
+        if request.url.path == "/auth/login":
+            return httpx.Response(200, json={"access_token": "t"})
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(429, json={"detail": "Rate limit exceeded"}, headers={"Retry-After": "42"})
+        return answering([])(request)
+
+    with http_client(handler, sleep=sleeps.append) as client:
+        result = client.ask("q")
+    assert sleeps == [42.0] and 0 <= result.latency_ms < 1000      # waited 42 s, reported milliseconds
+
+
+def test_slow_seconds_flags_questions_in_the_report_and_names_where_the_time_was_measured(capsys):
+    answers = {ROLLBACK.question: ask_result(GOOD, [ROLLBACK_SOURCE], latency_ms=4200),
+               REFUSE_COOKIES.question: ask_result(REFUSAL_ANSWER, latency_ms=900)}
+    code, out, _ = run_cli(capsys, ["--only", "g05,g17", "--slow-seconds", "2"], answers)
+    assert code == 0
+    assert "4.2 s  SLOW (over 2.0 s)" in out and "0.9 s" in out and out.count("SLOW (over") == 1
+    assert "over 2.0 s: 1/2 (50.0%) — slowest g05 4.2 s" in out
+    assert "measured in this process on this machine" in out
+
+    code, out, _ = run_cli(capsys, ["--only", "g05,g17"], answers)                 # default 5 s: nothing is slow
+    assert "SLOW" not in out and "over 5.0 s: none of 2" in out
+
+
+def test_in_url_mode_the_summary_says_the_time_includes_the_network(capsys):
+    code = main(["--only", "g17", "--url", "https://x.test", "--delay", "0"], client_factory=lambda: ScriptedClient({}))
+    assert code == 0 and "measured over HTTP from this machine to https://x.test" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("bad", ["0", "-1"])
+def test_a_threshold_that_is_not_positive_is_refused(capsys, bad):
+    code, out, err = run_cli(capsys, ["--slow-seconds", bad])
+    assert code == 2 and "--slow-seconds must be greater than 0" in err and out == ""
 
 
 # --- the in-process client: the real /ask route against the fakes -----------------------------------------

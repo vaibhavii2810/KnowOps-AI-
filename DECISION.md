@@ -966,3 +966,37 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Checked live (2026-11-07):** `g09` passed 6 of 6 tries after the change (before: 2 of 6); only one of the six happened to use the
   plural, so the offline tests are what pin the behaviour. The next full run, with the judge on, was **19/19** and the judge
   agreed on 19/19 — one run after two golden-set fixes (`g16` and this), a sample, not proof: earlier runs scattered between 17 and 18.
+
+### D-050 · The evaluation reports each question's latency, flags slow ones, and never fails a run for being slow (Phase 13.3)
+- **Date · by · source:** 2026-11-07 · Vaishnavi (with Claude) · Build guide (13.3: "record latency per question, flag anything
+  above a threshold (e.g. 5s)")
+- **Decision:** Every question line in `python -m evals` shows its time in seconds and, if it is **strictly over** the threshold,
+  `SLOW (over 5.0 s)` (`--slow-seconds`, default 5; zero or negative is refused with exit 2). The summary adds
+  mean, median, p95 (nearest-rank) and max over the questions that got an answer, how many were over the threshold, and the three
+  slowest by id, plus a note saying where the time was measured (in this process, or over HTTP from this machine to the URL).
+  A question with no response shows its time but is left out of the statistics and never flagged. **Latency is the wall-clock time of
+  the final `/ask` attempt**: in-process it is the route call (retrieval and both Gemini calls included); over HTTP it also includes
+  the network. The 30 s wait before a quota retry, a 429 wait and the `--delay` pause are not counted. Slowness changes neither a
+  question's pass/fail nor the exit code.
+- **Why:** The guide asks for latency to be recorded and flagged, and speed is a separate dimension from correctness: a right answer
+  that takes 14 s should show as both. Reporting the time of the last attempt only keeps waits we chose to take (quota, rate limit,
+  pacing) out of a number meant to describe the system. Nearest-rank p95 returns a value that was actually observed and has an
+  exact definition; with 19 questions it is the slowest one, which the docs and a test say outright so it is not over-read.
+  Thresholds are printed exactly (`0.25 s`, not `0.2 s`) because a rounded threshold would misstate what was flagged.
+- **Alternatives considered:** Failing the run when something is slow (latency depends on the machine and on in-process vs deployed, so
+  the exit code would be noise); interpolated percentiles (`statistics.quantiles` invents values nobody observed, meaningless at n=19);
+  counting errors in the statistics (a timeout is not a latency measurement); a per-stage breakdown (embed, search, chat — `/ask` does not
+  return it; the `request` and `agent_run` log lines and `/metrics` are where that lives).
+- **Tradeoff accepted:** One request per question, so each time is a single noisy sample (Gemini's response time varies by seconds); the
+  in-process figure belongs to this machine and the database in `.env`, not to production; a fixed 5 s line says nothing about *why*.
+- **First measurements (2026-11-07):** a full in-process run: **all 19 questions over 5 s** — mean 5.9 s, median 5.6 s, p95 = max 7.2 s,
+  fastest 5.0 s (a refusal), slowest 7.2 s. Over HTTP against the deployed site, 2 questions: **14.4 s and 14.2 s**, matching the 14.4 s
+  `/ask` measured earlier. So the slowness is systemic, not question-specific, and it matches the database investigation: `/ask` opens
+  3 connections (~1.3 s each locally, ~4 s each from Vercel's `iad1`) plus two Gemini calls. Accuracy and latency are independent
+  here: the answers are good, and every one of them is slow. That investigation's proposal (function region, no `register_vector`,
+  fewer connections) has not been acted on.
+- **Also seen:** one of those runs missed `g12` (18/19) because the model answered from the on-call guide's §5.2 instead of the incident
+  playbook's §5; both describe pool exhaustion, only the playbook mentions "pooler size", and retried five times it passed 5/5.
+  Overlapping runbooks are a source of run-to-run variation that the exact-phrase facts cannot absorb.
+- **Revisit if:** the threshold should differ by mode (a stricter one in-process, a looser one over HTTP), per-stage times are needed
+  (instrument the route or read the logs), or `--repeat N` lands in 13.5 (then report latency per question over several runs).

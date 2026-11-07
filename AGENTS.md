@@ -46,7 +46,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 10 | Error handling & security | Split 50/50 | ✅ Done |
 | 11 | Testing & QA | Vaishnavi | ✅ Done — plain `pytest` makes zero real calls; green on GitHub Actions (3.11 + 3.12) for `main` and `sprint-2` at `6111862` (D-038–D-041) |
 | 12 | Logging & monitoring | Vaishnavi | ✅ Done — JSON logs + request id (D-042), `agent_run` trace (D-043), checked in Vercel's runtime logs (12.3, which exposed an outage fixed by pinning deps, D-044); `GET /metrics` (12.4, stretch, D-046) deployed and verified live |
-| 13 | AI eval harness | Vaishnavi | 🟡 Partial — 13.1 (golden set, D-047) and 13.2 (`python -m evals` runner, keyword scoring + opt-in judge, D-048) done; live baselines 17–18/19 over three runs, then 19/19 after two golden-set fixes (`g16`, and accepted fact variants for `g09`, D-049); 13.3–13.5 to do. The older `tests/eval_rag.py` is retrieval-only |
+| 13 | AI eval harness | Vaishnavi | 🟡 Partial — 13.1 (golden set, D-047), 13.2 (`python -m evals` runner, keyword scoring + opt-in judge, D-048) and 13.3 (per-question latency + slow flag, D-050) done; accuracy baselines 17–19/19; **every question is over 5 s** (median 5.6 s in-process, 14 s deployed); 13.4–13.5 to do. The older `tests/eval_rag.py` is retrieval-only |
 | 14 | Deployment & final integration | Both | ⬜ Not started |
 | 15 | Docs & wrap-up | Vaishnavi | ⬜ Not started |
 
@@ -370,7 +370,7 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   agent did" holds — proven live in 12.3 (request id `kops-12-3-1bfd6d939735`) and again for the 12.2 fixes (`kops-d045-agent-01`).
   12.4 (the guide's optional stretch) is also live and verified, as above.
 
-**Phase 13 — AI evaluation harness** 🟡 in progress (13.1–13.2 done)
+**Phase 13 — AI evaluation harness** 🟡 in progress (13.1–13.3 done)
 - 13.1 Done. New `evals/` package (D-047): `evals/golden_set.json` — **19 items**: 16 in-scope questions covering all 5 runbooks
   (DR 4, Kubernetes 5, incident playbooks 3, on-call 2, API 2; kinds numeric / procedure / command / factual / diagnosis / list)
   and **3 that must be refused** (cookies, the 2022 World Cup, and a near-domain trap: Terraform for EKS). Each in-scope item has
@@ -417,8 +417,24 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   a correct answer missed for that reason. Used once (`g09`). `tests/test_golden_set.py` now has 34 tests and
   `tests/test_eval_runner.py` 56. 7 mutation checks (variants ignored, loader dropping them, "all" instead of "any", three validator
   rules removed, scoring bypassing them) each fail the tests. `g09` passed 6/6 live tries (2/6 before); full suite 461 passed.
-- Still to do: 13.3 latency per question and a flag over 5 s; 13.4 hallucination flags; 13.5 JSON report / `eval_runs` table
-  (and probably `--repeat N`, since one run is a sample).
+- 13.3 Done. Latency per question (D-050): every line of `python -m evals` shows its time, and a question **strictly over** the
+  threshold is marked `SLOW (over 5.0 s)` (`--slow-seconds`, default 5; ≤0 refused with exit 2). The summary adds mean, median, p95
+  (nearest-rank — with 19 questions that is the slowest one, a test and D-050 say so), max, how many were over, the three slowest by id, and
+  a note saying whether the time was measured in-process or over HTTP. Latency is the final `/ask` attempt's wall-clock time (quota,
+  429 and `--delay` waits excluded); a question with no response is shown but left out of the statistics and never flagged; slowness
+  changes neither pass/fail nor the exit code. New in `evals/scoring.py` (`is_slow`, `percentile`, `latency_stats`, `LatencyStats`) and
+  `evals/run.py`. `tests/test_eval_runner.py` is now 71 tests: exact percentile/mean/median/slowest numbers, the strict threshold,
+  errors excluded, the report text, the command line and URL mode, and the HTTP client's 429 wait not counting as latency. 11 mutation
+  checks (`>=`, errors flaggable or counted, percentile rounded down, median as mean, slowest order, threshold ignored or read as
+  milliseconds, non-positive accepted, threshold rounded, marker without threshold) each fail them. A display flaw found while writing
+  the tests: thresholds were shown to one decimal (0.25 s as "0.2 s"); now exact. 476 passed, 109 live deselected.
+- **First latency measurements (2026-11-07):** full in-process run — **19/19 questions over 5 s** (mean 5.9 s, median 5.6 s, p95 = max
+  7.2 s); over HTTP against `knowops-ai.vercel.app` (`--only g05,g17`, which created 2 conversation rows in the production database) —
+  **14.4 s and 14.2 s**, matching the 14.4 s `/ask` measured earlier. The same run also verified URL mode end to end for the first time
+  (login, `/ask`, scoring). The slowness is systemic — 3 database connections plus 2 Gemini calls per `/ask` — so it is the database
+  investigation's finding seen from the user's side, still unaddressed (see Known issues). Accuracy that run: 18/19; the miss was `g12`,
+  answered from the on-call guide's §5.2 instead of the playbook's §5 (both cover pool exhaustion; passed 5/5 when retried).
+- Still to do: 13.4 hallucination flags; 13.5 JSON report / `eval_runs` table (and probably `--repeat N`, since one run is a sample).
 
 ## Phase log
 
@@ -534,7 +550,8 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   `/tickets/stats` 2.5 s, against 1.9 ms for `/auth/me`, which makes no database call. A `vectors=False` default would
   cut the `register_vector` part (~0.8 s per call); the rest looks like function-to-database distance (the logs show the
   function running in `bom1`/`sfo1`/`iad1`, the database being in Singapore) — pinning the function's region next to
-  Neon is worth testing. Not done.
+  Neon is worth testing. Not done. **The Phase 13.3 evaluation shows the cost from the user's side:** every golden question is
+  over 5 s even in-process (median 5.6 s), and 14.2–14.4 s against the deployed site.
 - **n8n triage workflow has no auth:** `n8n/incident_triage_workflow.json` calls `POST /tickets` and
   `/agent/triage/{id}` without an `Authorization` header, so since Phase 5.4 it would get 401s.
 - **Phase 7.1 (partial, remainder of D-015):** `create_ticket`/`escalate_to_human` were added (D-025), but
@@ -549,7 +566,8 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   e.g. flipping the history query's `ORDER BY` goes unnoticed offline. The `live` variants (`pytest -m live`) catch it;
   run them before a deploy that touches SQL.
 - **Evaluation results vary run to run** (temperature 0.2): treat a single run as a sample. A run with `--judge` takes ~3 minutes
-  on the free tier and can hit Gemini's quota (the runner waits and retries).
+  on the free tier and can hit Gemini's quota (the runner waits and retries). Two runbook sections that cover the same incident
+  (e.g. pool exhaustion in the playbooks and the on-call guide) can make the answer's facts differ between runs (`g12`, once).
 - **Runbook text disagrees with the app in places (found reading them for 13.1):** `api_troubleshooting.md` §7 says `POST /ask` is
   limited to 20 requests/minute and `GET /health` to 100/minute, but the app enforces 10/minute on `/ask` (D-036) and does not
   limit `/health`; it and `on_call_guide.md` also say the Gemini retry is "up to 3 attempts" where the code makes 4 (D-032). `/ask`
@@ -563,8 +581,8 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - Tests: `pytest` (offline, ~2s; tests marked `live` are skipped). `pytest -m live` runs the ones that need the real
   Neon DB and Gemini, including the real-Postgres variant of every `db_backend` test (D-039, D-040). New tests should use
   `fake_gemini`, `fake_db` or `memory_db` (D-038, D-040); a test needing a new SQL statement must add it to `MemoryDB`.
-- Evaluation: `python -m evals` (in-process, real Gemini, ~1–3 min; `--judge`, `--only g01,g05`, `--url https://… ` for a deployed
-  site). It calls real services and writes conversations into the database in `.env`, so it is not part of `pytest` (D-048).
+- Evaluation: `python -m evals` (in-process, real Gemini, ~1–3 min; `--judge`, `--only g01,g05`, `--slow-seconds 3`, `--url https://… ` for a
+  deployed site). It calls real services and writes conversations into the database in `.env`, so it is not part of `pytest` (D-048).
 - Never commit `.env` or real keys.
 
 ## Rules for every code change

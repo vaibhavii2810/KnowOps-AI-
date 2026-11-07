@@ -34,7 +34,7 @@ create, check and triage incident tickets, and escalate to a human.
 Tests: `pytest` (skips tests marked `live`) · `pytest -m live` (tests that need the real database and Gemini)
 
 Evaluation: `python -m evals` runs 19 golden questions through the real `/ask` and prints accuracy (add `--judge` for a Gemini
-second opinion, `--url https://…` to test a deployed site). It uses real services, so it is separate from `pytest`.
+second opinion, `--url https://…` to test a deployed site). Each question's time is shown and anything over 5 s is flagged `SLOW`. It uses real services, so it is separate from `pytest`.
 
 ## Project layout
 

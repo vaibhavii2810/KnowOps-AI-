@@ -6,6 +6,7 @@ One command runs the golden set through /ask and prints how it did:
     python -m evals --url https://...    # against a deployed site (logs in with APP_USERNAME / APP_PASSWORD)
     python -m evals --judge              # also ask Gemini to grade each answer (extra quota, reported separately)
     python -m evals --only g01,g05       # just those questions
+    python -m evals --slow-seconds 3     # flag questions slower than 3 s (default 5); flagged, never failed
 
 Exit code: 0 finished, 1 finished but some questions got no response, 2 could not start (bad option, invalid golden set,
 login rejected). A run that finds wrong answers still exits 0: finding them is its job. It calls real services, so it is
@@ -24,12 +25,13 @@ from evals.client import EvalSetupError, HttpClient, InProcessClient
 from evals.golden import GoldenItem, load_golden_set, validate
 from evals.judge import judge_answer
 from evals.results import ERROR, AskResult, ItemResult
-from evals.scoring import score_item, summarise
+from evals.scoring import DEFAULT_SLOW_MS, is_slow, score_item, summarise
 
 DEFAULT_HTTP_DELAY_SECONDS = 7.0   # keeps a deployed site under its 10 requests/minute limit on /ask
 QUOTA_RETRIES = 2                  # extra tries for a question that hit Gemini's own quota (429 RESOURCE_EXHAUSTED)
 DEFAULT_QUOTA_WAIT_SECONDS = 30.0
 EXCERPT_CHARS = 220
+SLOWEST_SHOWN = 3
 
 
 def _ask_once(client, item: GoldenItem, top_k: Optional[int]) -> AskResult:
@@ -83,7 +85,17 @@ def _excerpt(text: str) -> str:
     return flat if len(flat) <= EXCERPT_CHARS else flat[:EXCERPT_CHARS] + "…"
 
 
-def format_result(result: ItemResult) -> str:
+def _secs(ms: float) -> str:
+    return f"{ms / 1000:.1f} s"
+
+
+def _limit(ms: float) -> str:
+    """A threshold, shown exactly: 5.0 s, 2.5 s, 0.25 s (never rounded to one decimal, which would misstate it)."""
+    seconds = ms / 1000
+    return f"{seconds:.1f} s" if round(seconds, 1) == seconds else f"{seconds:g} s"
+
+
+def format_result(result: ItemResult, slow_ms: float = DEFAULT_SLOW_MS) -> str:
     item = result.item
     if result.outcome == ERROR:
         detail, where = "no response", ""
@@ -92,7 +104,9 @@ def format_result(result: ItemResult) -> str:
     else:
         detail = f"facts {len(result.facts_found)}/{len(item.expected_facts)}"
         where = f"  section #{result.retrieval_rank}" if result.retrieval_rank else "  section not cited"
-    line = f"{item.id}  {result.outcome:<19} {detail}{where}"
+    line = f"{item.id}  {result.outcome:<19} {detail}{where}  {_secs(result.ask.latency_ms)}"
+    if is_slow(result, slow_ms):
+        line += f"  SLOW (over {_limit(slow_ms)})"
     if result.judge is not None:
         line += f"  judge: {result.judge.verdict}"
     lines = [f"{line}\n      {_excerpt(item.question)}"]
@@ -110,8 +124,8 @@ def _pct(numerator: float, denominator: float) -> str:
     return f"{100 * numerator / denominator:.1f}%" if denominator else "n/a"
 
 
-def format_summary(results: list[ItemResult]) -> str:
-    s = summarise(results)
+def format_summary(results: list[ItemResult], slow_ms: float = DEFAULT_SLOW_MS, latency_note: str = "") -> str:
+    s = summarise(results, slow_ms)
     lines = [
         "== Accuracy (an answer passes only if it contains every expected fact) ==",
         f"In-scope questions : {s.in_scope_passed}/{s.in_scope_total} passed ({_pct(s.in_scope_passed, s.in_scope_total)})"
@@ -124,6 +138,18 @@ def format_summary(results: list[ItemResult]) -> str:
         f" ({_pct(s.retrieval_hits, s.retrieval_total)}) | mean reciprocal rank "
         f"{f'{s.mrr:.2f}' if s.mrr is not None else 'n/a'}",
     ]
+    if s.latency is not None:
+        lat = s.latency
+        lines.append(f"Latency            : mean {_secs(lat.mean_ms)} | median {_secs(lat.median_ms)}"
+                     f" | p95 {_secs(lat.p95_ms)} | max {_secs(lat.max_ms)}  ({lat.count} answered questions)")
+        if lat.slow:
+            shown = ", ".join(f"{qid} {_secs(ms)}" for qid, ms in lat.slow[:SLOWEST_SHOWN])
+            lines.append(f"                     over {_limit(slow_ms)}: {lat.slow_count}/{lat.count}"
+                         f" ({_pct(lat.slow_count, lat.count)}) — slowest {shown}")
+        else:
+            lines.append(f"                     over {_limit(slow_ms)}: none of {lat.count}")
+        if latency_note:
+            lines.append(f"                     ({latency_note})")
     if s.judged:
         counts = ", ".join(f"{verdict} {n}" for verdict, n in sorted(s.judge_counts.items()))
         lines.append(f"Gemini judge       : {counts} | agrees with the keyword check on {s.judge_agrees}/{s.judged}")
@@ -138,6 +164,8 @@ def _parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=None, help="how many chunks /ask retrieves (default: the API's)")
     parser.add_argument("--delay", type=float, default=None,
                         help=f"seconds between questions (default {DEFAULT_HTTP_DELAY_SECONDS:g} with --url, otherwise 0)")
+    parser.add_argument("--slow-seconds", type=float, default=DEFAULT_SLOW_MS / 1000,
+                        help="flag questions that take longer than this (default %(default)g); flagged, never failed")
     parser.add_argument("--quota-wait", type=float, default=DEFAULT_QUOTA_WAIT_SECONDS,
                         help="seconds to wait before retrying a question that hit Gemini's quota (retried up to "
                              f"{QUOTA_RETRIES} times; default %(default)g)")
@@ -146,6 +174,10 @@ def _parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
 
 def main(argv: Optional[list[str]] = None, client_factory: Optional[Callable] = None) -> int:
     args = _parse_args(argv)
+    if args.slow_seconds <= 0:
+        print("--slow-seconds must be greater than 0", file=sys.stderr)
+        return 2
+    slow_ms = args.slow_seconds * 1000
     items = load_golden_set()
     problems = validate(items)
     if problems:
@@ -168,11 +200,13 @@ def main(argv: Optional[list[str]] = None, client_factory: Optional[Callable] = 
     try:
         with factory() as client:
             results = run_eval(items, client, judge=args.judge, top_k=args.top_k, delay=delay,
-                               quota_wait=args.quota_wait, on_result=lambda r: print(format_result(r), flush=True))
+                               quota_wait=args.quota_wait, on_result=lambda r: print(format_result(r, slow_ms), flush=True))
     except EvalSetupError as exc:
         print(f"Could not start: {exc}", file=sys.stderr)
         return 2
-    print("\n" + format_summary(results))
+    note = (f"measured over HTTP from this machine to {args.url}" if args.url else
+            "measured in this process on this machine, with the database and Gemini from .env — not on a deployed site")
+    print("\n" + format_summary(results, slow_ms, note))
     return 1 if any(r.outcome == ERROR for r in results) else 0
 
 

@@ -9,6 +9,8 @@ reported alongside as the softer measure. Refusal items pass only if the assista
 
 from __future__ import annotations
 
+import math
+import statistics
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -20,6 +22,8 @@ from evals.results import (
 
 _REFUSAL_PHRASE = normalize("I don't have enough information")
 _SHORT_ANSWER_CHARS = 160
+
+DEFAULT_SLOW_MS = 5000.0     # the build guide's example threshold for "slow"
 
 
 def is_refusal(answer: str) -> bool:
@@ -59,6 +63,44 @@ def score_item(item: GoldenItem, ask: AskResult) -> ItemResult:
     )
 
 
+def is_slow(result: ItemResult, threshold_ms: float) -> bool:
+    """Strictly over the threshold. A question with no response is never slow: a timeout is not a latency measurement."""
+    return result.outcome != ERROR and result.ask.latency_ms > threshold_ms
+
+
+def percentile(values: list[float], q: int) -> float:
+    """Nearest-rank percentile: the smallest value that at least q% of the values are at or below."""
+    ordered = sorted(values)
+    return ordered[max(1, math.ceil(q * len(ordered) / 100)) - 1]
+
+
+@dataclass(frozen=True)
+class LatencyStats:
+    count: int                                   # questions that got a response
+    mean_ms: float
+    median_ms: float
+    p95_ms: float
+    max_ms: float
+    threshold_ms: float
+    slow: tuple[tuple[str, float], ...]          # (question id, ms) over the threshold, slowest first
+
+    @property
+    def slow_count(self) -> int:
+        return len(self.slow)
+
+
+def latency_stats(results: list[ItemResult], threshold_ms: float = DEFAULT_SLOW_MS) -> Optional[LatencyStats]:
+    answered = [r for r in results if r.outcome != ERROR]
+    if not answered:
+        return None
+    times = [r.ask.latency_ms for r in answered]
+    slow = sorted(((r.item.id, r.ask.latency_ms) for r in answered if is_slow(r, threshold_ms)), key=lambda p: -p[1])
+    return LatencyStats(
+        count=len(times), mean_ms=statistics.fmean(times), median_ms=statistics.median(times),
+        p95_ms=percentile(times, 95), max_ms=max(times), threshold_ms=threshold_ms, slow=tuple(slow),
+    )
+
+
 @dataclass(frozen=True)
 class Summary:
     total: int
@@ -77,13 +119,14 @@ class Summary:
     judged: int
     judge_counts: dict[str, int]
     judge_agrees: int                       # judge said "correct" exactly when the keyword check passed
+    latency: Optional[LatencyStats] = None
 
     @property
     def accuracy(self) -> Optional[float]:
         return self.passed / self.total if self.total else None
 
 
-def summarise(results: list[ItemResult]) -> Summary:
+def summarise(results: list[ItemResult], slow_ms: float = DEFAULT_SLOW_MS) -> Summary:
     answered_in_scope = [r for r in results if not r.item.must_refuse and r.outcome != ERROR]
     judged = [r for r in results if r.judge is not None]
     judge_counts: dict[str, int] = {}
@@ -107,4 +150,5 @@ def summarise(results: list[ItemResult]) -> Summary:
         judged=len(judged),
         judge_counts=judge_counts,
         judge_agrees=sum((r.judge.verdict == "correct") == r.passed for r in judged),
+        latency=latency_stats(results, slow_ms),
     )
