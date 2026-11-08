@@ -222,7 +222,22 @@ Runbooks (.md) ──ingest──▶ Postgres (chunks + numbers) ──search─
   committed on purpose). `--repeat N` runs the set N times, because the model's answers vary a little and one run is only a sample.
 - **Try it:** `python -m evals --only g01,g05`, then open the file it names at the end. Full run:
   `python -m evals --repeat 3 --judge`.
-- **Not built yet:** 14 final deployment · 15 docs. Add a section here when each is done.
+## Phase 14 — Deployment & final integration
+- **The idea:** this phase has no new code — it's end-to-end verification that the already-built app actually works
+  for a stranger who only has the production URL and a login. Pure checking, except one real infrastructure change.
+- **14.1–14.3:** confirmed the GitHub↔Vercel connection, that `DATABASE_URL` reaches both Preview and Production,
+  and that every required secret (`JWT_SECRET`, `APP_PASSWORD`, `CRON_SECRET`, `GEMINI_API_KEY`, ...) is set — found
+  one gap: Preview's `GEMINI_API_KEY` only covers the `sprint-2` git branch (D-053, accepted, low impact today).
+- **14.4:** a scripted smoke test against `https://knowops-ai.vercel.app` — login → `/ask` → create a ticket → look
+  it up → trigger `/cron/reindex` — all 200, proving the full stack works live, not just offline.
+- **14.5, and `vercel.json`'s one real change:** the daily re-index schedule used to be Vercel's "Cron Jobs"
+  (`vercel.json`'s `crons` array). That dashboard kept no run history on this plan, so there was no way to prove the
+  schedule had ever actually fired. It was migrated to Vercel's newer **Schedules** product (`schedules` object
+  instead of `crons`, `requestMethod: "GET"` added because Schedules defaults to `POST` — D-054). Nothing in
+  `app/` changed: `/cron/reindex`'s `CRON_SECRET` check doesn't care which Vercel product called it.
+- **Try it:** `vercel schedules ls` / `vercel schedules executions list reindex` (needs the Vercel CLI linked —
+  see Working Here in `AGENTS.md`) shows the schedule and its run history directly, without opening a browser.
+- **Not built yet:** 15 docs. Add a section here when it's done.
 
 ## How to read the code yourself (suggested order)
 `config.py` → `db.py` → `schemas.py` → `rag.py` → `llm.py` → the `/ask` route in `main.py` → `crm.py` → `agent.py`

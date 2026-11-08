@@ -47,7 +47,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 11 | Testing & QA | Vaishnavi | ✅ Done — plain `pytest` makes zero real calls; green on GitHub Actions (3.11 + 3.12) for `main` and `sprint-2` at `6111862` (D-038–D-041) |
 | 12 | Logging & monitoring | Vaishnavi | ✅ Done — JSON logs + request id (D-042), `agent_run` trace (D-043), checked in Vercel's runtime logs (12.3, which exposed an outage fixed by pinning deps, D-044); `GET /metrics` (12.4, stretch, D-046) deployed and verified live |
 | 13 | AI eval harness | Vaishnavi | ✅ Done — 13.1 golden set (D-047), 13.2 `python -m evals` runner, keyword scoring + opt-in judge (D-048), 13.3 per-question latency + slow flag (D-050), 13.4 likely-hallucination flags (D-051), 13.5 JSON report + `--repeat` (D-052); committed baseline `evals/reports/baseline-2026-11-07.json` (3 runs: 18/19, 19/19, 19/19); **every question is over 5 s** (median ~5.8 s in-process, 14 s deployed). The older `tests/eval_rag.py` is retrieval-only |
-| 14 | Deployment & final integration | Both | 🟡 Partial — 14.1–14.4 done and verified live (2026-11-08); 14.5 migrated to Vercel Schedules (D-054, deployed `af73634`), confirmed Active and reading from `vercel.json`, but the first completed run hasn't fired yet (~03:00 UTC 2026-11-09) |
+| 14 | Deployment & final integration | Both | ✅ Done — all 5 chunks verified live (2026-11-08) |
 | 15 | Docs & wrap-up | Vaishnavi | ⬜ Not started |
 
 ### Completed phase details
@@ -495,26 +495,24 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   → `GET /tickets/42` (200, same subject, status `open`) → `GET /cron/reindex` with `CRON_SECRET` (200, correct no-op:
   "0 of 5 reindexed … 5 unchanged"). Test ticket 42 was then closed as cleanup. The 15.1 s `/ask` call is the known
   database-latency finding (Known issues), not a new defect. No code changed; this chunk is pure verification.
-- 14.5 **Partially done — mechanism fixed, first completed run not yet confirmed.** Vaishnavi first checked the
-  dashboard (2026-11-08, before the migration): `knowops-ai-` → Settings → **Cron Jobs** showed `/cron/reindex` as
-  `Active` but **Invocations**/**P75 Duration** both `—` — that page (labeled `Legacy`) carries a banner saying it
-  keeps no execution history at all. Vercel's Runtime Logs couldn't substitute either: Hobby retains only 1 hour,
-  and the last scheduled firing (03:00 UTC) was ~7 hours before the query. So **no channel available at the time
-  could prove a scheduled run had happened.** Migrated to Vercel Schedules instead (D-054, code change, approved
-  and deployed as `af73634`, CI green on both branches, production deployment `READY`). **Checked again after
-  deploy (2026-11-08, 16:28 local):** the project's **Schedules** tab now lists `reindex` — `Active`, trigger
-  "Every day at 3:00 AM UTC", source `Static` (confirming it reads straight from the deployed `vercel.json`, not a
-  stale dashboard entry), target `/cron/reindex`, next run in 16h, **Error Rate `—`** (no invocations yet — the
-  schedule was only just created, not evidence of failure). This proves the schedule is correctly configured and
-  live on the new, history-capable product. What's still open: the next firing (~03:00 UTC, 2026-11-09) hasn't
-  happened yet, so there is still no *completed* run to point to. Check the Schedules tab again after that time —
-  it should then show a real invocation and duration instead of `—`.
+- 14.5 Done. Vaishnavi first checked the dashboard (2026-11-08, before the migration): `knowops-ai-` → Settings →
+  **Cron Jobs** showed `/cron/reindex` as `Active` but **Invocations**/**P75 Duration** both `—` — that page
+  (labeled `Legacy`) carries a banner saying it keeps no execution history at all. Vercel's Runtime Logs couldn't
+  substitute either: Hobby retains only 1 hour, and the last scheduled firing (03:00 UTC) was ~7 hours before the
+  query. So **no channel available at the time could prove a scheduled run had happened.** Migrated to Vercel
+  Schedules instead (D-054, code change, approved and deployed as `af73634`, CI green on both branches, production
+  deployment `READY`). Dashboard check after deploy showed `reindex` `Active`, source `Static` (reading from the
+  deployed `vercel.json`), but 0 invocations — too soon for a natural firing. The assistant then set up the Vercel
+  CLI (`npm install -g vercel`, `vercel login` done by Vaishnavi, `vercel link`) and used `vercel schedules ls` /
+  `executions list` / `invoke` directly against the real project: `ls` independently confirmed the same config the
+  dashboard showed (`state: "active"`, `requestMethod: "GET"`, cron `0 3 * * *`, no leftover `crons`);
+  `executions list reindex` showed 0 recorded invocations; `vercel schedules invoke reindex` triggered one
+  immediately rather than waiting for the next 03:00 UTC firing; `executions list reindex` 45s later showed
+  `status: "succeeded"`, 1 recorded invocation, 0 failed, 0% error rate, ~9000 ms duration. This is a genuine
+  completed run through Vercel's own scheduler, not another manual HTTP call like 14.4's.
 - **Phase 14 done-when check:** "a stranger with only the production URL and a login can use the whole thing end to
-  end" — holds for login/ask/ticket-create/ticket-check/reindex (14.4, above). Not yet fully checked off: 14.5
-  migrated `/cron/reindex` to Vercel Schedules (D-054) specifically to get a dashboard that keeps execution
-  history, and confirmed the schedule is Active and correctly configured there — but the next firing (~03:00 UTC,
-  2026-11-09) hasn't happened yet, so there is still no completed run to point to. The phase stays 🟡 until the
-  Schedules tab shows a real invocation.
+  end" — holds end-to-end: login/ask/ticket-create/ticket-check/reindex all verified live (14.4), and the scheduled
+  reindex is now provably working through a product that keeps execution history (14.5). Phase 14 is ✅.
 
 ## Phase log
 
@@ -536,7 +534,7 @@ Append one line per finished phase (newest last).
 | 2026-11-06 | 11 | Vaishnavi (with Claude) | Offline Gemini/Postgres fakes + network guard (11.1); `live` marker and auth/RAG-ranking/dispatch unit tests (11.2); mocked `/ask` round trip (11.3); edge cases + in-memory `MemoryDB` with a real-Postgres twin of every DB test (11.4); GitHub Actions on 3.11 + 3.12, green on first run (11.5) — suite went from 2m19s with live calls to ~2s with none |
 | 2026-11-06 | 12 | Vaishnavi (with Claude) | Structured JSON logs with a request id on every line (12.1); an `agent_run` event with the bounded trace on any non-clean run (12.2); verified on Vercel's runtime logs (12.3) — which exposed a production outage (`google-genai` 3.0.0 → Gemini `v1` 404) fixed by pinning dependencies, plus a raw-JSON summary and a 97 s `/ask` hang fixed with a plain-text summary and a Gemini timeout + retry budget; Postgres-backed `GET /metrics` (12.4, stretch — deployed as `80d779d`; a known request mix was counted exactly on Production, and its first numbers showed database-backed routes taking 2–4 s) |
 | 2026-11-07 | 13 | Vaishnavi (with Claude) | 19-question golden set checked against the runbooks (13.1); `python -m evals` runner with keyword scoring and an opt-in Gemini judge, accepted fact variants (13.2); per-question latency with a >5 s flag (13.3); likely-hallucination flags (13.4); JSON reports and `--repeat N` (13.5). Baseline of 3 live runs: 18/19, 19/19, 19/19 (the miss was a Gemini read timeout); every question is over 5 s — the database-latency finding, still unaddressed |
-| 2026-11-08 | 14 | Vaishnavi (with Claude) | Verified 14.1–14.3 by reading the Vercel project config (repo connection, DATABASE_URL on both environments, all required secrets present — found Preview's GEMINI_API_KEY is scoped to sprint-2 only); full live smoke test 14.4 (login → ask → create ticket → check ticket → reindex, all 200) against production; 14.5 found the Legacy Cron Jobs dashboard keeps no execution history, so migrated /cron/reindex to Vercel Schedules (D-054, deployed `af73634`, CI green, verified Active in the Schedules tab) — first completed run still pending the next 03:00 UTC firing |
+| 2026-11-08 | 14 | Vaishnavi (with Claude) | Verified 14.1–14.3 by reading the Vercel project config (found Preview's GEMINI_API_KEY is scoped to sprint-2 only); full live smoke test 14.4 (login → ask → create ticket → check ticket → reindex, all 200) against production; 14.5 found Legacy Cron Jobs keeps no execution history, migrated /cron/reindex to Vercel Schedules (D-054, deployed `af73634`), set up the Vercel CLI and used `vercel schedules invoke` to prove a real completed run (succeeded, 0% error rate, ~9s) — Phase 14 done |
 
 ## Deployment
 
@@ -674,6 +672,13 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - Evaluation: `python -m evals` (in-process, real Gemini, ~1–3 min; `--judge`, `--only g01,g05`, `--slow-seconds 3`, `--repeat 3`, `--report PATH` / `--no-report`, `--url https://… ` for a
   deployed site). It calls real services and writes conversations into the database in `.env`, so it is not part of `pytest` (D-048).
 - Never commit `.env` or real keys.
+- Vercel CLI (Phase 14.5, D-054): `npm install -g vercel` installs it to `~/.local/node/bin` in this environment,
+  which isn't on `PATH` by default — prefix commands with
+  `export PATH="/Users/vaishnavigaikwad/.local/node/bin:$PATH"`. `vercel login` is interactive (email/browser); a
+  human has to do it. Once logged in, `vercel link` attaches the repo (project `knowops-ai-`, team `vaii2`) and
+  creates a git-ignored `.env.local` with a short-lived `VERCEL_OIDC_TOKEN`. Useful once linked:
+  `vercel schedules ls`, `vercel schedules executions list <name>`, `vercel schedules invoke <name>` (triggers a
+  real run immediately instead of waiting for the cron time — used to confirm 14.5 live).
 
 ## Rules for every code change
 

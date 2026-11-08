@@ -19,3 +19,5 @@ evals/reports/*.tmp
 
 # macOS
 .DS_Store
+.vercel
+.env*
