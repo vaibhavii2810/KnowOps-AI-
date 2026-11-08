@@ -48,7 +48,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 12 | Logging & monitoring | Vaishnavi | ✅ Done — JSON logs + request id (D-042), `agent_run` trace (D-043), checked in Vercel's runtime logs (12.3, which exposed an outage fixed by pinning deps, D-044); `GET /metrics` (12.4, stretch, D-046) deployed and verified live |
 | 13 | AI eval harness | Vaishnavi | ✅ Done — 13.1 golden set (D-047), 13.2 `python -m evals` runner, keyword scoring + opt-in judge (D-048), 13.3 per-question latency + slow flag (D-050), 13.4 likely-hallucination flags (D-051), 13.5 JSON report + `--repeat` (D-052); committed baseline `evals/reports/baseline-2026-11-07.json` (3 runs: 18/19, 19/19, 19/19); **every question is over 5 s** (median ~5.8 s in-process, 14 s deployed). The older `tests/eval_rag.py` is retrieval-only |
 | 14 | Deployment & final integration | Both | ✅ Done — all 5 chunks verified live (2026-11-08) |
-| 15 | Docs & wrap-up | Vaishnavi | 🟡 Partial — 15.1 done (README: architecture diagram, API reference); 15.2–15.4 to do |
+| 15 | Docs & wrap-up | Vaishnavi | 🟡 Partial — 15.1 (README) and 15.3 (PORTFOLIO.md) done; 15.2 (demo recording) and 15.4 (future work) to do |
 
 ### Completed phase details
 
@@ -525,6 +525,16 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   duplicated. The rest of 15.1's ask — setup steps, and a link to this status/decision trail — was already in
   place from earlier phases (Quick start, Project layout, Deployment, Monitoring, Understanding the code). No
   DECISION.md entry: Markdown-only change, and choosing Mermaid over a static image isn't a tradeoff worth logging.
+- 15.3 Done. New `PORTFOLIO.md`: no separate "original skills list" exists for this project (confirmed with the
+  user), so skills are derived directly from the stack and the recorded work in this file and `DECISION.md` —
+  every bullet points at a specific file, test count, or live result already on record, not an invented claim.
+  Split by owner per the Phase status table: Niranjan (Phases 2, 4–7 — DB/vector-search design, FastAPI, JWT auth,
+  RAG retrieval, the ReAct agent loop and two real bugs found and fixed under live load) and Vaishnavi with Claude
+  Code (Phases 3, 8–9, 11–13, 15 — content authoring, CRM, automation including the Phase 14.5 Schedules migration,
+  the offline test infrastructure that took the suite from 2m19s with live calls to ~2s with none, observability
+  that caught a real production outage, and the evaluation harness); Phase 10 (security) and 14 (deployment) kept
+  general since they were split/shared. Linked from `README.md` under a new "Who built what" heading. No
+  DECISION.md entry: Markdown-only change.
 
 ## Phase log
 
@@ -548,6 +558,7 @@ Append one line per finished phase (newest last).
 | 2026-11-07 | 13 | Vaishnavi (with Claude) | 19-question golden set checked against the runbooks (13.1); `python -m evals` runner with keyword scoring and an opt-in Gemini judge, accepted fact variants (13.2); per-question latency with a >5 s flag (13.3); likely-hallucination flags (13.4); JSON reports and `--repeat N` (13.5). Baseline of 3 live runs: 18/19, 19/19, 19/19 (the miss was a Gemini read timeout); every question is over 5 s — the database-latency finding, still unaddressed |
 | 2026-11-08 | 14 | Vaishnavi (with Claude) | Verified 14.1–14.3 by reading the Vercel project config (found Preview's GEMINI_API_KEY is scoped to sprint-2 only); full live smoke test 14.4 (login → ask → create ticket → check ticket → reindex, all 200) against production; 14.5 found Legacy Cron Jobs keeps no execution history, migrated /cron/reindex to Vercel Schedules (D-054, deployed `af73634`), set up the Vercel CLI and used `vercel schedules invoke` to prove a real completed run (succeeded, 0% error rate, ~9s) — Phase 14 done |
 | 2026-11-08 | 15 | Vaishnavi (with Claude) | 15.1: README gained an Architecture section (Mermaid diagram of the single-Function design, request flow for /ask and the agent) and an API reference section (link to /docs + a condensed route table) |
+| 2026-11-08 | 15 | Vaishnavi (with Claude) | 15.3: new PORTFOLIO.md maps each person's work to concrete, resume-ready skills, derived from the recorded phase work rather than an external skills list (none exists) |
 
 ## Deployment
 
@@ -610,6 +621,7 @@ to `sprint-2`'s tip the same day, so Production is a real, working deployment fo
 AGENTS.md   this file — status + rules      DECISION.md  why things are the way they are
 FLOW.md     how execution moves through the code
 CODE_TOUR.md  plain-English, phase-by-phase walkthrough of the code (for teammates new to it)
+PORTFOLIO.md  what each person built, mapped to resume-ready skills (Phase 15.3)
 app/        main.py (routes) · config.py · db.py · auth.py · rag.py · llm.py · agent.py · crm.py · schemas.py · retry.py · guardrails.py ·
             ratelimit.py · logs.py (JSON logs + request id, Phase 12.1) · metrics.py (GET /metrics counters, Phase 12.4)
 api/        index.py — Vercel entrypoint (sprint-2)

@@ -118,6 +118,10 @@ request count, average latency and error rate for the last 1–168 hours, per ro
 - [FLOW.md](FLOW.md) — entry points, startup order, and which function calls which for every route
 - [DECISION.md](DECISION.md) — every meaningful decision and the reason behind it (why this library, why this tradeoff)
 
+## Who built what
+
+[PORTFOLIO.md](PORTFOLIO.md) maps each person's work on this project to concrete, resume-ready skills.
+
 ## Team workflow
 
 The build follows a shared 15-phase build guide (ask a teammate for the link). The rules for AI agents live in
