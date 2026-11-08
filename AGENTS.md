@@ -48,7 +48,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 12 | Logging & monitoring | Vaishnavi | ✅ Done — JSON logs + request id (D-042), `agent_run` trace (D-043), checked in Vercel's runtime logs (12.3, which exposed an outage fixed by pinning deps, D-044); `GET /metrics` (12.4, stretch, D-046) deployed and verified live |
 | 13 | AI eval harness | Vaishnavi | ✅ Done — 13.1 golden set (D-047), 13.2 `python -m evals` runner, keyword scoring + opt-in judge (D-048), 13.3 per-question latency + slow flag (D-050), 13.4 likely-hallucination flags (D-051), 13.5 JSON report + `--repeat` (D-052); committed baseline `evals/reports/baseline-2026-11-07.json` (3 runs: 18/19, 19/19, 19/19); **every question is over 5 s** (median ~5.8 s in-process, 14 s deployed). The older `tests/eval_rag.py` is retrieval-only |
 | 14 | Deployment & final integration | Both | ✅ Done — all 5 chunks verified live (2026-11-08) |
-| 15 | Docs & wrap-up | Vaishnavi | ⬜ Not started |
+| 15 | Docs & wrap-up | Vaishnavi | 🟡 Partial — 15.1 done (README: architecture diagram, API reference); 15.2–15.4 to do |
 
 ### Completed phase details
 
@@ -514,6 +514,18 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   end" — holds end-to-end: login/ask/ticket-create/ticket-check/reindex all verified live (14.4), and the scheduled
   reindex is now provably working through a product that keeps execution history (14.5). Phase 14 is ✅.
 
+**Phase 15 — Documentation & wrap-up** 🟡 in progress (15.1 done)
+- 15.1 Done. `README.md` gained an **Architecture** section with a Mermaid flowchart (renders natively on GitHub,
+  no image file to keep in sync): the single FastAPI Function, its three inbound triggers (browser, Vercel
+  Schedules, scripted calls), the two outbound dependencies (Gemini, Neon), the best-effort n8n webhook, and the
+  agent's 7 tools as a subgraph — plus a one-paragraph description of the `/ask` and agent request flows, linking
+  to `FLOW.md` for the full call chains. Also added an **API reference** section: a link to the live `/docs`
+  Swagger UI (satisfying the guide's "either an API reference or a link to `/docs`" directly) plus a condensed
+  route table, with the full table (exact rate limits, decision references) linked to `AGENTS.md#api` rather than
+  duplicated. The rest of 15.1's ask — setup steps, and a link to this status/decision trail — was already in
+  place from earlier phases (Quick start, Project layout, Deployment, Monitoring, Understanding the code). No
+  DECISION.md entry: Markdown-only change, and choosing Mermaid over a static image isn't a tradeoff worth logging.
+
 ## Phase log
 
 Append one line per finished phase (newest last).
@@ -535,6 +547,7 @@ Append one line per finished phase (newest last).
 | 2026-11-06 | 12 | Vaishnavi (with Claude) | Structured JSON logs with a request id on every line (12.1); an `agent_run` event with the bounded trace on any non-clean run (12.2); verified on Vercel's runtime logs (12.3) — which exposed a production outage (`google-genai` 3.0.0 → Gemini `v1` 404) fixed by pinning dependencies, plus a raw-JSON summary and a 97 s `/ask` hang fixed with a plain-text summary and a Gemini timeout + retry budget; Postgres-backed `GET /metrics` (12.4, stretch — deployed as `80d779d`; a known request mix was counted exactly on Production, and its first numbers showed database-backed routes taking 2–4 s) |
 | 2026-11-07 | 13 | Vaishnavi (with Claude) | 19-question golden set checked against the runbooks (13.1); `python -m evals` runner with keyword scoring and an opt-in Gemini judge, accepted fact variants (13.2); per-question latency with a >5 s flag (13.3); likely-hallucination flags (13.4); JSON reports and `--repeat N` (13.5). Baseline of 3 live runs: 18/19, 19/19, 19/19 (the miss was a Gemini read timeout); every question is over 5 s — the database-latency finding, still unaddressed |
 | 2026-11-08 | 14 | Vaishnavi (with Claude) | Verified 14.1–14.3 by reading the Vercel project config (found Preview's GEMINI_API_KEY is scoped to sprint-2 only); full live smoke test 14.4 (login → ask → create ticket → check ticket → reindex, all 200) against production; 14.5 found Legacy Cron Jobs keeps no execution history, migrated /cron/reindex to Vercel Schedules (D-054, deployed `af73634`), set up the Vercel CLI and used `vercel schedules invoke` to prove a real completed run (succeeded, 0% error rate, ~9s) — Phase 14 done |
+| 2026-11-08 | 15 | Vaishnavi (with Claude) | 15.1: README gained an Architecture section (Mermaid diagram of the single-Function design, request flow for /ask and the agent) and an API reference section (link to /docs + a condensed route table) |
 
 ## Deployment
 

@@ -8,6 +8,36 @@ create, check and triage incident tickets, and escalate to a human.
 
 **Progress:** Phases 1–14 of 15 complete. Live status of every phase: [AGENTS.md](AGENTS.md#phase-status). New to the code? Start with [CODE_TOUR.md](CODE_TOUR.md).
 
+## Architecture
+
+Every request lands on the same FastAPI app, running as one Vercel Function. `/ask` is plain retrieval-augmented
+generation; the agent endpoints run a ReAct tool-calling loop on top of the same retrieval and the same Postgres
+database. Scheduled re-indexing and manual requests go through the identical route.
+
+```mermaid
+flowchart LR
+    Browser["Web console (static/)"] -->|HTTPS| Vercel["Vercel Function<br/>(app/main.py, FastAPI)"]
+    Schedule["Vercel Schedules<br/>(daily, D-054)"] -->|"GET /cron/reindex<br/>+ CRON_SECRET"| Vercel
+    CLI["curl / scripts<br/>(login + JWT)"] -->|HTTPS| Vercel
+
+    Vercel -->|"embed + chat"| Gemini["Google Gemini<br/>(chat + gemini-embedding-001)"]
+    Vercel -->|"cosine search, tickets,<br/>conversations, rate limits"| Neon[("Neon Postgres<br/>+ pgvector")]
+    Vercel -. "best-effort webhook<br/>on escalate_to_human" .-> N8N["n8n workflow<br/>(Slack notification)"]
+
+    subgraph Agent["ReAct agent loop (app/agent.py)"]
+        direction TB
+        Tools["lookup_runbook · get_ticket · create_ticket ·<br/>update_ticket · escalate_to_human ·<br/>run_system_diagnostics · execute_recovery_action"]
+    end
+    Vercel --> Agent
+    Agent --> Neon
+    Agent --> Gemini
+```
+
+Request flow for `/ask`: embed the question → cosine-similarity search over `chunks` in Neon → build a grounded
+prompt with the retrieved text fenced as untrusted data (D-034) → one Gemini chat call → answer + ranked citations.
+The agent endpoints (`/agent/chat`, `/agent/triage/{id}`) repeat a send→tool-call→observe loop (bounded by
+`max_steps`) instead of a single retrieval step. Full call chains for every route are in [FLOW.md](FLOW.md).
+
 ## Stack (free tier)
 
 | Layer | Choice |
@@ -49,6 +79,26 @@ tests/      pytest suite (offline fakes in conftest.py) + RAG eval
 evals/      AI evaluation harness: golden question set and the `python -m evals` runner and its JSON reports (Phase 13)
 .github/    CI workflow: runs pytest on every push
 ```
+
+## API reference
+
+Full interactive docs (Swagger UI) are served at **`/docs`** on any running instance (local or deployed) — every
+request/response schema, tried live from the browser. The routes, summarized:
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/` | none | Web operations console |
+| GET | `/health` | none | DB + knowledge-base health |
+| GET | `/metrics` | JWT | Request count, average latency, error rate — last 1–168 hours, per route |
+| POST | `/auth/login` | none (rate-limited) | Returns a JWT |
+| GET | `/auth/me` | JWT | Current operator |
+| POST | `/ask` | JWT (rate-limited) | RAG answer with citations |
+| POST/GET | `/conversations`, `/conversations/{id}` | JWT | Chat history |
+| POST/GET/PATCH | `/tickets`, `/tickets/stats`, `/tickets/{id}` | JWT | Mock CRM |
+| POST | `/agent/chat`, `/agent/triage/{ticket_id}` | JWT (rate-limited) | ReAct agent with 7 tools |
+| GET | `/cron/reindex` | `CRON_SECRET` bearer | Re-index changed `data/docs/` files |
+
+The full table with exact rate limits and decision references is in [AGENTS.md](AGENTS.md#api).
 
 ## Deployment
 
