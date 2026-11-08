@@ -12,7 +12,7 @@ Notation: `→` calls · `[DB]` opens a Postgres connection via `app.db.get_conn
 | HTTP request on Vercel | `vercel.json` rewrites `/(.*)` → `/api/index` | `api/index.py` puts the repo root on `sys.path` and imports `app.main.app` (sprint-2 branch) |
 | Local dev | `uvicorn app.main:app --reload` | Same `app` object |
 | Browser | `GET /` | `serve_dashboard()` returns `static/index.html`, which loads `static/js/app.js` (§6) |
-| Vercel Cron | Daily `0 3 * * *` (03:00 UTC) → `GET /cron/reindex` | `api_cron_reindex()` → `scripts.ingest.reindex_knowledge_base()` (Phase 9.1, D-029) |
+| Vercel Schedules | Daily `0 3 * * *` (03:00 UTC) → `GET /cron/reindex` (migrated from Vercel Cron Jobs, Phase 14.5, D-054) | `api_cron_reindex()` → `scripts.ingest.reindex_knowledge_base()` (Phase 9.1, D-029) |
 | Ingestion | `python scripts/ingest.py` | `main()` in `scripts/ingest.py` → `reindex_knowledge_base()` (§5) |
 | DB setup | `scripts/init_db.sql`, run by hand in Neon | Creates the `vector` extension, 5 tables and the HNSW index |
 | CI | push or pull request on GitHub | `.github/workflows/tests.yml` → plain `pytest` on Python 3.11 + 3.12, no secrets, full git history (Phase 11.5, D-041) |

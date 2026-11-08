@@ -237,7 +237,8 @@ Runbooks (.md) ──ingest──▶ Postgres (chunks + numbers) ──search─
   `app/` changed: `/cron/reindex`'s `CRON_SECRET` check doesn't care which Vercel product called it.
 - **Try it:** `vercel schedules ls` / `vercel schedules executions list reindex` (needs the Vercel CLI linked —
   see Working Here in `AGENTS.md`) shows the schedule and its run history directly, without opening a browser.
-- **Not built yet:** 15 docs. Add a section here when it's done.
+- **Phase 15 (docs & wrap-up):** no new code — `README.md` (15.1, 15.4), `PORTFOLIO.md` (15.3) and this tour are
+  the deliverable. 15.2 (a short screen-capture demo) is the one chunk still outstanding.
 
 ## How to read the code yourself (suggested order)
 `config.py` → `db.py` → `schemas.py` → `rag.py` → `llm.py` → the `/ask` route in `main.py` → `crm.py` → `agent.py`
