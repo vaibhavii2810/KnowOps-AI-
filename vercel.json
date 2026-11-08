@@ -4,7 +4,11 @@
   "functions": {
     "api/index.py": { "includeFiles": "{static,data}/**" }
   },
-  "crons": [
-    { "path": "/cron/reindex", "schedule": "0 3 * * *" }
-  ]
+  "schedules": {
+    "reindex": {
+      "schedule": "0 3 * * *",
+      "path": "/cron/reindex",
+      "requestMethod": "GET"
+    }
+  }
 }

@@ -1076,3 +1076,54 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   but there is no migration tool: a changed schema bumps `schema_version` and old files are simply old.
 - **Revisit if:** a trend across many runs is wanted (then an `eval_runs` table or a small comparison command), reports get large,
   or a second consumer (CI, a dashboard) needs a stable schema.
+
+### D-053 · Preview `GEMINI_API_KEY` left scoped to `sprint-2` only; not widened yet (Phase 14.3)
+- **Date · by · source:** 2026-11-08 · Vaishnavi (with Claude) · Agent (found during Phase 14.3 verification)
+- **Decision:** Leave `GEMINI_API_KEY` as-is in the Vercel dashboard: set for Production, and for Preview scoped only
+  to the `sprint-2` git branch (not all Preview deployments). Recorded as a known issue rather than fixed immediately.
+- **Why:** In practice Preview is only ever built from `sprint-2` — `main` is production and no other branch is
+  deployed — so the gap has no observed impact today. Widening it is a two-click dashboard change with no code
+  change, so there is no reason to rush it into this phase's smoke test, which is about proving the already-set
+  config works end to end, not about completing the config.
+- **Alternatives considered:** widen the key to all Preview branches now (safe, but a dashboard edit outside what
+  14.3 asked to verify — deferred so this phase stays verification-only, matching D-052's and earlier phases'
+  pattern of not bundling an unrelated fix into a check); duplicate the Production key as a second Preview-wide
+  variable (same effect, more to keep in sync for no benefit over just widening the scope).
+- **Tradeoff accepted:** if a third branch is ever deployed to Preview, `/ask` and the agent there will 503 with "No
+  API key was provided" until this is fixed.
+- **Revisit if:** a branch other than `sprint-2` needs a working Preview deployment — then widen the `GEMINI_API_KEY`
+  env var's git-branch scope (or target) in the Vercel dashboard before relying on it.
+
+### D-054 · Migrated `/cron/reindex` from Vercel Cron Jobs to Vercel Schedules (Phase 14.5)
+- **Date · by · source:** 2026-11-08 · Vaishnavi (with Claude) · User (requested after Phase 14.5 found the Legacy
+  Cron Jobs dashboard keeps no execution history, so a scheduled run could not be confirmed)
+- **Decision:** `vercel.json`'s `crons` array (one entry, `/cron/reindex` at `0 3 * * *`) is replaced with the
+  `schedules` object (Vercel docs: `vercel.com/docs/schedules`, `/docs/schedules/migrate-from-cron-jobs`, verified
+  by fetching both pages before writing any config): a named schedule `reindex` with the same `path` and `schedule`,
+  plus `"requestMethod": "GET"` — required because Schedules default a path invocation to `POST`, while
+  `/cron/reindex` is a plain `@app.get(...)` in `app/main.py`. The old `crons` key is removed in the same change
+  (Vercel's own migration doc: keeping both runs the route twice). No application code changed: `CRON_SECRET` auth
+  (`Authorization: Bearer <CRON_SECRET>` checked in `api_cron_reindex`) and the catch-all rewrite to `api/index.py`
+  are both confirmed unaffected — Schedules sends the same header shape as Cron Jobs. Guarded by a new
+  `tests/test_vercel_config.py` (4 tests, proven to fail against the pre-migration file) so a later edit can't
+  silently drop `requestMethod` or reintroduce `crons` alongside `schedules`.
+- **Why:** Legacy Cron Jobs' dashboard page carries no execution history (confirmed live, 2026-11-08 — Invocations
+  and P75 Duration both showed `—`, and the page's own banner says so), and Hobby's 1-hour Runtime Logs retention
+  can't reach back to the once-daily 03:00 UTC firing either. Phase 14.5's "done when" needs an actually-checkable
+  confirmation that the schedule ran; Schedules' dashboard is Vercel's own replacement with that history, so it is
+  the lower-effort fix compared with building an app-side alternative (e.g. writing a timestamp to Postgres on each
+  reindex) just to work around a UI gap in a product being deprecated anyway.
+- **Alternatives considered:** stay on Legacy Cron Jobs and prove a run happened some other way — e.g. have
+  `api_cron_reindex` write a `last_reindexed_at` row and poll it (real app-code change, new table, for a problem
+  that's really "can't see Vercel's own history," not an app gap); wait near 03:00 UTC and catch it in the 1-hour
+  Runtime Logs window (fragile — depends on being online at the right minute, and still only proves one run, not
+  that the schedule is reliable going forward); do nothing and accept 14.5 as permanently unverifiable (rejected —
+  the build guide's done-when explicitly asks for dashboard confirmation).
+- **Tradeoff accepted:** **Schedules is in beta** (Vercel's own words: "Behavior, APIs, and limits may change before
+  general availability"). Low risk here — `/cron/reindex` only refreshes the knowledge base and is not on any
+  user-facing path; worst case is a missed or delayed daily re-index, not an outage of `/ask` or the agent. Also:
+  Schedules fire within a jitter window rather than exactly on the minute (not configurable on Hobby), which doesn't
+  matter for a daily, not time-sensitive, maintenance job.
+- **Revisit if:** Vercel deprecates Legacy Cron Jobs entirely (this migration would already be done), Schedules exits
+  beta with a breaking config change, or the jitter window ever matters for a different, time-sensitive schedule
+  added later.
