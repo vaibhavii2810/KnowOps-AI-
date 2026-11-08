@@ -118,6 +118,40 @@ request count, average latency and error rate for the last 1–168 hours, per ro
 - [FLOW.md](FLOW.md) — entry points, startup order, and which function calls which for every route
 - [DECISION.md](DECISION.md) — every meaningful decision and the reason behind it (why this library, why this tradeoff)
 
+## Future work
+
+**From the build guide (not attempted — explicitly optional/stretch):**
+- **Real CRM integration** — swap the Postgres-mocked CRM (`app/crm.py`) for HubSpot's free tier (Phase 8.4).
+  The mock's shape (create/get/update a ticket) was chosen to make this swap mostly a new backend behind the
+  same interface, not a rewrite.
+- **Multi-user auth** — today there is one shared operator login (`APP_USERNAME`/`APP_PASSWORD`), not per-user
+  accounts. Real multi-user auth would mean a `users` table, per-user tickets/conversations, and roles — a
+  genuinely new auth layer, not a config change.
+- **Streaming responses** — `/ask` and the agent endpoints return one complete JSON response; a user waits the
+  full ~5–15 s (see the latency item below) with nothing shown in between. Server-sent events or a streaming
+  response would show the answer as it's generated.
+- **OAuth** — the self-rolled JWT (D-007 and Phase 5) uses one hardcoded account; a real OAuth provider (e.g.
+  GitHub or Google sign-in) would remove the shared-password model entirely and enable multi-user auth above.
+
+**Found during this build, recorded but not fixed (full detail in [AGENTS.md § Known issues](AGENTS.md#known-issues)):**
+- **Database latency** — `/health` averages 4.5 s and `/ask` 14+ s on Production, traced to per-request Postgres
+  connection setup and a Vercel-function-to-Neon region mismatch (the function runs in the US, the database in
+  Singapore). Pinning the function's region next to Neon, and skipping `register_vector` where it isn't needed,
+  are both untested candidate fixes.
+- **Simulated infrastructure tools** — the agent's `run_system_diagnostics` and `execute_recovery_action` tools
+  are simulated for everything except the one real database diagnostic; connecting them to real infrastructure
+  (Kubernetes, a real monitoring API) is unfinished from Phase 7.1.
+- **n8n workflow never run for real** — `n8n/workflow.json` is exported and its payload shape verified against a
+  local test listener, but nobody has actually run `npx n8n`, imported it, and pointed its Slack node at a real
+  webhook URL (currently a placeholder).
+- **Hallucination-flag and golden-set limits** — the heuristic flags (Phase 13.4) miss a contradiction that
+  changes no number or code, and the 19-question golden set is small enough that run-to-run model variance still
+  shows up occasionally; growing the golden set and tightening the flags would both help.
+- **Login hardening** — `APP_USERNAME` is still the guessable default `admin`; the per-IP login rate limit
+  doesn't stop a distributed attack from many IPs. Both are small, known-scope fixes, not new features.
+- **`/metrics` has no percentiles** — only sums and a max are stored per route per hour; p50/p95 would need a
+  different storage shape (e.g. a histogram) than the current upsert-per-hour counters.
+
 ## Who built what
 
 [PORTFOLIO.md](PORTFOLIO.md) maps each person's work on this project to concrete, resume-ready skills.

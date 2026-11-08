@@ -48,7 +48,7 @@ Legend: ✅ done · 🟡 partial / code exists but not verified against the guid
 | 12 | Logging & monitoring | Vaishnavi | ✅ Done — JSON logs + request id (D-042), `agent_run` trace (D-043), checked in Vercel's runtime logs (12.3, which exposed an outage fixed by pinning deps, D-044); `GET /metrics` (12.4, stretch, D-046) deployed and verified live |
 | 13 | AI eval harness | Vaishnavi | ✅ Done — 13.1 golden set (D-047), 13.2 `python -m evals` runner, keyword scoring + opt-in judge (D-048), 13.3 per-question latency + slow flag (D-050), 13.4 likely-hallucination flags (D-051), 13.5 JSON report + `--repeat` (D-052); committed baseline `evals/reports/baseline-2026-11-07.json` (3 runs: 18/19, 19/19, 19/19); **every question is over 5 s** (median ~5.8 s in-process, 14 s deployed). The older `tests/eval_rag.py` is retrieval-only |
 | 14 | Deployment & final integration | Both | ✅ Done — all 5 chunks verified live (2026-11-08) |
-| 15 | Docs & wrap-up | Vaishnavi | 🟡 Partial — 15.1 (README) and 15.3 (PORTFOLIO.md) done; 15.2 (demo recording) and 15.4 (future work) to do |
+| 15 | Docs & wrap-up | Vaishnavi | 🟡 Partial — 15.1 (README), 15.3 (PORTFOLIO.md) and 15.4 (Future work) done; 15.2 (demo recording) still needs a human |
 
 ### Completed phase details
 
@@ -535,6 +535,13 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   that caught a real production outage, and the evaluation harness); Phase 10 (security) and 14 (deployment) kept
   general since they were split/shared. Linked from `README.md` under a new "Who built what" heading. No
   DECISION.md entry: Markdown-only change.
+- 15.4 Done. New **Future work** section in `README.md`, split in two: items named directly in the build guide
+  (real HubSpot CRM integration, multi-user auth, streaming responses, OAuth — each with one sentence on what it
+  would actually take, not just the name) and items this build already found and recorded but didn't fix (database
+  latency, the two still-simulated agent tools, the never-really-run n8n workflow, hallucination-flag/golden-set
+  limits, login hardening, `/metrics` having no percentiles), each linking back to its full `AGENTS.md` Known
+  issues entry rather than duplicating the detail. No new issue invented — every item already existed in Known
+  issues or the build guide's own stretch list. No DECISION.md entry: Markdown-only change.
 
 ## Phase log
 
@@ -559,6 +566,7 @@ Append one line per finished phase (newest last).
 | 2026-11-08 | 14 | Vaishnavi (with Claude) | Verified 14.1–14.3 by reading the Vercel project config (found Preview's GEMINI_API_KEY is scoped to sprint-2 only); full live smoke test 14.4 (login → ask → create ticket → check ticket → reindex, all 200) against production; 14.5 found Legacy Cron Jobs keeps no execution history, migrated /cron/reindex to Vercel Schedules (D-054, deployed `af73634`), set up the Vercel CLI and used `vercel schedules invoke` to prove a real completed run (succeeded, 0% error rate, ~9s) — Phase 14 done |
 | 2026-11-08 | 15 | Vaishnavi (with Claude) | 15.1: README gained an Architecture section (Mermaid diagram of the single-Function design, request flow for /ask and the agent) and an API reference section (link to /docs + a condensed route table) |
 | 2026-11-08 | 15 | Vaishnavi (with Claude) | 15.3: new PORTFOLIO.md maps each person's work to concrete, resume-ready skills, derived from the recorded phase work rather than an external skills list (none exists) |
+| 2026-11-08 | 15 | Vaishnavi (with Claude) | 15.4: new Future work section in README — build-guide stretch items (HubSpot, multi-user auth, streaming, OAuth) plus every unfixed gap already recorded in Known issues, nothing new invented |
 
 ## Deployment
 
