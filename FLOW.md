@@ -103,13 +103,13 @@ Depends(auth.get_current_user_required)
 ask(AskRequest, Depends(ratelimit.rate_limited("ask")))   ← JWT required (Phase 5.4) + 10/min per user (Phase 10.5)
   1. [DB] create a conversation, or load its history (first 8 messages, oldest first)
   2. rag.retrieve_and_format(question, top_k)
-       → rag.retrieve(query, top_k, threshold=0.55)
+       → rag.retrieve(query, top_k, threshold=0.65)  # D-056, 2026-11-10 — was 0.55
             → llm.embed_query → llm.embed_text(task_type="RETRIEVAL_QUERY")
                  → llm.get_client() → [Gemini] embed_content, 768 dims
                    (retry_call: up to 4 tries on 429 / 408 / any 5xx / network timeouts, exponential backoff
                     with jitter ≈ 1s / 2s / 4s — other 4xx fail fast; Phase 10.1, D-032; no new attempt after
                     GEMINI_TIMEOUT_SECONDS, so a slow call fails once instead of four times — D-045)
-            → [DB] cosine search: 1 - (embedding <=> query) >= 0.55, nearest first, LIMIT top_k (HNSW index)
+            → [DB] cosine search: 1 - (embedding <=> query) >= 0.65, nearest first, LIMIT top_k (HNSW index)
             → list[ChunkResult]
        → rag.format_context_for_llm(chunks) → "Source: <title> › <heading>\n\n<content>" per chunk
      (503 if retrieval fails)

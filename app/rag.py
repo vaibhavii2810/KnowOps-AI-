@@ -28,9 +28,11 @@ from app.schemas import ChunkResult
 
 
 # Minimum cosine similarity a chunk must reach to be included in results.
-# Tuned in Phase 2.4: 0.55 cleanly rejects out-of-domain queries (~0.50)
-# while preserving all valid operational queries (which score >= 0.70).
-SIMILARITY_THRESHOLD = 0.55
+# Re-tuned 2026-11-10 (D-056, supersedes the /ask half of D-012): live probes found off-topic
+# queries scoring up to 0.583 ("Terraform state locking", "AWS S3 lifecycle") — above the old
+# 0.55 threshold — while the lowest-scoring in-scope golden question (g16) was 0.699. 0.65 sits
+# in that measured gap with margin on both sides.
+SIMILARITY_THRESHOLD = 0.65
 
 
 def retrieve(

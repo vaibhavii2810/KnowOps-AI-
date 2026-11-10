@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.rag import retrieve, format_context_for_llm, retrieve_and_format
+from app.rag import SIMILARITY_THRESHOLD, retrieve, format_context_for_llm, retrieve_and_format
 from app.schemas import ChunkResult, AskResponse, HealthResponse
 
 
@@ -164,3 +164,42 @@ def test_retrieve_sql_ranks_by_ascending_cosine_distance(knowledge_base, fake_db
     assert "WHERE (1 - (c.embedding <=> %s::vector)) >= %s" in sql
     assert "ORDER BY c.embedding <=> %s::vector LIMIT %s" in sql  # ascending distance = most similar first
     assert "DESC" not in sql.upper()
+
+
+# --- D-056: SIMILARITY_THRESHOLD re-tuned from 0.55 to 0.65 ----------------------------------
+# Bug #2 (external bug report, 2026-11-08, High): off-topic probes ("what is 2+2", "Terraform
+# state locking", "AWS S3 lifecycle policy") scored up to 0.583 at the old 0.55 threshold — above
+# it — and were retrieved and cited as if relevant. Measured live on 2026-11-10: highest known
+# false-positive top score 0.583; lowest known true-positive top score (across all 16 in-scope
+# golden questions) 0.699. 0.65 sits in that gap.
+
+def test_similarity_threshold_sits_between_the_measured_false_and_true_positive_bands():
+    """Offline guard: nobody can move the constant back toward 0.55 (or past 0.699) without
+    re-measuring — the bound itself is the evidence from D-056, not an opinion."""
+    assert 0.583 < SIMILARITY_THRESHOLD < 0.699
+
+
+@pytest.mark.live
+@pytest.mark.parametrize("query", [
+    "what is 2+2",
+    "Terraform state locking",
+    "AWS S3 lifecycle policy",
+    "best pizza topping",
+])
+def test_off_topic_questions_get_no_sources_at_the_new_threshold(query):
+    """The live counterpart: these exact queries (from the bug report / its live re-measurement)
+    used to clear the old 0.55 threshold and are retrieved with it dropped — proving the fix, not
+    just the constant's position."""
+    assert retrieve(query) == []
+
+
+@pytest.mark.live
+def test_every_in_scope_golden_question_still_retrieves_something():
+    """The other side of the same fix: raising the threshold must not start false-refusing the
+    golden set. Full fact-level scoring is evals' job (`python -m evals`); this is the fast,
+    offline-adjacent regression that the threshold alone didn't silence a real question."""
+    from evals.golden import load_golden_set
+
+    starved = [item.id for item in load_golden_set()
+               if not item.must_refuse and not retrieve(item.question, top_k=1)]
+    assert starved == []

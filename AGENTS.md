@@ -101,6 +101,16 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
 - Bug found and fixed on the way: `scripts/ingest.py` `split_by_headings` treated `# comments` inside ``` fences
   as headings, dropping the runbook commands (so `/ask` refused the failover question). Now ignores fenced
   lines; KB re-ingested to 80 chunks; regression tests in `tests/test_ingest.py`.
+- **6.1 addendum (2026-11-10, D-056):** an external bug report (bug #2, High) found that D-012's 0.55 `/ask`
+  threshold let off-topic text through: live probes scored "what is 2+2", "Terraform state locking" and "AWS S3
+  lifecycle policy" at 0.518–0.583 — above 0.55 — so they were retrieved and shown as cited sources. Re-measured
+  (not re-guessed) against the real database: the lowest top-match score across all 16 in-scope golden-set
+  questions was 0.699. `SIMILARITY_THRESHOLD` raised to 0.65, sitting in that measured gap with margin both ways;
+  the agent's separate 0.50 threshold (D-012) is untouched — not measured here. Also fixes bug #23 (refusals
+  showing citation cards) as a direct consequence. 2 new offline/live test groups in `tests/test_rag.py` (a
+  threshold-margin guard offline, 4 off-topic-queries-get-no-sources + a full-golden-set-still-retrieves live);
+  2 mutation checks (reverted to 0.55, pushed past the measured floor) each fail the offline guard. 581 passed
+  offline (114 live deselected); `pytest -m live -k rag`: 8/8 pass against real Gemini and Postgres.
 
 **Phase 7 — Agent + tool-calling** ✅
 - 7.1 Added `create_ticket` and `escalate_to_human` tools (D-025), closing the gap D-015 flagged. All 7 tools
@@ -577,6 +587,7 @@ Append one line per finished phase (newest last).
 | 2026-11-08 | 15 | Vaishnavi (with Claude) | 15.3: new PORTFOLIO.md maps each person's work to concrete, resume-ready skills, derived from the recorded phase work rather than an external skills list (none exists) |
 | 2026-11-08 | 15 | Vaishnavi (with Claude) | 15.4: new Future work section in README — build-guide stretch items (HubSpot, multi-user auth, streaming, OAuth) plus every unfixed gap already recorded in Known issues, nothing new invented |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix from an external bug report (D-055): `/cron/reindex` now refuses with 503 when deployed with no `CRON_SECRET` configured, instead of silently allowing anyone to trigger it; local dev with no secret unchanged |
+| 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-056): `/ask`'s SIMILARITY_THRESHOLD raised 0.55 → 0.65, measured live against real off-topic scores (0.518–0.583) and the lowest true-positive golden-set score (0.699); also fixes bug #23 (refusals showing sources) |
 
 ## Deployment
 
@@ -665,11 +676,11 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - **An external bug report (`KnowOps_AI_Bug_Report.pdf`, 2026-11-08, 27 findings) is not yet in this repo:** it
   references `tests/test_suspected_bugs.py` and `TEST_RESULTS.md`, neither of which exist here — that testing
   pass happened somewhere outside this repo's history. Bug #1 (High — `/cron/reindex` open when `CRON_SECRET` is
-  unset) is fixed, D-055, 2026-11-10. The other 26 (including #21, High — stored-XSS in the console via
-  `formatMarkdown`, and #2, High — the 0.55 retrieval threshold lets unrelated text through as cited context)
-  are **not yet fixed or verified against this codebase** — only cross-checked that bug #1's claim matched the
-  real code before fixing it. Worth pulling the PDF's test file and results doc into the repo so the rest aren't
-  only tracked in a PDF.
+  unset, D-055) and bug #2 (High — the 0.55 retrieval threshold, D-056, which also fixed #23) are fixed, both
+  2026-11-10, each independently re-measured against the real code/data before fixing, not taken on the PDF's
+  word alone. The other 24 (including #21, High — stored-XSS in the console via `formatMarkdown`) are **not yet
+  fixed or verified against this codebase**. Worth pulling the PDF's test file and results doc into the repo so
+  the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any

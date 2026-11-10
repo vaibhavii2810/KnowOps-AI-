@@ -128,6 +128,8 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Alternatives considered:** No threshold (the model would get irrelevant context and might hallucinate).
 - **Tradeoff accepted:** Borderline but valid questions may get "I don't have enough information".
 - **Revisit if:** The Phase 13 eval shows false refusals.
+- **Superseded by D-056 for `/ask`'s threshold (2026-11-10)** — the "about 0.50" estimate for off-topic questions
+  was measured too low; the agent's 0.50 is untouched and this entry still stands for that half.
 
 ### D-013 · Grounding by system prompt and low temperature
 - **Date · by · source:** 2026-10-07 · both · Build guide
@@ -1155,3 +1157,30 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   deployment, which is documented platform behavior but not something this repo controls. If a future deploy target
   other than Vercel is ever added, this check needs its own signal for "deployed," not `settings.vercel`.
 - **Revisit if:** the project deploys anywhere other than Vercel, or Vercel changes how/whether it sets `VERCEL`.
+
+### D-056 · `/ask`'s similarity threshold raised from 0.55 to 0.65, measured not guessed
+- **Date · by · source:** 2026-11-10 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #2, High; also fixes bug #23)
+- **Decision:** `app/rag.py`'s `SIMILARITY_THRESHOLD` (the default for `retrieve()` and `retrieve_and_format()`,
+  used by `/ask`) is raised from 0.55 to 0.65. The agent's `tool_lookup_runbook` threshold (0.50, D-012) is
+  untouched — it wasn't independently measured here and D-012's "lower bar to find leads" reasoning still applies
+  to it specifically.
+- **Why:** D-012's "~0.50 for off-topic, ~0.70+ for real questions" estimate was re-measured live against the
+  real database and Gemini, not assumed: four off-topic probes ("what is 2+2", "Terraform state locking", "AWS S3
+  lifecycle policy", the same set the bug report used) scored **0.518–0.583** — above the old 0.55 threshold,
+  meaning they were retrieved and shown as cited sources under a question `/ask` should have refused. Checked
+  against the other side too: the **lowest** top-match score across all 16 in-scope golden-set questions (not
+  just a couple of samples) was **0.699** (`g16`). 0.65 sits in the measured gap between 0.583 and 0.699, with
+  margin on both sides, rather than picking a round number and hoping. This also fixes bug #23 (refusals still
+  showing citation cards) as a direct consequence: a query that now scores below 0.65 returns zero sources, so
+  the refusal path no longer carries misleading citations.
+- **Alternatives considered:** leave 0.55 and instead stop the model from citing sources on a refusal (would hide
+  the symptom in the UI, bug #23, but the retrieved context still reaches the model as grounding material —
+  doesn't fix the retrieval-quality problem at the root, bug #2); a semantic/keyword hybrid gate (more robust long
+  term, but a bigger change than this bug warrants); re-tune per query category (no evidence yet that different
+  question types need different bars).
+- **Tradeoff accepted:** 0.65 is still a single global threshold tuned against the current 5-runbook, 80-chunk
+  knowledge base and the current embedding model; it is not guaranteed to hold if the knowledge base grows
+  substantially or the embedding model changes — D-012's own "Revisit if: Phase 13 eval shows false refusals"
+  condition still applies, now against this new value.
+- **Revisit if:** the Phase 13 eval harness (`python -m evals`) shows a false refusal against the new threshold, or
+  the knowledge base/embedding model changes meaningfully.
