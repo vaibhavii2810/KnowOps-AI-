@@ -645,9 +645,20 @@ def api_cron_reindex(
     D-030 — superseding D-020's "production only" check now that this endpoint does
     real, costly work instead of just counting rows). A contributor with no
     CRON_SECRET set in their own local .env is unaffected — settings.cron_secret is
-    empty by default, so nothing is enforced until it's actually configured.
+    empty by default, so nothing is enforced until it's actually configured. But a
+    *deployed* instance (settings.vercel set — Vercel sets this on every Preview and
+    Production build) with no CRON_SECRET configured refuses instead of silently
+    allowing anyone to trigger it (D-055, closing a real finding: an unset env var in
+    production used to be indistinguishable from "developer running locally").
     """
-    if settings.cron_secret and authorization != f"Bearer {settings.cron_secret}":
+    if not settings.cron_secret:
+        if settings.vercel:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="CRON_SECRET is not configured.",
+            )
+        # else: genuinely local dev with no secret set — unchanged, unenforced (D-030's original intent).
+    elif authorization != f"Bearer {settings.cron_secret}":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized cron execution.",

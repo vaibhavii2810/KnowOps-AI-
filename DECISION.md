@@ -1127,3 +1127,31 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Revisit if:** Vercel deprecates Legacy Cron Jobs entirely (this migration would already be done), Schedules exits
   beta with a breaking config change, or the jitter window ever matters for a different, time-sensitive schedule
   added later.
+
+### D-055 · `/cron/reindex` refuses, instead of silently allowing, when deployed with no `CRON_SECRET`
+- **Date · by · source:** 2026-11-10 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #1, High)
+- **Decision:** `api_cron_reindex()` now branches on whether `CRON_SECRET` is configured, not just whether the
+  presented header matches it. If `settings.cron_secret` is empty **and** `settings.vercel` is set (Vercel sets
+  this env var to `"1"` on every Preview and Production build, never locally), the endpoint refuses with a 503
+  before touching the database or Gemini. If `cron_secret` is empty and `vercel` is also empty — a genuine local
+  run — behavior is unchanged from D-030: unenforced, so a contributor never has to set a secret just to run the
+  app locally. If `cron_secret` is set, the existing bearer-token check is unchanged.
+- **Why:** The old check was `if settings.cron_secret and authorization != ...`. An **empty** `cron_secret` made
+  the whole condition `False`, so the route fell straight through to re-indexing — correct for local dev (the
+  documented D-030 intent) but equally true for a real deployment that simply forgot to set the env var. Nothing
+  distinguished "developer, no secret needed" from "production, secret missing by accident" — both looked like
+  "no secret configured" to the code. `settings.vercel` is the one signal that's reliably true in exactly the
+  case that matters (deployed) and reliably false in exactly the case that shouldn't be touched (local), without
+  asking anyone to set a new env var themselves.
+- **Alternatives considered:** require `CRON_SECRET` unconditionally, everywhere (simplest, but breaks the
+  documented "a contributor with no CRON_SECRET set is unaffected" local-dev promise from Phase 9.1/D-030 — would
+  force every contributor to generate and set a secret just to run `scripts/ingest.py` locally or hit `/cron/reindex`
+  in dev); detect "production" via some other signal, e.g. `DATABASE_URL` being the live Neon URL (fragile — a
+  contributor's local `.env` can legitimately point at the live database too, per the Deployment section's own
+  note that `pytest -m live` can do exactly that); warn-only (log a warning but still allow) — rejected because a
+  warning nobody reads doesn't change that the route stays wide open; a separate `ENVIRONMENT=production` variable
+  the team sets by hand — rejected in favor of `VERCEL`, which Vercel sets automatically and can't be forgotten.
+- **Tradeoff accepted:** this relies on Vercel's own `VERCEL` env var continuing to be set automatically on every
+  deployment, which is documented platform behavior but not something this repo controls. If a future deploy target
+  other than Vercel is ever added, this check needs its own signal for "deployed," not `settings.vercel`.
+- **Revisit if:** the project deploys anywhere other than Vercel, or Vercel changes how/whether it sets `VERCEL`.

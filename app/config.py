@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     app_username: str = "admin"
     app_password: str = "admin"
     cron_secret: str = ""
+    vercel: str = ""  # Vercel sets this to "1" on every Preview/Production deployment; empty locally (D-055)
     n8n_escalation_webhook_url: str = ""
     rate_limit_ask_per_minute: int = 10
     rate_limit_agent_per_minute: int = 5

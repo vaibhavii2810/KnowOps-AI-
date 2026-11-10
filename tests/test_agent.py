@@ -326,6 +326,29 @@ def test_api_cron_reindex_requires_cron_secret_in_every_environment(client, no_n
     ).status_code == 401
 
 
+def test_api_cron_reindex_refuses_when_deployed_with_no_secret_configured(client, no_network, monkeypatch):
+    """
+    D-055: an unset CRON_SECRET used to be indistinguishable from "developer running locally" — the check
+    (`if settings.cron_secret and ...`) was simply skipped, so a deployed instance missing the env var was
+    silently open to anyone. `settings.vercel` (Vercel sets it on every Preview/Production build) now tells
+    the two cases apart: deployed-with-no-secret refuses outright. no_network proves this happens before any
+    DB or Gemini work is attempted, not after.
+    """
+    monkeypatch.setattr(settings, "cron_secret", "")
+    monkeypatch.setattr(settings, "vercel", "1")
+    assert client.get("/cron/reindex").status_code == 503
+
+
+def test_api_cron_reindex_stays_open_locally_when_no_secret_configured(client, fake_gemini, memory_db, monkeypatch):
+    """D-055's other half: a genuine local run with no CRON_SECRET set (settings.vercel empty) is unchanged
+    from before — the original D-030 intent of "nothing enforced until a contributor actually sets a secret"."""
+    monkeypatch.setattr(settings, "cron_secret", "")
+    monkeypatch.setattr(settings, "vercel", "")
+    response = client.get("/cron/reindex")
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+
 def test_api_cron_reindex_with_the_right_secret_ingests_then_skips_unchanged_files(client, fake_gemini, memory_db, monkeypatch):
     """Offline twin of the live test below (Phase 11.5): the real data/docs/ runbooks go into MemoryDB with
     fake embeddings; a second run finds every file unchanged by content hash and embeds nothing."""

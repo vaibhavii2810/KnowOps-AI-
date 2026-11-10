@@ -148,6 +148,15 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
 - 9.2 `CRON_SECRET` is now enforced in every environment, not just production (D-030) — found and fixed a
   real gap: an unauthenticated call against the live Preview deployment succeeded and triggered a real
   re-embed before the fix.
+- **9.2 addendum (2026-11-10, D-055):** an external bug report (bug #1, High) found that D-030's check —
+  `if settings.cron_secret and authorization != ...` — silently did nothing when `cron_secret` was *empty*,
+  which was the documented, intended behavior for local dev but equally true for a real deployment that simply
+  never had `CRON_SECRET` set. Fixed: a new `settings.vercel` field (reads the `VERCEL` env var Vercel sets
+  automatically on every Preview/Production build, never set locally) now distinguishes the two; a deployed
+  instance with no secret configured gets a 503 instead of silently running. Local dev with no secret is
+  unchanged. 2 new tests in `tests/test_agent.py` (one per branch); 3 mutation checks (the deployed-no-secret
+  branch removed, the wrong status code, the local-dev branch always refusing) each fail them. 580 passed,
+  109 live deselected.
 - 9.3 `vercel.json`'s daily cron (`0 3 * * *` → `/cron/reindex`) is syntactically correct and, as of
   2026-10-27, actually deployed to Production for the first time (`main` was fast-forwarded to `sprint-2`).
   Manually confirmed the endpoint behaves exactly as Vercel Cron's own invocation would (`GET`, `Authorization:
@@ -567,6 +576,7 @@ Append one line per finished phase (newest last).
 | 2026-11-08 | 15 | Vaishnavi (with Claude) | 15.1: README gained an Architecture section (Mermaid diagram of the single-Function design, request flow for /ask and the agent) and an API reference section (link to /docs + a condensed route table) |
 | 2026-11-08 | 15 | Vaishnavi (with Claude) | 15.3: new PORTFOLIO.md maps each person's work to concrete, resume-ready skills, derived from the recorded phase work rather than an external skills list (none exists) |
 | 2026-11-08 | 15 | Vaishnavi (with Claude) | 15.4: new Future work section in README — build-guide stretch items (HubSpot, multi-user auth, streaming, OAuth) plus every unfixed gap already recorded in Known issues, nothing new invented |
+| 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix from an external bug report (D-055): `/cron/reindex` now refuses with 503 when deployed with no `CRON_SECRET` configured, instead of silently allowing anyone to trigger it; local dev with no secret unchanged |
 
 ## Deployment
 
@@ -619,6 +629,8 @@ Interactive docs: `/docs` (Swagger UI).
 `RATE_LIMIT_AGENT_PER_MINUTE` (5) (optional — Phase 10.5, D-036; 0 disables) · `RATE_LIMIT_LOGIN_PER_MINUTE` (5) /
 `RATE_LIMIT_LOGIN_PER_HOUR` (30) (optional — D-037; per client IP) · `LOG_LEVEL` (INFO) (optional — Phase 12.1, D-042) · `GEMINI_TIMEOUT_SECONDS` (25) (optional — D-045; per Gemini request,
 also each call's retry budget) · `METRICS_ENABLED` (true) (optional — Phase 12.4, D-046; false stops request counting).
+`VERCEL` is platform-set by Vercel itself (never add it to `.env` or `.env.example`) — `GET /cron/reindex` uses it to tell a real
+deployment apart from local dev when `CRON_SECRET` is missing (D-055).
 Template: `.env.example`.
 All are now set on both Preview and Production in the Vercel project (2026-10-27) — `main` was fast-forwarded
 to `sprint-2`'s tip the same day, so Production is a real, working deployment for the first time.
@@ -649,6 +661,15 @@ All decisions and their reasons are in [`DECISION.md`](DECISION.md). Key ones: D
 EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-ai-` project (D-018).
 
 ## Known issues
+
+- **An external bug report (`KnowOps_AI_Bug_Report.pdf`, 2026-11-08, 27 findings) is not yet in this repo:** it
+  references `tests/test_suspected_bugs.py` and `TEST_RESULTS.md`, neither of which exist here — that testing
+  pass happened somewhere outside this repo's history. Bug #1 (High — `/cron/reindex` open when `CRON_SECRET` is
+  unset) is fixed, D-055, 2026-11-10. The other 26 (including #21, High — stored-XSS in the console via
+  `formatMarkdown`, and #2, High — the 0.55 retrieval threshold lets unrelated text through as cited context)
+  are **not yet fixed or verified against this codebase** — only cross-checked that bug #1's claim matched the
+  real code before fixing it. Worth pulling the PDF's test file and results doc into the repo so the rest aren't
+  only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
