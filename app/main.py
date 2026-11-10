@@ -38,7 +38,9 @@ from app.auth import (
     get_current_user_required,
     verify_operator_credentials,
 )
-from app.config import settings
+from app.config import ensure_secrets_are_configured, settings
+
+ensure_secrets_are_configured()  # D-063: refuse to boot on Vercel with a default JWT_SECRET/APP_PASSWORD
 from app.crm import (
     create_ticket,
     get_crm_stats,

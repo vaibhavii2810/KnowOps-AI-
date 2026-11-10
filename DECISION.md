@@ -84,6 +84,9 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Tradeoff accepted:** The defaults (`admin`/`admin`, `jwt_secret="dev-secret"`) are used silently if a
   variable is missing in production. See Known issues in `AGENTS.md`.
 - **Revisit if:** Phase 10 — production should refuse to start without real secrets.
+- **Revisited and partly superseded by D-063 (2026-11-10):** deployed with `JWT_SECRET`/`APP_PASSWORD` still
+  default now genuinely refuses to start, closing exactly this condition. `APP_USERNAME` defaulting to
+  `admin` is unchanged — see D-063 for why that one stays as a documented, lower-severity gap.
 
 ### D-008 · Self-rolled JWT auth for a single operator
 - **Date · by · source:** 2026-10-07 · both · Build guide
@@ -1338,3 +1341,39 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Revisit if:** the app ever adds cookie-based auth (then `allow_credentials=True` would mean something
   real, and `allow_origins` would need to be an explicit list, not `*`), or cross-origin access should be
   restricted to specific known callers.
+
+### D-063 · Refuse to start on Vercel with a default `JWT_SECRET` or `APP_PASSWORD`
+- **Date · by · source:** 2026-11-10 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #9, Medium) — also D-007's own named revisit condition
+- **Decision:** New `app/config.py` function `ensure_secrets_are_configured()`, called once at `app/main.py`
+  module level (so it runs exactly once, at real import time — before any test can monkeypatch
+  `settings.vercel`, and in production, at cold start). If `settings.vercel` is set and either
+  `JWT_SECRET == "dev-secret"` or `APP_PASSWORD == "admin"` (the two insecure defaults from D-007), it
+  raises `InsecureDefaultSecret`, which crashes the import — every request 500s until the real env vars are
+  set. Off Vercel, it is a no-op regardless of what the secrets are: local dev needs no `.env` to run,
+  unchanged.
+- **Why:** D-007 already named this exact condition as its own trigger to revisit: "production should
+  refuse to start without real secrets." A deployment that forgot to set `JWT_SECRET` would let anyone forge
+  a valid operator token by signing their own with the public default value; forgetting `APP_PASSWORD`
+  leaves the login guessable with the well-known `admin`/`admin`. Both were previously silent — the app ran
+  normally, looking deployed and working, while actually wide open.
+- **`APP_USERNAME` is deliberately not checked here:** it's an identifier, not a secret, and Known issues
+  already tracks it as a "free guess; optional to change" — a real gap, but a different, lower-severity one
+  than a forgeable token or a guessable password; adding it here would also make the check fire for
+  deployments that reasonably keep `admin` as the username but changed the password, which isn't insecure.
+- **Alternatives considered:** a soft warning (logged, not raised) instead of refusing to start — rejected,
+  because a log line nobody is watching doesn't close the exposure, and this is specifically the "refuse to
+  start" D-007 asked for; checking at every request instead of once at import (more defensive in theory, but
+  adds a check to every request for a condition that cannot change between requests in one running process,
+  and the one-time import-time check is what makes this cleanly testable via a real subprocess, see below).
+- **Tested two ways:** the pure function directly (constructed stand-ins, 5 cases: each secret alone, both
+  together — and the message names both — real secrets, and off-Vercel safety) and, separately, a real
+  subprocess doing `import app.main` with `VERCEL=1` and the defaults still set — proving the actual wiring
+  in `app/main.py` crashes a real cold start, not just that the helper function works when called directly.
+  A mutation removing the call from `app/main.py` entirely is caught only by the subprocess tests, not the
+  direct ones — expected, and why both exist.
+- **Tradeoff accepted:** this cannot be exercised by the normal `pytest`/`TestClient` flow (module caching
+  means `app.main` is only ever really imported once per test process, before any per-test monkeypatch could
+  take effect) — hence the subprocess tests, which are slower (≈1s each) but are what actually proves the
+  Vercel cold-start behavior rather than just the extracted logic.
+- **Revisit if:** another insecure default is ever added to `Settings`, or the project needs the check to
+  cover a config error class beyond these two specific secrets.

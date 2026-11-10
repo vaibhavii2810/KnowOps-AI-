@@ -9,7 +9,7 @@ Notation: `→` calls · `[DB]` opens a Postgres connection via `app.db.get_conn
 
 | Trigger | Entry | What happens next |
 |---|---|---|
-| HTTP request on Vercel | `vercel.json` rewrites `/(.*)` → `/api/index` | `api/index.py` puts the repo root on `sys.path` and imports `app.main.app` (sprint-2 branch) |
+| HTTP request on Vercel | `vercel.json` rewrites `/(.*)` → `/api/index` | `api/index.py` puts the repo root on `sys.path` and imports `app.main.app` (sprint-2 branch) — importing `app.main` first calls `config.ensure_secrets_are_configured()`, which raises (crashing the cold start, every request 500s) if deployed (`settings.vercel` set) with `JWT_SECRET`/`APP_PASSWORD` still at their insecure defaults; a no-op everywhere else (D-063) |
 | Local dev | `uvicorn app.main:app --reload` | Same `app` object |
 | Browser | `GET /` | `serve_dashboard()` returns `static/index.html`, which loads `static/js/app.js` (§6) |
 | Vercel Schedules | Daily `0 3 * * *` (03:00 UTC) → `GET /cron/reindex` (migrated from Vercel Cron Jobs, Phase 14.5, D-054) | `api_cron_reindex()` → `scripts.ingest.reindex_knowledge_base()` (Phase 9.1, D-029) |
