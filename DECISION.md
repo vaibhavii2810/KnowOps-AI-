@@ -1377,3 +1377,22 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   Vercel cold-start behavior rather than just the extracted logic.
 - **Revisit if:** another insecure default is ever added to `Settings`, or the project needs the check to
   cover a config error class beyond these two specific secrets.
+
+### D-064 · Request-body integer fields use `strict=True` so a boolean is rejected, not coerced
+- **Date · by · source:** 2026-11-10 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #11, Low)
+- **Decision:** `AskRequest.top_k`, `AskRequest.conversation_id` and `AgentChatRequest.max_steps` (the
+  client-input `int` fields that take a plain number) add `strict=True` to their `Field(...)`. A real
+  integer is accepted exactly as before; a JSON `true`/`false` is now a 422 naming the field instead of
+  being silently coerced to `1`/`0`.
+- **Why:** Python's `bool` is a subtype of `int`, and Pydantic v2's default (non-strict) `int` validation
+  accepts that — verified directly: `AskRequest(top_k=True)` produced `top_k=1` with no error. A client
+  bug that sends a boolean where a count was meant (an off-by-one in some calling code, a template that
+  defaults to `true`) would silently succeed with a wrong, un-signaled value instead of failing loudly.
+- **Alternatives considered:** a custom field validator per field (same outcome, more code for it);
+  `model_config = {"strict": True}` on the whole model (would also start rejecting values Pydantic
+  currently coerces elsewhere, such as numeric strings in places that rely on that — wider than this bug
+  asks for; `strict=True` per-field is the minimal fix for exactly the reported gap).
+- **Tradeoff accepted:** none found — a genuine integer is unaffected; only a `bool` masquerading as one
+  changes behavior, and that's the point.
+- **Revisit if:** another request field is added that takes a plain integer from a client and should get
+  the same guard.

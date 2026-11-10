@@ -47,6 +47,9 @@ HOSTILE_REQUESTS = [
     ("ask-question-int", "POST", "/ask", {"json": {"question": 12345}}),
     ("ask-question-null", "POST", "/ask", {"json": {"question": None}}),
     ("ask-top-k-string", "POST", "/ask", {"json": {"question": "valid question", "top_k": "five"}}),
+    ("ask-top-k-bool", "POST", "/ask", {"json": {"question": "valid question", "top_k": True}}),
+    ("ask-conversation-id-bool", "POST", "/ask", {"json": {"question": "valid question", "conversation_id": True}}),
+    ("agent-max-steps-bool", "POST", "/agent/chat", {"json": {"prompt": "valid prompt", "max_steps": True}}),
     ("ticket-priority-int", "POST", "/tickets", {"json": {**VALID_TICKET, "priority": 1}}),
     ("patch-status-int", "PATCH", "/tickets/1", {"json": {"status": 5}}),
     # --- whitespace-only text (min_length used to count the spaces) ---
@@ -133,6 +136,14 @@ def test_nul_byte_is_a_422_naming_the_field(client, auth_headers):
     loc, msg = _first_error(client.post("/tickets", headers=auth_headers, json={**VALID_TICKET, "description": "bad\u0000x description"}))
     assert loc == "body.description"
     assert "NUL" in msg
+
+
+def test_a_boolean_is_rejected_for_an_integer_field_not_silently_coerced(client, auth_headers):
+    """Bug #11 (external bug report, Low, D-064): Python's bool is an int subtype, so top_k=True used to
+    silently become top_k=1 instead of being rejected — a client bug sending booleans was invisible."""
+    loc, _ = _first_error(client.post("/ask", headers=auth_headers, json={"question": "valid question", "top_k": True}))
+    assert loc == "body.top_k"
+    assert client.post("/ask", headers=auth_headers, json={"question": "valid question", "top_k": 5}).status_code == 200
 
 
 def test_limit_bounds_are_enforced_on_both_list_routes(client, auth_headers):

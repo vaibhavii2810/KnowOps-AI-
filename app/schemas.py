@@ -144,6 +144,7 @@ class AskRequest(BaseModel):
         default=None,
         ge=1,
         le=MAX_DB_ID,
+        strict=True,
         description="Optional conversation ID for multi-turn memory. "
                     "Pass None (or omit) for a fresh single-turn query.",
     )
@@ -151,8 +152,10 @@ class AskRequest(BaseModel):
         default=5,
         ge=1,
         le=20,
+        strict=True,
         description="Number of knowledge-base chunks to retrieve as context (1–20).",
     )
+
 
 
 class ChunkResult(BaseModel):
@@ -302,6 +305,7 @@ class AgentChatRequest(BaseModel):
         default=5,
         ge=1,
         le=10,
+        strict=True,
         description="Maximum ReAct reasoning steps before synthesizing a final resolution.",
     )
 

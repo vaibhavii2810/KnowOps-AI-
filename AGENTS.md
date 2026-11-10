@@ -261,6 +261,15 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   text, NUL bytes, unknown priority/status and out-of-range `limit` are now clear 422s (D-033). Contract changes:
   invalid `PATCH` status is 422 (was 400); invalid priority on create is 422 (was silently P2); unknown list filters
   are 422. 57 tests in `tests/test_input_validation.py` (31 fail against the old code); 137/137 pass.
+- **10.2 addendum (2026-11-10, D-064):** an external bug report (bug #11, Low) found that `top_k: true` and
+  `conversation_id: true` on `/ask`, and `max_steps: true` on `/agent/chat`, were silently coerced to `1` —
+  verified directly (`AskRequest(top_k=True)` → `top_k=1`, no error) before fixing. Python's `bool` is an
+  `int` subtype, which is why Pydantic's default validation let it through. Fixed with `strict=True` on
+  each of those three `Field(...)`; a real integer is unaffected. 3 new rows in `HOSTILE_REQUESTS` (all 3
+  fields) plus one precise test naming `body.top_k` and confirming a real integer still returns 200. 3
+  mutation checks (each field's `strict=True` removed independently) each fail only that field's own tests,
+  proving the three guards are independent, not one shared check. 605 passed offline, 122 live deselected;
+  `pytest -m live tests/test_input_validation.py`: 61/61 pass.
 - 10.3 Done. Measured first: of 5 attack cases against live Gemini, **E (a poisoned `lookup_runbook` result) hijacked
   the agent into calling `execute_recovery_action` 1 time in 3** (intermittent; the other cases held; some runs were
   inconclusive because of Gemini 429s). New `app/guardrails.py` (D-034): untrusted text is fenced as `<untrusted_data>`
@@ -693,6 +702,7 @@ Append one line per finished phase (newest last).
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-061): client_ip() now trusts X-Forwarded-For / x-real-ip only when settings.vercel is set — off Vercel these headers were trusted unconditionally, letting an attacker rotate them to defeat the per-IP login limit entirely |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-062): CORS allow_credentials switched to False — paired with allow_origins=["*"], it had made Starlette echo back any requesting origin with credentials allowed; verified live before fixing, then closed (auth is a Bearer token, never a cookie, so nothing was actually protected) |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-063): the app now refuses to start on Vercel if JWT_SECRET or APP_PASSWORD is still at its insecure default — exactly the condition D-007 named as its own revisit trigger; proven with a real subprocess cold-start test, not just the extracted check function |
+| 2026-11-10 | — | Vaishnavi (with Claude) | Checked bug #10 (stale local GEMINI_CHAT_MODEL) against the real local .env — already correct, nothing to fix; live Gemini call confirmed working. Post-launch fix (D-064): top_k / conversation_id / max_steps now use strict=True so a JSON boolean is rejected (422) instead of silently coercing to 1/0 |
 
 ## Deployment
 
@@ -786,12 +796,14 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   the latest 8, D-058), bug #5 (Medium — deleted runbooks never removed from the DB, D-059), bug #6
   (Medium — short sections silently dropped from the index, D-060), bug #7 (Medium — login-limit
   header spoofing off Vercel, D-061), bug #8 (Medium — CORS wildcard origin echoed back with
-  credentials, D-062) and bug #9 (Medium — silent insecure defaults, D-063) are fixed, all
-  2026-11-10, each independently verified against the real code/data before fixing, not taken on the
-  PDF's word alone. The other 17 (including #21, High — stored-XSS in the console via
-  `formatMarkdown`, and #12, Medium — the related `closed`-tickets gap in the same stats function
-  D-057 touched, left out on purpose) are **not yet fixed or verified against this codebase**. Worth
-  pulling the PDF's test file and results doc into the repo so the rest aren't only tracked in a PDF.
+  credentials, D-062), bug #9 (Medium — silent insecure defaults, D-063) and bug #11 (Low — a JSON
+  boolean silently coerced to an integer, D-064) are fixed, each independently verified against the
+  real code/data before fixing, not taken on the PDF's word alone. Bug #10 (Low — a stale local
+  `GEMINI_CHAT_MODEL`) was checked and found already correct — nothing to fix, not counted as a fix.
+  The other 16 (including #21, High — stored-XSS in the console via `formatMarkdown`, and #12,
+  Medium — the related `closed`-tickets gap in the same stats function D-057 touched, left out on
+  purpose) are **not yet fixed or verified against this codebase**. Worth pulling the PDF's test file
+  and results doc into the repo so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
