@@ -255,7 +255,8 @@ reindex_knowledge_base(force, verbose)
                  → split_by_headings (#, ##, ###; `#` lines inside ``` code fences are ignored — shell comments)
                  → pack_paragraphs → split_units → split_text_with_overlap (only for single lines > 500 chars,
                    50 overlap)
-                 → drop pieces shorter than 80 chars
+                 → a piece shorter than 80 chars is merged into a neighboring piece in the same heading,
+                   never dropped (D-060, was dropped outright — a short but real section could vanish)
             → for each chunk: llm.embed_document → embed_text("RETRIEVAL_DOCUMENT") → [Gemini]
                               → insert_chunk → sleep 0.5 s (free-tier rate limit)
             → return {..., "unchanged": False}

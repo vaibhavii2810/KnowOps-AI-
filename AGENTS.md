@@ -64,6 +64,25 @@ install cleanly; local `.env` has every variable in `.env.example`.
 **Phase 3 — KB content + RAG ingestion** ✅
 5 DevOps/SRE runbooks in `data/docs/`; paragraph-packing chunker (~500 chars); `scripts/ingest.py`
 ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, was 78); re-running doesn't duplicate rows (`tests/test_ingest.py`).
+- **Addendum (2026-11-10, D-060):** an external bug report (bug #6, Medium) found that `make_chunks()`
+  silently *dropped* any packed piece under `MIN_CHUNK_CHARS` (80) — a short-but-real section (a one-line
+  contact, a single command) that was the only content under its heading could vanish from the index
+  entirely, with no way to ever retrieve it. Fixed: a short piece is merged into a neighboring piece within
+  the same heading instead of discarded; if there's nothing to merge into, it's kept as its own (short)
+  chunk rather than lost. Checked against the real knowledge base: none of the 5 current runbooks actually
+  have a section under 80 chars (shortest measured: 92), so this changes no existing retrieval behavior and
+  needs no re-ingestion — chunk count stays at 80. 3 new tests in `tests/test_ingest.py`: a short solo
+  section survives, a short trailing piece joins its neighbor rather than staying a separate tiny chunk, a
+  document that's nothing but short sections keeps every one. **A test-writing mistake found and fixed on
+  the way:** the first version of the "merges into a neighbor" test used paragraph lengths small enough
+  that `pack_paragraphs` itself already combined them before `make_chunks`' new merge step ever ran — the
+  test passed but never exercised the code it claimed to (caught by a mutation check that should have
+  failed and didn't); resized the paragraph so packing is forced to produce two separate pieces first,
+  after which the same mutation check correctly failed. 3 mutation checks (reverted to drop-short-pieces,
+  merge condition disabled) each fail the right tests; `tests/test_seed_docs_chunk_within_limit`'s ceiling
+  widened from a hard `CHUNK_SIZE` to `CHUNK_SIZE + MIN_CHUNK_CHARS` to allow the one documented kind of
+  overage this fix can cause (measured on the real docs: one chunk now 546 chars). 587 passed offline, 117
+  live deselected.
 
 **Phase 4 — FastAPI skeleton + Vercel deploy** ✅
 - 4.1 `app/main.py` with FastAPI app and `GET /health` (reports DB + KB counts)
@@ -635,6 +654,7 @@ Append one line per finished phase (newest last).
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-057): active_p1_incidents switched from a `status != 'resolved'` blocklist to an explicit `status IN ('open', 'in_progress')` allow-list — a closed P1 ticket was overstating the active-incident count; MemoryDB's matching test double updated in lockstep |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-058): /ask history now sends the latest 8 messages, not the first 8 — extracted into _recent_history() so a live test could prove the SQL itself; mutation testing found the offline MemoryDB fake could not catch an ORDER BY reversion on its own (D-040) |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-059): reindex_knowledge_base() now removes documents (and their chunks, via cascade) whose source file no longer exists in data/docs/ — a retired runbook used to keep being retrieved and cited forever |
+| 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-060): make_chunks() merges a chunk under MIN_CHUNK_CHARS into a neighbor instead of dropping it — a short-but-real section (one-line contact/command) used to vanish from the index entirely; no change to the real knowledge base's 80 chunks |
 
 ## Deployment
 
@@ -725,12 +745,13 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   pass happened somewhere outside this repo's history. Bug #1 (High — `/cron/reindex` open when `CRON_SECRET` is
   unset, D-055), bug #2 (High — the 0.55 retrieval threshold, D-056, which also fixed #23), bug #3 (Medium —
   closed P1 tickets counted as active, D-057), bug #4 (Medium — history sent the first 8 messages, not
-  the latest 8, D-058) and bug #5 (Medium — deleted runbooks never removed from the DB, D-059) are fixed,
-  all 2026-11-10, each independently verified against the real code/data before fixing, not taken on the
-  PDF's word alone. The other 21 (including #21, High — stored-XSS in the console via `formatMarkdown`,
-  and #12, Medium — the related `closed`-tickets gap in the same stats function D-057 touched, left out
-  on purpose) are **not yet fixed or verified against this codebase**. Worth pulling the PDF's test file
-  and results doc into the repo so the rest aren't only tracked in a PDF.
+  the latest 8, D-058), bug #5 (Medium — deleted runbooks never removed from the DB, D-059) and bug #6
+  (Medium — short sections silently dropped from the index, D-060) are fixed, all 2026-11-10, each
+  independently verified against the real code/data before fixing, not taken on the PDF's word alone.
+  The other 20 (including #21, High — stored-XSS in the console via `formatMarkdown`, and #12, Medium —
+  the related `closed`-tickets gap in the same stats function D-057 touched, left out on purpose) are
+  **not yet fixed or verified against this codebase**. Worth pulling the PDF's test file and results doc
+  into the repo so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any

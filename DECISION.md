@@ -110,6 +110,8 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Alternatives considered:** Fixed-size windows (cut sentences in half); larger chunks (less precise retrieval).
 - **Tradeoff accepted:** More chunks means more embedding calls (80 so far) and less context per chunk.
 - **Revisit if:** Answers miss context that spans sections.
+- **Superseded by D-060 for "drop pieces under 80 chars" (2026-11-10)** — that half silently lost short-but-real
+  sections entirely; everything else here (headings, 500-char packing, the 50-char hard-split overlap) is unchanged.
 
 ### D-011 · Idempotent ingestion keyed on the file path
 - **Date · by · source:** 2026-10-15 · Niranjan · Build guide
@@ -1256,3 +1258,30 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   gone, and nothing should keep citing it.
 - **Revisit if:** the project wants to preserve a history of retired runbooks instead of deleting them
   outright — that's a soft-delete feature, a bigger change than this bug asked for.
+
+### D-060 · A chunk under `MIN_CHUNK_CHARS` is merged into a neighbor, never dropped
+- **Date · by · source:** 2026-11-10 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #6, Medium)
+- **Decision:** `make_chunks()` still packs each heading's paragraphs into ~`CHUNK_SIZE` pieces (D-010,
+  unchanged), but a piece under `MIN_CHUNK_CHARS` (80) is now merged into an adjacent piece within the
+  same heading — appended to the previous piece if one exists in that heading, otherwise left as the
+  section's only (short) chunk — rather than silently discarded. Nothing is ever dropped except content
+  that was already empty before reaching this step (which `pack_paragraphs` never produces).
+- **Why:** D-010's original "drop pieces under 80 chars" meant a whole short-but-real section — a one-line
+  emergency contact, a single command — could vanish from the knowledge base entirely if it happened to be
+  the only content under its heading, with no way to ever retrieve it. Dropping was meant to filter noise
+  (a stray near-empty fragment), not to delete real content that just happened to be brief.
+- **Checked against the real knowledge base:** none of the 5 current runbooks actually have a section under
+  80 chars today (shortest chunk measured: 92 chars) — the fix changes no existing retrieval behavior and
+  needs no re-ingestion; it only protects a section that's short in the future.
+- **Alternatives considered:** lower or remove `MIN_CHUNK_CHARS` instead of merging (would let truly
+  near-empty fragments — a lone heading with no real body — through as noise, which the threshold existed
+  to prevent); always merge forward into the *next* piece instead of the previous (arbitrary either way;
+  merging backward when a previous piece exists in the same heading reads more naturally as "the short
+  follow-up belongs with what came before it").
+- **Tradeoff accepted:** a merge can push a chunk past `CHUNK_SIZE` by up to roughly `MIN_CHUNK_CHARS` worth
+  (measured: one real runbook chunk now 546 chars against a 500-char target) — `tests/test_ingest.py`'s
+  size-ceiling test now allows `CHUNK_SIZE + MIN_CHUNK_CHARS`, not a hard 500. Never losing content is worth
+  an occasional chunk running a bit long; D-010's reason for `CHUNK_SIZE` (readable citations) still holds
+  at ~550 chars.
+- **Revisit if:** the merge-based overage ever causes genuinely unreadable citations, or `MIN_CHUNK_CHARS`
+  itself needs to change.

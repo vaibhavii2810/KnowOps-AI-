@@ -194,6 +194,9 @@ def make_chunks(text: str) -> list[tuple[str, str]]:
       1. Split on heading boundaries        →  coarse semantic sections
       2. Pack each section's paragraphs     →  ~CHUNK_SIZE pieces, never mid-paragraph
          unless a single line is itself too long
+      3. A piece under MIN_CHUNK_CHARS is merged into a neighboring piece within the same
+         heading, never dropped (D-060) — a short but real section (a one-line command, a
+         contact) must not vanish from the index just because it alone is brief.
 
     Returns:
         List of (heading, chunk_text) tuples ready for embedding.
@@ -201,10 +204,17 @@ def make_chunks(text: str) -> list[tuple[str, str]]:
     chunks: list[tuple[str, str]] = []
 
     for heading, body in split_by_headings(text):
-        for piece in pack_paragraphs(body):
-            piece = piece.strip()
-            if len(piece) >= MIN_CHUNK_CHARS:
-                chunks.append((heading, piece))
+        pieces = [p.strip() for p in pack_paragraphs(body)]
+
+        merged: list[str] = []
+        for piece in pieces:
+            if merged and (len(piece) < MIN_CHUNK_CHARS or len(merged[-1]) < MIN_CHUNK_CHARS):
+                merged[-1] = f"{merged[-1]}\n\n{piece}"
+            else:
+                merged.append(piece)
+
+        for piece in merged:
+            chunks.append((heading, piece))
 
     return chunks
 

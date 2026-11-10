@@ -1,4 +1,6 @@
-from scripts.ingest import CHUNK_SIZE, DOCS_DIR, compute_content_hash, ingest_file, make_chunks, reindex_knowledge_base
+from scripts.ingest import (
+    CHUNK_SIZE, DOCS_DIR, MIN_CHUNK_CHARS, compute_content_hash, ingest_file, make_chunks, reindex_knowledge_base,
+)
 from app.db import get_conn
 
 
@@ -22,15 +24,46 @@ def test_shell_comments_in_code_fences_are_not_headings():
     assert "pg_ctl promote" in chunks[0][1]
 
 
+def test_short_section_is_not_lost_from_the_index():
+    """Bug #6 (external bug report, Medium, D-060): a section under MIN_CHUNK_CHARS (80) used to be
+    silently dropped — a one-line emergency contact or command could never be retrieved at all."""
+    doc = "# Runbook\n\n## Emergency Contacts\n\nCall +1-555-0100.\n\n## Normal Section\n\n" + "word " * 60
+    chunks = make_chunks(doc)
+    assert any(h == "Emergency Contacts" and "+1-555-0100" in c for h, c in chunks)
+
+
+def test_a_short_section_is_merged_into_a_neighbor_not_left_as_a_tiny_fragment():
+    """The short piece survives by joining a neighboring piece within the same heading, so the index
+    never ends up with a standalone sub-80-char chunk either. The paragraph is sized (~494 chars) so
+    pack_paragraphs itself is forced to put "Short tail." in its own piece first — otherwise packing
+    would combine them before make_chunks' merge step ever runs, and this test wouldn't exercise it."""
+    para = "word " * 99  # ~494 chars: + the 11-char tail would be 507, over CHUNK_SIZE, so packed separately
+    doc = f"# Title\n\n## Section\n\n{para}\n\nShort tail.\n"
+    chunks = make_chunks(doc)
+    assert len(chunks) == 1  # the short tail joined the paragraph, not a second tiny chunk
+    assert "Short tail." in chunks[0][1]
+
+
+def test_a_document_that_is_only_short_sections_keeps_every_one():
+    """Nothing to merge into at all — each section stays its own (short) chunk rather than vanishing."""
+    doc = "# Contacts\n\n## On-call\n\nCall +1-555-0100.\n\n## Escalation\n\nPage the SRE lead.\n"
+    chunks = make_chunks(doc)
+    assert [h for h, _ in chunks] == ["On-call", "Escalation"]
+    assert "+1-555-0100" in chunks[0][1] and "SRE lead" in chunks[1][1]
+
+
 def test_seed_docs_keep_failover_commands():
     text = (DOCS_DIR / "disaster_recovery_runbook.md").read_text(encoding="utf-8")
     assert any("pg_ctl promote" in c for _, c in make_chunks(text))
 
 
 def test_seed_docs_chunk_within_limit():
+    """D-060: a chunk is ~CHUNK_SIZE, not a hard ceiling — merging a short piece into a near-full
+    neighbor (so a short section is never dropped outright) can push a little past it. The ceiling
+    here allows exactly that one merge's worth of overage, not unbounded growth."""
     for path in DOCS_DIR.glob("*.md"):
         for _, content in make_chunks(path.read_text(encoding="utf-8")):
-            assert len(content) <= CHUNK_SIZE, (path.name, len(content))
+            assert len(content) <= CHUNK_SIZE + MIN_CHUNK_CHARS, (path.name, len(content))
 
 
 def test_compute_content_hash_is_deterministic_and_content_sensitive():
