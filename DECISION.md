@@ -594,6 +594,8 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   a safe password — it only makes guessing slow. The headers are trusted because Vercel sets them; run behind another
   proxy (or locally) and a client can send them itself, so the limit is only as strong as the proxy in front. A shared
   office/NAT address shares one allowance. A legitimate user fumbling the password 5 times in a minute waits up to 60 s.
+- **Partly superseded by D-061 (2026-11-10):** off Vercel, these headers are no longer trusted at all (not
+  merely a noted risk) — the real socket address is used instead. Everything else here is unchanged.
 - **Revisit if:** The app is hosted somewhere that does not overwrite these headers; a second operator is added; or logs
   (Phase 12) show distributed guessing.
 
@@ -1285,3 +1287,25 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   at ~550 chars.
 - **Revisit if:** the merge-based overage ever causes genuinely unreadable citations, or `MIN_CHUNK_CHARS`
   itself needs to change.
+
+### D-061 · `client_ip()` trusts forwarded headers only on Vercel, not everywhere
+- **Date · by · source:** 2026-11-10 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #7, Medium)
+- **Decision:** `client_ip()` (`app/ratelimit.py`) only reads `x-vercel-forwarded-for` / `x-forwarded-for` /
+  `x-real-ip` when `settings.vercel` is set (the same signal introduced in D-055 for `/cron/reindex`).
+  Anywhere else, the real TCP peer address (`request.client.host`) is used, and these headers are ignored
+  outright — not merely treated as lower priority.
+- **Why:** D-037 already knew the headers are only trustworthy on Vercel and said so in its own Tradeoff
+  line, but the code never actually checked — it trusted them unconditionally everywhere. Off Vercel (a
+  local run, or any other host), a caller can send `X-Forwarded-For` itself and rotate it on every request,
+  which defeats the per-IP login limit entirely: each "new IP" gets its own fresh allowance to guess the
+  password with.
+- **Alternatives considered:** keep trusting the headers everywhere and document the risk more prominently
+  (already tried — D-037's own text — and still exploitable); only trust them for a configured allow-list of
+  proxy IPs (more correct for a general deployment, but there's exactly one real proxy here, Vercel, which
+  already has its own unambiguous signal); drop these headers entirely and always use the socket address
+  (would break the real reason they exist — Vercel's own edge network means the socket peer the app sees
+  is Vercel's infrastructure, not the visitor, so the limiter would key on nothing useful in production).
+- **Tradeoff accepted:** none beyond what D-037 already accepted (no defense against a distributed attack
+  from many real IPs) — this closes a gap, it doesn't open a new one. A deployment behind some other proxy
+  that also overwrites these headers trustworthily would need its own signal; none exists today.
+- **Revisit if:** the project deploys behind a proxy other than Vercel that also needs trusted forwarding.

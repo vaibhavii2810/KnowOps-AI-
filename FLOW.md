@@ -85,7 +85,9 @@ metrics(hours=24 [1–168]) → metrics.read_metrics(hours)
 login(LoginRequest, Depends(ratelimit.login_rate_limited))
   → [DB] per-client-IP counters BEFORE the credentials are looked at: 5 attempts/min and 30/hour, every attempt
     counted, right or wrong → 429 + Retry-After (a blocked caller learns nothing about whether a guess was right);
-    IP = x-vercel-forwarded-for / x-forwarded-for, which Vercel overwrites so clients cannot spoof them (Phase 10.5, D-037)
+    IP = x-vercel-forwarded-for / x-forwarded-for, trusted only when settings.vercel is set — Vercel overwrites
+    them there so clients cannot spoof them; off Vercel the real socket address is used instead (Phase 10.5,
+    D-037; D-061 closed the gap where these headers were trusted everywhere)
   → auth.verify_operator_credentials(username, password)   compare_digest (as UTF-8 bytes — non-ASCII input is a 401, not a crash) vs settings.app_username / app_password
   → auth.create_access_token({"sub", "role"}, 60 min)      jwt.encode HS256 + exp / iat / iss="knowops-ai"
   → TokenResponse             (401 if credentials are wrong)

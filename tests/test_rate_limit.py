@@ -26,6 +26,16 @@ from app.ratelimit import check_rate_limit, client_ip
 pytestmark = pytest.mark.usefixtures("db_backend")
 
 
+@pytest.fixture(autouse=True)
+def _trust_forwarded_headers_by_default(monkeypatch):
+    """D-061: client_ip() only trusts X-Forwarded-For / x-real-ip / the Vercel header when settings.vercel
+    is set (closing a real spoofing gap off-Vercel, D-061). The login tests below simulate distinct client
+    IPs via that header on purpose, so by default they look like they're running on Vercel; the one test
+    for the off-Vercel case overrides this back to unset for itself. Harmless for the per-user tests above,
+    which authenticate by JWT and never call client_ip()."""
+    monkeypatch.setattr(settings, "vercel", "1")
+
+
 @pytest.fixture
 def user():
     key = f"rltest-{uuid.uuid4().hex[:10]}"
@@ -272,11 +282,25 @@ def _login(client, ip, password="not-the-password", username="admin"):
 
 
 def test_client_ip_prefers_the_vercel_header_then_the_first_forwarded_entry_then_the_socket():
+    """On Vercel (settings.vercel set, D-061) — the only place these headers can be trusted."""
     assert client_ip(_request({"x-vercel-forwarded-for": "1.1.1.1", "x-forwarded-for": "2.2.2.2"})) == "1.1.1.1"
     assert client_ip(_request({"x-forwarded-for": "3.3.3.3, 4.4.4.4"})) == "3.3.3.3"
     assert client_ip(_request({"x-real-ip": "5.5.5.5"})) == "5.5.5.5"
     assert client_ip(_request({})) == "9.9.9.9"
     assert client_ip(_request({}, client=None)) == "unknown"
+
+
+def test_client_ip_ignores_forwarded_headers_off_vercel(monkeypatch):
+    """
+    Bug #7 (external bug report, Medium, D-061): off Vercel (settings.vercel unset — a local run, another
+    host), these headers used to be trusted unconditionally, so an attacker could send any value and
+    rotate it to defeat the per-IP login limit entirely. The real socket address is used instead.
+    """
+    monkeypatch.setattr(settings, "vercel", "")
+    assert client_ip(_request({"x-forwarded-for": "6.6.6.6"})) == "9.9.9.9"       # the socket, not the header
+    assert client_ip(_request({"x-vercel-forwarded-for": "7.7.7.7"})) == "9.9.9.9"
+    assert client_ip(_request({"x-real-ip": "8.8.8.8"})) == "9.9.9.9"
+    assert client_ip(_request({"x-forwarded-for": "6.6.6.6"}, client=None)) == "unknown"
 
 
 def test_login_attempts_are_limited_per_ip(client, user, monkeypatch):

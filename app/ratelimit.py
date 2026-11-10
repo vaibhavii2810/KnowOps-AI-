@@ -131,15 +131,19 @@ def check_rate_limit(
 
 def client_ip(request: Request) -> str:
     """
-    The caller's IP. On Vercel `x-forwarded-for` / `x-vercel-forwarded-for` / `x-real-ip` are overwritten by the
-    platform, which does not forward client-supplied values, so they cannot be spoofed there. Anywhere else
-    (a local run, another host) a client can send these headers itself, so a per-IP limit is only as strong as
-    the proxy in front of the app.
+    The caller's IP. On Vercel (`settings.vercel` set — the platform sets this automatically on every
+    Preview/Production build, D-055) `x-forwarded-for` / `x-vercel-forwarded-for` / `x-real-ip` are
+    overwritten by the platform itself, which does not forward client-supplied values, so they cannot be
+    spoofed there. Off Vercel (a local run, another host) these headers are not trusted at all — a client
+    could send any value itself and rotate it to defeat the per-IP limit — so the real TCP peer address is
+    used instead (D-061). A deployment behind some other trusted proxy would need its own signal here; none
+    exists today.
     """
-    for header in ("x-vercel-forwarded-for", "x-forwarded-for", "x-real-ip"):
-        value = request.headers.get(header)
-        if value:
-            return value.split(",")[0].strip()[:64]
+    if settings.vercel:
+        for header in ("x-vercel-forwarded-for", "x-forwarded-for", "x-real-ip"):
+            value = request.headers.get(header)
+            if value:
+                return value.split(",")[0].strip()[:64]
     return request.client.host if request.client else "unknown"
 
 

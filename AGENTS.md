@@ -287,6 +287,17 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   (≈0.8s is `register_vector`), so the limiter keeps one plain connection open — ~56 ms per check, with one automatic
   reconnect when it goes stale. Self-creates its table (no manual prod migration). 16 tests in `tests/test_rate_limit.py`
   (frozen clock; removing the route wiring or introducing an off-by-one fails them); 199/199 pass.
+- **10.5 / D-037 addendum (2026-11-10, D-061):** an external bug report (bug #7, Medium) found that the login
+  limiter's `client_ip()` trusted `X-Forwarded-For` / `x-real-ip` / the Vercel header unconditionally — D-037
+  had already named this as a known risk off Vercel, but the code never actually checked. Off Vercel (local,
+  another host), a caller could send any value and rotate it per request, giving each "new IP" its own fresh
+  login allowance and defeating the limit entirely. Fixed: these headers are only read when `settings.vercel`
+  is set (the same signal from D-055); everywhere else the real socket address is used, full stop. All the
+  existing per-IP login tests in `tests/test_rate_limit.py` simulate distinct client IPs via that header on
+  purpose, so a new file-wide autouse fixture sets `settings.vercel = "1"` for them by default; the one new
+  test for the actual bug (headers ignored off-Vercel) overrides it back to unset for itself. 1 mutation
+  check (reverted to always-trust) fails it. 588 passed offline (118 live deselected, +1 new live-variant
+  test via the file's existing `db_backend`); `pytest -m live tests/test_rate_limit.py`: 26/26 pass.
 - **Phase 10 done-when check:** the 45 permanent hostile requests (and the 76-request fuzz before them) return no 5xx,
   with the limiter on; the 5 injection cases are blocked by the guardrails even for a fully hijacked model
   (D-034). Residual risk is recorded there: the detector is a heuristic.
@@ -655,6 +666,7 @@ Append one line per finished phase (newest last).
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-058): /ask history now sends the latest 8 messages, not the first 8 — extracted into _recent_history() so a live test could prove the SQL itself; mutation testing found the offline MemoryDB fake could not catch an ORDER BY reversion on its own (D-040) |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-059): reindex_knowledge_base() now removes documents (and their chunks, via cascade) whose source file no longer exists in data/docs/ — a retired runbook used to keep being retrieved and cited forever |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-060): make_chunks() merges a chunk under MIN_CHUNK_CHARS into a neighbor instead of dropping it — a short-but-real section (one-line contact/command) used to vanish from the index entirely; no change to the real knowledge base's 80 chunks |
+| 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-061): client_ip() now trusts X-Forwarded-For / x-real-ip only when settings.vercel is set — off Vercel these headers were trusted unconditionally, letting an attacker rotate them to defeat the per-IP login limit entirely |
 
 ## Deployment
 
@@ -745,13 +757,14 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   pass happened somewhere outside this repo's history. Bug #1 (High — `/cron/reindex` open when `CRON_SECRET` is
   unset, D-055), bug #2 (High — the 0.55 retrieval threshold, D-056, which also fixed #23), bug #3 (Medium —
   closed P1 tickets counted as active, D-057), bug #4 (Medium — history sent the first 8 messages, not
-  the latest 8, D-058), bug #5 (Medium — deleted runbooks never removed from the DB, D-059) and bug #6
-  (Medium — short sections silently dropped from the index, D-060) are fixed, all 2026-11-10, each
-  independently verified against the real code/data before fixing, not taken on the PDF's word alone.
-  The other 20 (including #21, High — stored-XSS in the console via `formatMarkdown`, and #12, Medium —
-  the related `closed`-tickets gap in the same stats function D-057 touched, left out on purpose) are
-  **not yet fixed or verified against this codebase**. Worth pulling the PDF's test file and results doc
-  into the repo so the rest aren't only tracked in a PDF.
+  the latest 8, D-058), bug #5 (Medium — deleted runbooks never removed from the DB, D-059), bug #6
+  (Medium — short sections silently dropped from the index, D-060) and bug #7 (Medium — login-limit
+  header spoofing off Vercel, D-061) are fixed, all 2026-11-10, each independently verified against the
+  real code/data before fixing, not taken on the PDF's word alone. The other 19 (including #21, High —
+  stored-XSS in the console via `formatMarkdown`, and #12, Medium — the related `closed`-tickets gap in
+  the same stats function D-057 touched, left out on purpose) are **not yet fixed or verified against
+  this codebase**. Worth pulling the PDF's test file and results doc into the repo so the rest aren't
+  only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
@@ -764,7 +777,9 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   appended; fix by copying with `... | cut -d= -f2- | tr -d '\n' | pbcopy`.) Still open: `APP_USERNAME` is `admin`
   (a free guess; optional to change). If an env var is ever missing, `app/config.py` silently falls back to
   `admin`/`admin` and `jwt_secret="dev-secret"` (D-007). The per-IP login limit (5/min, 30/hour, D-037) does not stop a
-  distributed attack from many addresses, and trusts the client-IP headers only because Vercel sets them.
+  distributed attack from many real addresses. It used to also trust the client-IP headers unconditionally even off
+  Vercel (found as bug #7 in the external report, fixed as D-061, 2026-11-10) — now it only trusts them when
+  `settings.vercel` is set, and uses the real socket address everywhere else.
 - **`get_conn()` latency — worse on Production than measured locally:** each call costs ~1.2s against the remote Neon DB
   locally, ~0.8s of it `register_vector`, which only `scripts/ingest.py` needs (found while measuring 10.5). `/ask` pays
   it 3×. `/metrics` on Production (2026-11-06) shows `/health` averaging 4.5 s (max 4.6 s), `/tickets/{id}` 4.3 s and
