@@ -1184,3 +1184,23 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   condition still applies, now against this new value.
 - **Revisit if:** the Phase 13 eval harness (`python -m evals`) shows a false refusal against the new threshold, or
   the knowledge base/embedding model changes meaningfully.
+
+### D-057 · `active_p1_incidents` uses an explicit active-status allow-list, not a `resolved` blocklist
+- **Date · by · source:** 2026-11-10 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #3, Medium)
+- **Decision:** `get_crm_stats()`'s P1-incident count changes from `AND status != 'resolved'` to
+  `AND status IN ('open', 'in_progress')` — the two statuses in `VALID_STATUSES` that actually mean
+  "still active." `tests/conftest.py`'s `MemoryDB` fixture, which mirrors this exact SQL text to answer
+  the query offline, is updated to match (both the registered fragment and its Python predicate) — the
+  app code and its offline test double would otherwise silently drift apart (D-040's known limitation).
+- **Why:** `VALID_STATUSES` is `{"open", "in_progress", "resolved", "closed"}` (`app/crm.py`), four
+  statuses, but the old query only excluded one of them. A `closed` P1 ticket is not `resolved`, so it
+  was still counted as an "active P1 incident," overstating the dashboard stat for anyone relying on it
+  during an actual incident.
+- **Alternatives considered:** `AND status NOT IN ('resolved', 'closed')` (fixes today's bug, but is the
+  same blocklist shape — silently wrong again the next time a new terminal status is added, e.g. a future
+  `cancelled`); leave it and only fix it in the UI layer (the dashboard number itself would still be wrong
+  for any other consumer of `get_crm_stats()`, e.g. `/metrics`-style tooling or the agent's diagnostics).
+- **Tradeoff accepted:** none functionally — an allow-list of "active" statuses is strictly more correct
+  than a blocklist of one terminal status, for no added cost.
+- **Revisit if:** a new non-terminal status is ever added (e.g. `pending`, `escalated`) — it needs adding
+  to this allow-list explicitly, which is the point: silence here means "not active," not an oversight.

@@ -297,8 +297,9 @@ class MemoryDB:
         for status in ("open", "in_progress", "resolved"):
             on(f"SELECT COUNT(*) FROM tickets WHERE status = '{status}'",
                lambda p, status=status: [(sum(t[4] == status for t in self.tickets.values()),)])
-        on("SELECT COUNT(*) FROM tickets WHERE priority = 'P1' AND status != 'resolved'",
-           lambda p: [(sum(t[3] == "P1" and t[4] != "resolved" for t in self.tickets.values()),)])
+        on("SELECT COUNT(*) FROM tickets WHERE priority = 'P1' AND status IN ('open', 'in_progress')",
+           lambda p: [(sum(t[3] == "P1" and t[4] in ("open", "in_progress") for t in self.tickets.values()),)])
+
 
         # conversations and messages (app/main.py)
         on("INSERT INTO conversations DEFAULT VALUES", self._insert_conversation)

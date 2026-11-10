@@ -81,6 +81,19 @@ def test_crm_stats_direct():
     assert stats["total_tickets"] >= 1
 
 
+def test_closed_p1_ticket_is_not_counted_as_an_active_incident():
+    """Bug #3 (external bug report, Medium, D-057): active_p1_incidents used `status != 'resolved'`, so a
+    *closed* P1 ticket (a valid, distinct status per VALID_STATUSES) was still counted as an active incident,
+    overstating the dashboard stat. Fixed to an explicit allow-list of the truly-active statuses."""
+    ticket = create_ticket(subject="P1 outage", description="Full probe.", priority="P1")
+    before = get_crm_stats()["active_p1_incidents"]
+
+    update_ticket_status(ticket_id=ticket["id"], status="closed")
+
+    after = get_crm_stats()["active_p1_incidents"]
+    assert after == before - 1
+
+
 def test_api_create_ticket_endpoint(client, auth_headers):
     """POST /tickets should create a new ticket and return 200 with a valid token."""
     payload = {

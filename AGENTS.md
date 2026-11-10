@@ -149,6 +149,20 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   Phase 7.5 ("what is the status of ticket #137?" → `get_ticket`), so both halves of the done-when criterion
   are covered
 - 8.4 *(stretch, optional per the guide — not attempted)*: swap the mock CRM for HubSpot's free tier
+- **8.1 addendum (2026-11-10, D-057):** an external bug report (bug #3, Medium) found `get_crm_stats()`'s
+  `active_p1_incidents` used `AND status != 'resolved'` against `VALID_STATUSES = {open, in_progress,
+  resolved, closed}` — a `closed` P1 ticket was still counted as active. Fixed to an explicit allow-list
+  (`status IN ('open', 'in_progress')`). The offline `MemoryDB` test double in `tests/conftest.py` mirrors
+  this exact SQL fragment to answer it without a real database (D-040), so it had to be updated in lockstep
+  or the fix would look tested while the offline run still exercised the old logic — both the registered
+  fragment and its Python predicate were updated. New test in `tests/test_crm.py` (runs against both
+  `MemoryDB` and real Postgres via the file's `db_backend` fixture). 2 mutation checks (reverted the real
+  SQL, reverted only `MemoryDB`'s predicate while keeping the real fix) each fail it — the second one proves
+  the test wasn't just passing by fragment-matching coincidence. 582 passed offline (115 live deselected);
+  `pytest -m live tests/test_crm.py`: passes against real Postgres too.
+  **Related, not fixed here (kept out of scope on purpose):** bug #12 — `get_crm_stats()` never counts
+  `closed` tickets at all, so `total_tickets != open + in_progress + resolved`. Same function, same root
+  gap, but a different fix (adding a field to the returned dict, not changing a filter) — tracked separately.
 
 **Phase 9 — Automation (cron + n8n)** ✅
 - 9.1 `GET /cron/reindex` (was `POST`, counted rows only) now actually re-ingests new/changed `data/docs/`
@@ -588,6 +602,7 @@ Append one line per finished phase (newest last).
 | 2026-11-08 | 15 | Vaishnavi (with Claude) | 15.4: new Future work section in README — build-guide stretch items (HubSpot, multi-user auth, streaming, OAuth) plus every unfixed gap already recorded in Known issues, nothing new invented |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix from an external bug report (D-055): `/cron/reindex` now refuses with 503 when deployed with no `CRON_SECRET` configured, instead of silently allowing anyone to trigger it; local dev with no secret unchanged |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-056): `/ask`'s SIMILARITY_THRESHOLD raised 0.55 → 0.65, measured live against real off-topic scores (0.518–0.583) and the lowest true-positive golden-set score (0.699); also fixes bug #23 (refusals showing sources) |
+| 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-057): active_p1_incidents switched from a `status != 'resolved'` blocklist to an explicit `status IN ('open', 'in_progress')` allow-list — a closed P1 ticket was overstating the active-incident count; MemoryDB's matching test double updated in lockstep |
 
 ## Deployment
 
@@ -676,11 +691,13 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - **An external bug report (`KnowOps_AI_Bug_Report.pdf`, 2026-11-08, 27 findings) is not yet in this repo:** it
   references `tests/test_suspected_bugs.py` and `TEST_RESULTS.md`, neither of which exist here — that testing
   pass happened somewhere outside this repo's history. Bug #1 (High — `/cron/reindex` open when `CRON_SECRET` is
-  unset, D-055) and bug #2 (High — the 0.55 retrieval threshold, D-056, which also fixed #23) are fixed, both
-  2026-11-10, each independently re-measured against the real code/data before fixing, not taken on the PDF's
-  word alone. The other 24 (including #21, High — stored-XSS in the console via `formatMarkdown`) are **not yet
-  fixed or verified against this codebase**. Worth pulling the PDF's test file and results doc into the repo so
-  the rest aren't only tracked in a PDF.
+  unset, D-055), bug #2 (High — the 0.55 retrieval threshold, D-056, which also fixed #23) and bug #3 (Medium —
+  closed P1 tickets counted as active, D-057) are fixed, all 2026-11-10, each independently verified against
+  the real code/data before fixing, not taken on the PDF's word alone. The other 23 (including #21, High —
+  stored-XSS in the console via `formatMarkdown`, and #12, Medium — the related `closed`-tickets gap in the
+  same stats function D-057 touched, left out on purpose) are **not yet fixed or verified against this
+  codebase**. Worth pulling the PDF's test file and results doc into the repo so the rest aren't only tracked
+  in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
