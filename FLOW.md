@@ -101,7 +101,7 @@ Depends(auth.get_current_user_required)
 ### `POST /ask` — the main RAG path
 ```
 ask(AskRequest, Depends(ratelimit.rate_limited("ask")))   ← JWT required (Phase 5.4) + 10/min per user (Phase 10.5)
-  1. [DB] create a conversation, or load its history (first 8 messages, oldest first)
+  1. [DB] create a conversation, or load its history via main._recent_history() (latest 8 messages, oldest first — D-058, was the first 8)
   2. rag.retrieve_and_format(question, top_k)
        → rag.retrieve(query, top_k, threshold=0.65)  # D-056, 2026-11-10 — was 0.55
             → llm.embed_query → llm.embed_text(task_type="RETRIEVAL_QUERY")

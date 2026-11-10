@@ -372,6 +372,34 @@ def metrics(
 # POST /ask — RAG with Multi-turn Memory & Citations
 # ---------------------------------------------------------------------------
 
+HISTORY_LIMIT = 8  # most recent messages sent to the model as conversation context
+
+
+def _recent_history(conn, conversation_id: int, limit: int = HISTORY_LIMIT) -> list[dict]:
+    """
+    The last `limit` messages of a conversation, oldest first (D-058, 2026-11-10 — was the *first*
+    `limit` messages, ORDER BY id ASC LIMIT N, so a conversation past that length never saw recent
+    turns). Pulled out as its own function so it can be tested directly against real Postgres
+    (`tests/test_ask_integration.py`'s @pytest.mark.live test) without a full /ask round trip — the
+    offline MemoryDB fake matches this query by a text fragment, not by executing real SQL, so it
+    cannot by itself prove the ORDER BY/LIMIT shape is correct (D-040).
+    """
+    rows = conn.execute(
+        """
+        SELECT role, content FROM (
+            SELECT id, role, content
+            FROM messages
+            WHERE conversation_id = %s
+            ORDER BY id DESC
+            LIMIT %s
+        ) AS recent
+        ORDER BY id ASC
+        """,
+        (conversation_id, limit),
+    ).fetchall()
+    return [{"role": r[0], "content": r[1]} for r in rows]
+
+
 @app.post(
     "/ask",
     response_model=AskResponse,
@@ -400,17 +428,7 @@ def ask(
                 ).fetchone()
                 conv_id = row[0]
             else:
-                past_msgs = conn.execute(
-                    """
-                    SELECT role, content
-                    FROM messages
-                    WHERE conversation_id = %s
-                    ORDER BY id ASC
-                    LIMIT 8
-                    """,
-                    (conv_id,),
-                ).fetchall()
-                history = [{"role": r[0], "content": r[1]} for r in past_msgs]
+                history = _recent_history(conn, conv_id)
         else:
             row = conn.execute(
                 "INSERT INTO conversations DEFAULT VALUES RETURNING id"

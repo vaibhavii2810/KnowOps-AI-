@@ -101,6 +101,18 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
 - Bug found and fixed on the way: `scripts/ingest.py` `split_by_headings` treated `# comments` inside ``` fences
   as headings, dropping the runbook commands (so `/ask` refused the failover question). Now ignores fenced
   lines; KB re-ingested to 80 chunks; regression tests in `tests/test_ingest.py`.
+- **6.1 addendum #2 (2026-11-10, D-058):** an external bug report (bug #4, Medium) found the history query
+  (`ORDER BY id ASC LIMIT 8`) returned a conversation's *first* 8 messages forever, not its latest 8 — once
+  past that length, the model never saw recent turns. Fixed with a subquery (latest 8 by id, re-sorted
+  chronological) and pulled into its own function, `_recent_history()` in `app/main.py`, specifically so it
+  could be tested against real Postgres directly. **Mutation-testing found a real gap while fixing this:**
+  reverting the real SQL back to the old query did not fail any offline test — `MemoryDB` matches this query
+  by a text fragment and runs its own Python logic rather than executing real SQL (D-040's documented
+  limitation, caught in the act here). A new `@pytest.mark.live` test calling `_recent_history()` directly
+  with 10 seeded rows does fail on that same reversion, closing the gap. Offline test with >8 messages added
+  too (couldn't exist before — the old `backend` fixture only seeded 2). 583 passed offline (116 live
+  deselected, +1 new live test); mutation checks on both the real SQL and `MemoryDB`'s predicate each fail
+  the right test.
 - **6.1 addendum (2026-11-10, D-056):** an external bug report (bug #2, High) found that D-012's 0.55 `/ask`
   threshold let off-topic text through: live probes scored "what is 2+2", "Terraform state locking" and "AWS S3
   lifecycle policy" at 0.518–0.583 — above 0.55 — so they were retrieved and shown as cited sources. Re-measured
@@ -603,6 +615,7 @@ Append one line per finished phase (newest last).
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix from an external bug report (D-055): `/cron/reindex` now refuses with 503 when deployed with no `CRON_SECRET` configured, instead of silently allowing anyone to trigger it; local dev with no secret unchanged |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-056): `/ask`'s SIMILARITY_THRESHOLD raised 0.55 → 0.65, measured live against real off-topic scores (0.518–0.583) and the lowest true-positive golden-set score (0.699); also fixes bug #23 (refusals showing sources) |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-057): active_p1_incidents switched from a `status != 'resolved'` blocklist to an explicit `status IN ('open', 'in_progress')` allow-list — a closed P1 ticket was overstating the active-incident count; MemoryDB's matching test double updated in lockstep |
+| 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-058): /ask history now sends the latest 8 messages, not the first 8 — extracted into _recent_history() so a live test could prove the SQL itself; mutation testing found the offline MemoryDB fake could not catch an ORDER BY reversion on its own (D-040) |
 
 ## Deployment
 
@@ -691,13 +704,13 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - **An external bug report (`KnowOps_AI_Bug_Report.pdf`, 2026-11-08, 27 findings) is not yet in this repo:** it
   references `tests/test_suspected_bugs.py` and `TEST_RESULTS.md`, neither of which exist here — that testing
   pass happened somewhere outside this repo's history. Bug #1 (High — `/cron/reindex` open when `CRON_SECRET` is
-  unset, D-055), bug #2 (High — the 0.55 retrieval threshold, D-056, which also fixed #23) and bug #3 (Medium —
-  closed P1 tickets counted as active, D-057) are fixed, all 2026-11-10, each independently verified against
-  the real code/data before fixing, not taken on the PDF's word alone. The other 23 (including #21, High —
-  stored-XSS in the console via `formatMarkdown`, and #12, Medium — the related `closed`-tickets gap in the
-  same stats function D-057 touched, left out on purpose) are **not yet fixed or verified against this
-  codebase**. Worth pulling the PDF's test file and results doc into the repo so the rest aren't only tracked
-  in a PDF.
+  unset, D-055), bug #2 (High — the 0.55 retrieval threshold, D-056, which also fixed #23), bug #3 (Medium —
+  closed P1 tickets counted as active, D-057) and bug #4 (Medium — history sent the first 8 messages, not
+  the latest 8, D-058) are fixed, all 2026-11-10, each independently verified against the real code/data
+  before fixing, not taken on the PDF's word alone. The other 22 (including #21, High — stored-XSS in the
+  console via `formatMarkdown`, and #12, Medium — the related `closed`-tickets gap in the same stats
+  function D-057 touched, left out on purpose) are **not yet fixed or verified against this codebase**.
+  Worth pulling the PDF's test file and results doc into the repo so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
@@ -724,7 +737,6 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - **Phase 7.1 (partial, remainder of D-015):** `create_ticket`/`escalate_to_human` were added (D-025), but
   `run_system_diagnostics`/`execute_recovery_action` are still simulated for everything except the database
   diagnostic — no real infrastructure is inspected or changed.
-- **`/ask` history:** loads the *first* 8 messages of a conversation, not the latest 8.
 - **Request counting costs a Postgres write (~65 ms locally) per API request (Phase 12.4, D-046):** it runs after the
   response is produced; live client-side timings showed no measurable difference (see 12.4), but a caller may still wait
   for it on a serverless runtime. `/metrics` has no percentiles (only sums and a max are stored). `METRICS_ENABLED=false`

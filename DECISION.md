@@ -1204,3 +1204,30 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   than a blocklist of one terminal status, for no added cost.
 - **Revisit if:** a new non-terminal status is ever added (e.g. `pending`, `escalated`) — it needs adding
   to this allow-list explicitly, which is the point: silence here means "not active," not an oversight.
+
+### D-058 · `/ask` sends the latest 8 conversation messages, not the first 8
+- **Date · by · source:** 2026-11-10 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #4, Medium)
+- **Decision:** The history fetch (`ORDER BY id ASC LIMIT 8`) is replaced with a subquery that takes the
+  latest 8 messages by id and re-sorts them chronologically (`ORDER BY id DESC LIMIT %s` inside, `ORDER BY
+  id ASC` outside) before handing them to the model. Pulled out into its own function, `_recent_history()`
+  in `app/main.py`, so it can be tested directly against real Postgres without a full Gemini round trip.
+- **Why:** Once a conversation passed 8 messages, the old query permanently returned the conversation's
+  opening exchange and nothing since — a follow-up like "what about step 2?" lost all recent context
+  forever, not just after the window filled once. A fix that only raised the limit would have delayed the
+  same bug, not removed it; the direction was the actual defect.
+- **A real gap found while fixing this (not just the bug itself):** `tests/conftest.py`'s `MemoryDB` test
+  double matches this query by a text fragment and runs its own hardcoded Python logic — it does not
+  execute real SQL. Mutation-testing the fix proved this directly: reverting the real SQL back to the old
+  `ORDER BY id ASC LIMIT 8` **did not fail any offline test** (D-040's documented limitation, confirmed in
+  practice here). `_recent_history()` was extracted specifically so a `@pytest.mark.live` test could call
+  it directly against real Postgres with 10 seeded rows and prove the SQL's own `ORDER BY`/`LIMIT` shape —
+  that live test does fail when the SQL is reverted, closing the gap the offline test couldn't.
+- **Alternatives considered:** keep the query inline in the route and rely only on the offline `MemoryDB`
+  test (rejected — proven above to be blind to exactly this class of regression); duplicate the SQL text
+  into the live test instead of extracting a shared function (rejected — two copies of the same SQL drift
+  apart over time, which is a worse version of the same problem this fix is closing); raise the limit
+  instead of fixing the direction (treats the symptom, not the cause — still breaks on a long enough chat).
+- **Tradeoff accepted:** a very long conversation still only gets an 8-message window; this fix makes that
+  window the *right* 8 messages, not a larger one. That's an existing, separate, known limitation (window
+  size, not direction) — out of scope here.
+- **Revisit if:** the 8-message window itself needs to grow (a separate decision, not this one).

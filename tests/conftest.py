@@ -309,8 +309,8 @@ class MemoryDB:
            lambda p: [(p[0], self.conversations[p[0]])] if p[0] in self.conversations else [])
         on("FROM conversations c LEFT JOIN messages m", self._list_conversations)
         on("INSERT INTO messages", self._insert_messages)
-        on("SELECT role, content FROM messages WHERE conversation_id = %s",
-           lambda p: [(m[2], m[3]) for m in self._messages_of(p[0])][:8])  # ORDER BY id ASC LIMIT 8
+        on("ORDER BY id DESC LIMIT %s",
+           lambda p: [(m[2], m[3]) for m in self._messages_of(p[0])][-p[1]:])  # latest N, kept chronological
         on("SELECT id, role, content, created_at FROM messages WHERE conversation_id = %s",
            lambda p: [(m[0], m[2], m[3], m[4]) for m in self._messages_of(p[0])])
 
