@@ -1,4 +1,4 @@
-from scripts.ingest import CHUNK_SIZE, DOCS_DIR, compute_content_hash, ingest_file, make_chunks
+from scripts.ingest import CHUNK_SIZE, DOCS_DIR, compute_content_hash, ingest_file, make_chunks, reindex_knowledge_base
 from app.db import get_conn
 
 
@@ -80,6 +80,40 @@ def test_ingest_file_skips_unchanged_content_without_embedding(tmp_path, monkeyp
             third = ingest_file(test_file, conn, verbose=False)
             assert third["unchanged"] is False
             assert len(embed_calls) > calls_before
+    finally:
+        test_file.unlink(missing_ok=True)
+        with get_conn() as conn:
+            conn.execute("DELETE FROM documents WHERE source = %s", (source,))
+
+
+def test_reindex_removes_documents_whose_file_is_gone(tmp_path, monkeypatch, db_backend):
+    """
+    Bug #5 (external bug report, Medium, D-059): deleting a runbook from data/docs/ used to leave its
+    document and chunks in the DB forever, so a retired procedure kept being retrieved and cited as
+    current guidance. reindex_knowledge_base() now removes any stored document whose file is gone
+    (chunks follow via ON DELETE CASCADE).
+    """
+    monkeypatch.setattr("scripts.ingest.embed_document", lambda text: [0.0] * 768)
+    monkeypatch.setattr("scripts.ingest.EMBED_SLEEP_SECONDS", 0)  # free-tier pacing; pointless here too
+
+    test_file = DOCS_DIR / "_test_9_1_bug5_tmp.md"
+    source = test_file.relative_to(DOCS_DIR.parents[1]).as_posix()
+    body = "Some content here for the regression test. " * 3  # > 80 chars, clears MIN_CHUNK_CHARS
+    test_file.write_text(f"# Temp Doc\n\n## Section\n\n{body}\n", encoding="utf-8")
+
+    try:
+        first = reindex_knowledge_base(force=False, verbose=False)
+        assert first["documents_removed"] == 0
+        assert any(s["source"] == source for s in first["summaries"])
+
+        test_file.unlink()  # the file "disappears" from data/docs/, like a retired runbook
+
+        second = reindex_knowledge_base(force=False, verbose=False)
+        assert second["documents_removed"] == 1
+        assert not any(s["source"] == source for s in second["summaries"])
+
+        with get_conn() as conn:
+            assert conn.execute("SELECT id FROM documents WHERE source = %s", (source,)).fetchone() is None
     finally:
         test_file.unlink(missing_ok=True)
         with get_conn() as conn:

@@ -341,13 +341,13 @@ class AgentTriageResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class CronReindexResponse(BaseModel):
-    """Response payload for GET /cron/reindex (Phase 9.1)."""
-
     status: str
     documents_total: int = Field(description="Markdown files found in data/docs/.")
     documents_reindexed: int = Field(description="Files that were new or had changed content.")
     documents_unchanged: int = Field(description="Files skipped because their content hash matched — no re-embedding needed.")
+    documents_removed: int = Field(description="Documents (and their chunks) deleted because their source file no longer exists.")
     chunks_embedded: int = Field(description="Chunks embedded via Gemini in this run (0 if nothing changed).")
     message: str
+
 
 

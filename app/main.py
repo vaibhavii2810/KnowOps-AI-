@@ -689,10 +689,13 @@ def api_cron_reindex(
         documents_total=result["documents_total"],
         documents_reindexed=result["documents_reindexed"],
         documents_unchanged=result["documents_unchanged"],
+        documents_removed=result["documents_removed"],
         chunks_embedded=result["chunks_embedded"],
         message=(
             f"{result['documents_reindexed']} of {result['documents_total']} runbook file(s) "
             f"reindexed ({result['chunks_embedded']} chunks embedded); "
-            f"{result['documents_unchanged']} unchanged and skipped."
+            f"{result['documents_unchanged']} unchanged and skipped"
+            + (f"; {result['documents_removed']} removed (file deleted)." if result['documents_removed'] else ".")
         ),
     )
+

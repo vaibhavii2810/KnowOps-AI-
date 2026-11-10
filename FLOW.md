@@ -259,6 +259,9 @@ reindex_knowledge_base(force, verbose)
             → for each chunk: llm.embed_document → embed_text("RETRIEVAL_DOCUMENT") → [Gemini]
                               → insert_chunk → sleep 0.5 s (free-tier rate limit)
             → return {..., "unchanged": False}
+  → after the loop: [DB] diff stored document sources against the files just processed — any stored
+    source with no matching file (a deleted runbook) is DELETE FROM documents (cascades to its chunks,
+    ON DELETE CASCADE) — D-059, "documents_removed" in the result; a no-op when force=True (already wiped)
   → aggregate: {documents_total, documents_reindexed, documents_unchanged, chunks_embedded, chunks_skipped}
 ```
 

@@ -318,6 +318,7 @@ class MemoryDB:
         on("SELECT 1", lambda p: [(1,)])
         on("SELECT COUNT(*) FROM documents", lambda p: [(len(self.documents),)])
         on("SELECT COUNT(*) FROM chunks", lambda p: [(len(self.chunks),)])
+        on("SELECT source FROM documents", lambda p: [(d["source"],) for d in self.documents.values()])
         on("SELECT id FROM documents WHERE source = %s", lambda p: [(i,) for i in self._docs_by_source(p[0])])
         on("SELECT id, content_hash FROM documents WHERE source = %s",
            lambda p: [(i, self.documents[i]["content_hash"]) for i in self._docs_by_source(p[0])])

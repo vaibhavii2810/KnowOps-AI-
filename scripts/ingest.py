@@ -391,10 +391,20 @@ def reindex_knowledge_base(force: bool = False, verbose: bool = True) -> dict:
                     "total_chunks": 0, "unchanged": False, "error": str(exc),
                 })
 
+        # Phase 9.1 bug fix (D-059): a document whose file no longer exists on disk should not keep
+        # being retrieved and cited as current guidance. force=True already wiped documents/chunks
+        # above, so removed_sources is always empty on that path — nothing to do, correctly.
+        current_sources = {f.relative_to(PROJECT_ROOT).as_posix() for f in files}
+        stored_sources = {row[0] for row in conn.execute("SELECT source FROM documents").fetchall()}
+        removed_sources = stored_sources - current_sources
+        for source in removed_sources:
+            conn.execute("DELETE FROM documents WHERE source = %s", (source,))  # cascades to chunks
+
     return {
         "documents_total": len(summaries),
         "documents_reindexed": sum(1 for s in summaries if not s.get("unchanged")),
         "documents_unchanged": sum(1 for s in summaries if s.get("unchanged")),
+        "documents_removed": len(removed_sources),
         "chunks_embedded": sum(s.get("inserted", 0) for s in summaries),
         "chunks_skipped": sum(s.get("skipped", 0) for s in summaries),
         "summaries": summaries,
@@ -459,6 +469,8 @@ def main() -> None:
     print(f"  Documents total      : {result['documents_total']}")
     print(f"  Documents reindexed  : {result['documents_reindexed']}")
     print(f"  Documents unchanged  : {result['documents_unchanged']} (skipped — no content change)")
+    print(f"  Documents removed    : {result['documents_removed']}")
+
     print(f"  Chunks embedded      : {result['chunks_embedded']}")
     print(f"  Chunks skipped       : {result['chunks_skipped']}")
     print()

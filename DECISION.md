@@ -1231,3 +1231,28 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   window the *right* 8 messages, not a larger one. That's an existing, separate, known limitation (window
   size, not direction) — out of scope here.
 - **Revisit if:** the 8-message window itself needs to grow (a separate decision, not this one).
+
+### D-059 · `reindex_knowledge_base()` removes documents whose source file is gone
+- **Date · by · source:** 2026-11-10 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #5, Medium)
+- **Decision:** After the per-file ingest loop, `reindex_knowledge_base()` diffs the set of document
+  `source` values stored in Postgres against the set of files just processed. Any stored source with no
+  matching file is deleted (`DELETE FROM documents WHERE source = %s`), which cascades to its chunks via
+  the existing `ON DELETE CASCADE` on `chunks.document_id` — no separate chunk-deletion step needed. The
+  count is returned as `documents_removed` and surfaced in `CronReindexResponse` and the CLI's summary.
+  Under `force=True` (`--reset`), this is always a no-op: the reset already wiped `documents`/`chunks`
+  before the loop, so after it the stored set equals the current set exactly.
+- **Why:** The ingest sweep only ever iterated over files that currently exist in `data/docs/` — it had
+  no path at all for "this file used to exist and doesn't anymore." A deleted/retired runbook's chunks
+  stayed in the vector index forever and kept being retrieved and cited by `/ask` as if still current.
+- **Alternatives considered:** a soft-delete/"stale" flag on `documents` instead of a hard delete (a
+  real option if the project ever wants to show retired procedures separately, but nothing today asked
+  for that, and it would need `rag.retrieve()`'s query and every downstream consumer to filter on it);
+  detecting removal inside the per-file loop instead of as a separate pass after it (the loop only knows
+  about files that exist — there's no file to iterate for the one that's gone, so the comparison has to
+  happen against the stored set as a whole, after collecting what's current).
+- **Tradeoff accepted:** a runbook that's renamed (not deleted) looks identical to "old path removed, new
+  path added" — the old document is removed and the new path is ingested as a brand-new document with a
+  fresh id. That's correct behavior for this bug, not a gap: the content under the old `source` really is
+  gone, and nothing should keep citing it.
+- **Revisit if:** the project wants to preserve a history of retired runbooks instead of deleting them
+  outright — that's a soft-delete feature, a bigger change than this bug asked for.

@@ -181,6 +181,24 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   files via `scripts.ingest.reindex_knowledge_base()`, skipping unchanged ones by content hash (D-029).
   Verified live on both Preview and Production: editing one runbook re-embedded only that file; a no-op run
   took 2.3s with zero Gemini calls.
+- **9.1 addendum (2026-11-10, D-059):** an external bug report (bug #5, Medium) found that deleting a file
+  from `data/docs/` left its `documents` row (and chunks) in Postgres forever — the ingest sweep only ever
+  looked at files that currently exist, with no path for "this one used to exist and doesn't anymore," so a
+  retired runbook kept being retrieved and cited as current guidance. Fixed: after the per-file loop,
+  `reindex_knowledge_base()` diffs stored document sources against the files just processed and deletes any
+  with no matching file (`chunks` follow via the existing `ON DELETE CASCADE`); the count is returned as
+  `documents_removed` in `CronReindexResponse` and the CLI summary. Correctly a no-op under `--reset`
+  (already wiped everything). `MemoryDB` (`tests/conftest.py`) gained the one statement it was missing
+  (`SELECT source FROM documents`) — `DELETE FROM documents WHERE source = %s` was already wired, someone
+  had anticipated this. New test in `tests/test_ingest.py` (writes a real temp file under `DOCS_DIR`,
+  ingests it, deletes it, re-ingests, confirms it's gone from Postgres too) runs via `db_backend` against
+  both `MemoryDB` and real Postgres. 2 mutation checks (the cleanup deleted entirely, the set-diff direction
+  reversed) each fail it offline; a third check (removing just the new `MemoryDB` statement) fails only the
+  `[memory]` variant with a clear "statement not understood" error, proving the test genuinely needs it.
+  First run of the test was ~41s — `EMBED_SLEEP_SECONDS`'s real `time.sleep()` ran once per chunk across all
+  real runbooks on first ingest, since only `embed_document` itself was faked; zeroing it too (the same
+  thing `fake_gemini` already does for other tests) brought it to 0.03s offline. 584 passed offline (117
+  live deselected, +1 new live test).
 - 9.2 `CRON_SECRET` is now enforced in every environment, not just production (D-030) — found and fixed a
   real gap: an unauthenticated call against the live Preview deployment succeeded and triggered a real
   re-embed before the fix.
@@ -616,6 +634,7 @@ Append one line per finished phase (newest last).
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-056): `/ask`'s SIMILARITY_THRESHOLD raised 0.55 → 0.65, measured live against real off-topic scores (0.518–0.583) and the lowest true-positive golden-set score (0.699); also fixes bug #23 (refusals showing sources) |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-057): active_p1_incidents switched from a `status != 'resolved'` blocklist to an explicit `status IN ('open', 'in_progress')` allow-list — a closed P1 ticket was overstating the active-incident count; MemoryDB's matching test double updated in lockstep |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-058): /ask history now sends the latest 8 messages, not the first 8 — extracted into _recent_history() so a live test could prove the SQL itself; mutation testing found the offline MemoryDB fake could not catch an ORDER BY reversion on its own (D-040) |
+| 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-059): reindex_knowledge_base() now removes documents (and their chunks, via cascade) whose source file no longer exists in data/docs/ — a retired runbook used to keep being retrieved and cited forever |
 
 ## Deployment
 
@@ -705,12 +724,13 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   references `tests/test_suspected_bugs.py` and `TEST_RESULTS.md`, neither of which exist here — that testing
   pass happened somewhere outside this repo's history. Bug #1 (High — `/cron/reindex` open when `CRON_SECRET` is
   unset, D-055), bug #2 (High — the 0.55 retrieval threshold, D-056, which also fixed #23), bug #3 (Medium —
-  closed P1 tickets counted as active, D-057) and bug #4 (Medium — history sent the first 8 messages, not
-  the latest 8, D-058) are fixed, all 2026-11-10, each independently verified against the real code/data
-  before fixing, not taken on the PDF's word alone. The other 22 (including #21, High — stored-XSS in the
-  console via `formatMarkdown`, and #12, Medium — the related `closed`-tickets gap in the same stats
-  function D-057 touched, left out on purpose) are **not yet fixed or verified against this codebase**.
-  Worth pulling the PDF's test file and results doc into the repo so the rest aren't only tracked in a PDF.
+  closed P1 tickets counted as active, D-057), bug #4 (Medium — history sent the first 8 messages, not
+  the latest 8, D-058) and bug #5 (Medium — deleted runbooks never removed from the DB, D-059) are fixed,
+  all 2026-11-10, each independently verified against the real code/data before fixing, not taken on the
+  PDF's word alone. The other 21 (including #21, High — stored-XSS in the console via `formatMarkdown`,
+  and #12, Medium — the related `closed`-tickets gap in the same stats function D-057 touched, left out
+  on purpose) are **not yet fixed or verified against this codebase**. Worth pulling the PDF's test file
+  and results doc into the repo so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
