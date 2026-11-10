@@ -298,6 +298,17 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   test for the actual bug (headers ignored off-Vercel) overrides it back to unset for itself. 1 mutation
   check (reverted to always-trust) fails it. 588 passed offline (118 live deselected, +1 new live-variant
   test via the file's existing `db_backend`); `pytest -m live tests/test_rate_limit.py`: 26/26 pass.
+- **CORS addendum (2026-11-10, D-062):** an external bug report (bug #8, Medium) found
+  `allow_origins=["*"]` combined with `allow_credentials=True` in the `CORSMiddleware` setup. Independently
+  reproduced before fixing: an `OPTIONS /ask` preflight with `Origin: https://evil.com` got back
+  `Access-Control-Allow-Origin: https://evil.com` and `Access-Control-Allow-Credentials: true` — Starlette
+  echoes the request's own Origin when credentials are requested alongside a wildcard, since a browser
+  rejects a literal `*` paired with credentials. Fixed: `allow_credentials=False` (auth here is a Bearer
+  token in a header, never a cookie — there's no ambient credential to protect), which keeps the wildcard
+  honest: a real `*`, the same for every origin, no credentials header at all. New `tests/test_cors.py` (5
+  tests): an unknown origin gets the literal `*`, not an echo; no credentials header is ever sent; three
+  different origins (including the real deployed one) all get identical treatment. 1 mutation check
+  (reverted to `allow_credentials=True`) fails all 5. 593 passed offline, 118 live deselected.
 - **Phase 10 done-when check:** the 45 permanent hostile requests (and the 76-request fuzz before them) return no 5xx,
   with the limiter on; the 5 injection cases are blocked by the guardrails even for a fully hijacked model
   (D-034). Residual risk is recorded there: the detector is a heuristic.
@@ -667,6 +678,7 @@ Append one line per finished phase (newest last).
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-059): reindex_knowledge_base() now removes documents (and their chunks, via cascade) whose source file no longer exists in data/docs/ — a retired runbook used to keep being retrieved and cited forever |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-060): make_chunks() merges a chunk under MIN_CHUNK_CHARS into a neighbor instead of dropping it — a short-but-real section (one-line contact/command) used to vanish from the index entirely; no change to the real knowledge base's 80 chunks |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-061): client_ip() now trusts X-Forwarded-For / x-real-ip only when settings.vercel is set — off Vercel these headers were trusted unconditionally, letting an attacker rotate them to defeat the per-IP login limit entirely |
+| 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-062): CORS allow_credentials switched to False — paired with allow_origins=["*"], it had made Starlette echo back any requesting origin with credentials allowed; verified live before fixing, then closed (auth is a Bearer token, never a cookie, so nothing was actually protected) |
 
 ## Deployment
 
@@ -758,13 +770,14 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   unset, D-055), bug #2 (High — the 0.55 retrieval threshold, D-056, which also fixed #23), bug #3 (Medium —
   closed P1 tickets counted as active, D-057), bug #4 (Medium — history sent the first 8 messages, not
   the latest 8, D-058), bug #5 (Medium — deleted runbooks never removed from the DB, D-059), bug #6
-  (Medium — short sections silently dropped from the index, D-060) and bug #7 (Medium — login-limit
-  header spoofing off Vercel, D-061) are fixed, all 2026-11-10, each independently verified against the
-  real code/data before fixing, not taken on the PDF's word alone. The other 19 (including #21, High —
-  stored-XSS in the console via `formatMarkdown`, and #12, Medium — the related `closed`-tickets gap in
-  the same stats function D-057 touched, left out on purpose) are **not yet fixed or verified against
-  this codebase**. Worth pulling the PDF's test file and results doc into the repo so the rest aren't
-  only tracked in a PDF.
+  (Medium — short sections silently dropped from the index, D-060), bug #7 (Medium — login-limit
+  header spoofing off Vercel, D-061) and bug #8 (Medium — CORS wildcard origin echoed back with
+  credentials, D-062) are fixed, all 2026-11-10, each independently verified against the real code/data
+  before fixing, not taken on the PDF's word alone. The other 18 (including #21, High — stored-XSS in
+  the console via `formatMarkdown`, and #12, Medium — the related `closed`-tickets gap in the same
+  stats function D-057 touched, left out on purpose) are **not yet fixed or verified against this
+  codebase**. Worth pulling the PDF's test file and results doc into the repo so the rest aren't only
+  tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any

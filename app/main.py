@@ -99,7 +99,11 @@ configure_logging()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,  # D-062: auth is a Bearer token, never a cookie — no ambient credential to protect.
+    # allow_credentials=True together with allow_origins=["*"] makes Starlette echo the request's own Origin
+    # back as Access-Control-Allow-Origin (browsers reject a literal "*" alongside credentials) — effectively
+    # trusting every origin. False here keeps the wildcard honest: a real "*", no echoed origin, no credentials
+    # header at all.
     allow_methods=["*"],
     allow_headers=["*"],
 )

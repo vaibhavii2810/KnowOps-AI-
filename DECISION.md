@@ -1309,3 +1309,32 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   from many real IPs) — this closes a gap, it doesn't open a new one. A deployment behind some other proxy
   that also overwrites these headers trustworthily would need its own signal; none exists today.
 - **Revisit if:** the project deploys behind a proxy other than Vercel that also needs trusted forwarding.
+
+### D-062 · CORS: `allow_credentials=False`, keeping `allow_origins=["*"]`
+- **Date · by · source:** 2026-11-10 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #8, Medium)
+- **Decision:** `app.add_middleware(CORSMiddleware, ...)` changes `allow_credentials=True` to `False`.
+  `allow_origins=["*"]` stays — the API is meant to be called from the console and from scripts/tools,
+  not restricted to one browser origin.
+- **Why:** Starlette's CORS middleware cannot send a literal `Access-Control-Allow-Origin: *` when
+  `allow_credentials=True` (the CORS spec forbids combining a wildcard origin with credentials, and
+  browsers reject it), so it works around that by **echoing the request's own `Origin` header back**
+  instead — verified live: an `https://evil.com` preflight got back exactly
+  `Access-Control-Allow-Origin: https://evil.com` plus `Access-Control-Allow-Credentials: true`. That
+  combination tells a browser the response may be read *with* ambient credentials sent, for literally
+  any origin. Auth here is a Bearer token sent explicitly in an `Authorization` header — never a cookie —
+  so there is no ambient credential for a hostile page to ride on, and `allow_credentials=True` was
+  protecting nothing while causing exactly this echo-back.
+- **Alternatives considered:** restrict `allow_origins` to an explicit list (the deployed domain, maybe
+  `localhost` for dev) instead of touching `allow_credentials` — a reasonable *additional* hardening step,
+  but a separate decision from this bug: it changes who can call the API cross-origin at all, where this
+  fix only removes the false claim of trusting ambient credentials. Nothing today asks for cross-origin
+  calls to be restricted, so left as `*` rather than guessing at a list that might break something; revisit
+  if that's ever wanted.
+- **Tradeoff accepted:** any website's JavaScript can still read `/health`, `/ask`, etc. from a visitor's
+  browser — a real `*` is still a real `*`. The attacker would need their own valid Bearer token to get a
+  useful response, and a token is never ambient (it's never sent unless the caller's own code adds the
+  header), so this isn't a new way to act as someone else — it's the same exposure any public, unauthenticated-looking
+  wildcard-CORS API has, now stated honestly instead of masked by a credentials flag that did nothing.
+- **Revisit if:** the app ever adds cookie-based auth (then `allow_credentials=True` would mean something
+  real, and `allow_origins` would need to be an explicit list, not `*`), or cross-origin access should be
+  restricted to specific known callers.

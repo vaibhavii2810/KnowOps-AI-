@@ -33,7 +33,7 @@ Then `app/main.py` itself runs:
 
 4. `app = FastAPI(...)` — Swagger at `/docs`, ReDoc at `/redoc`
 5. `logs.configure_logging()` — one JSON handler on the `knowops` logger, writing to stdout (Phase 12.1, D-042)
-6. `CORSMiddleware` (all origins), then `logs.RequestLogMiddleware`, then `metrics.RequestMetricsMiddleware` — added last, so it is the outermost layer (Phase 12.4, D-046)
+6. `CORSMiddleware` (all origins, no credentials — D-062), then `logs.RequestLogMiddleware`, then `metrics.RequestMetricsMiddleware` — added last, so it is the outermost layer (Phase 12.4, D-046)
 7. Mounts `/static` if `static/` exists
 8. The route decorators register 17 routes
 
