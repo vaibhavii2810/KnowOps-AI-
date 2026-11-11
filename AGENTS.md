@@ -760,6 +760,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-066): path-level ids (ticket_id, conversation_id) now reject float-shaped strings like "1.0" and oversized values the same way body ids already did — checked strict=True first and found it would break normal "/tickets/1" lookups too, so used a custom validator instead |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-067): the 401 for an invalid JWT no longer echoes PyJWT's exception text (which check, alg/signature/issuer/structure, failed) — a single fixed message now, with the specific reason logged server-side only |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-068): CRON_SECRET now compared with secrets.compare_digest, not != (a theoretical timing side-channel) — encoded to UTF-8 bytes first, avoiding the non-ASCII crash a naive switch would have reintroduced (same class as D-033) |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Measured and documented bug #16 (D-069) — a typo'd query can rank the wrong-but-related section first (0.665 vs 0.659, correct one still position 2 of 5); not fixed, since every real mitigation (spell-correction, hybrid search) is a genuine architecture tradeoff, not a small patch, and spell-correction would add latency to the already-slow /ask path |
 
 ## Deployment
 
@@ -859,9 +860,11 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   echoing PyJWT's exception text, D-067) and bug #15 (Low — CRON_SECRET compared with !=, D-068) are
   fixed, each independently verified against the real code/data before fixing, not taken on the PDF's
   word alone. Bug #10 (Low — a stale local `GEMINI_CHAT_MODEL`) was checked and found already correct —
-  nothing to fix, not counted as a fix. The other 12 (including #21, High — stored-XSS in the console
-  via `formatMarkdown`) are **not yet fixed or verified against this codebase**. Worth pulling the
-  PDF's test file and results doc into the repo so the rest aren't only tracked in a PDF.
+  nothing to fix, not counted as a fix. Bug #16 (Low — typo-degraded ranking, D-069) was measured and
+  recorded as a known limitation rather than fixed — every real mitigation is an architecture tradeoff,
+  not a small patch. The other 11 (including #21, High — stored-XSS in the console via `formatMarkdown`)
+  are **not yet fixed or verified against this codebase**. Worth pulling the PDF's test file and results
+  doc into the repo so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
@@ -906,6 +909,12 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - **Evaluation results vary run to run** (temperature 0.2): treat a single run as a sample. A run with `--judge` takes ~3 minutes
   on the free tier and can hit Gemini's quota (the runner waits and retries). Two runbook sections that cover the same incident
   (e.g. pool exhaustion in the playbooks and the on-call guide) can make the answer's facts differ between runs (`g12`, once).
+- **A typo'd query can rank the wrong-but-related section first (bug #16 in the external report, Low, D-069 — recorded, not
+  fixed):** measured live, 2026-11-11 — `retrieve("kubernetis rolbak", top_k=5)` ranked Disaster Recovery Runbook › 5.2
+  Rollback first (similarity 0.665) ahead of the actually relevant Kubernetes Cluster Operations Guide › 4.3 Rollback (0.659,
+  position 2 of 5 — still present, not lost). This is normal embedding-search behavior on garbled text, not a logic bug; every
+  real fix (spell-correcting the query, hybrid keyword+vector search) is a genuine engineering tradeoff, not a small patch — see
+  D-069 for why none was made, including that spell-correction would add another Gemini call to the already-slow `/ask` path.
 - **Runbook text disagrees with the app in places (found reading them for 13.1):** `api_troubleshooting.md` §7 says `POST /ask` is
   limited to 20 requests/minute and `GET /health` to 100/minute, but the app enforces 10/minute on `/ask` (D-036) and does not
   limit `/health`; it and `on_call_guide.md` also say the Gemini retry is "up to 3 attempts" where the code makes 4 (D-032). `/ask`

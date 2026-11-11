@@ -1506,3 +1506,29 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Tradeoff accepted:** none — behavior for every real caller is unchanged; only a forged or malformed
   request's processing time, which is not observable in practice over a network in any case, differs.
 - **Revisit if:** another secret comparison is added anywhere in the codebase using a plain `==`/`!=`.
+
+### D-069 · Typo-degraded retrieval ranking (bug #16) is recorded as a known limitation, not fixed
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #16, Low)
+- **Decision:** No code change. Measured and documented instead, in `AGENTS.md` Known issues.
+- **What was measured (2026-11-11, live, real Gemini + real database):** `retrieve("kubernetis rolbak", top_k=5)`
+  ranks Disaster Recovery Runbook › 5.2 Rollback to Previous Version first (similarity 0.665), ahead of the
+  actually-relevant Kubernetes Cluster Operations Guide › 4.3 Rollback (0.659) — a 0.006 margin. The correct
+  section is still returned, in position 2 of 5, not lost entirely.
+- **Why no code fix:** unlike bugs #1–#15 (and #17+ where applicable), this isn't a logic error with one
+  correct, verifiable behavior — it's the normal behavior of embedding-based semantic search on garbled
+  text. Every candidate fix is a real engineering tradeoff, not a small patch:
+  - **Spell-correcting the query before embedding** (e.g., an extra Gemini call) would likely help this
+    specific case, but adds another Gemini round-trip to every `/ask` — directly working against the
+    already-flagged, already-deferred database/latency problem (every `/ask` is already 5–14 s per the
+    Phase 13.3 evaluation; see Known issues). Adding latency to fix a Low-severity ranking nuance, on a
+    system whose latency is itself a bigger, already-known, already-deferred issue, is the wrong trade.
+  - **Hybrid search** (keyword/BM25 blended with vector similarity) is a real architecture change — new
+    ranking logic, more code, its own test surface — not a bug-report-sized fix.
+  - **Lowering the similarity threshold or raising `top_k`** doesn't address *ranking* (which section comes
+    first) — only whether the right one appears anywhere in the list, which it already does here.
+- **Tradeoff accepted:** a typo'd query can rank a merely-related runbook section above the actually
+  relevant one, by a small margin, while still surfacing the right one nearby. Left as-is.
+- **Revisit if:** (a) query spell-correction is added for an unrelated reason, and it's worth checking
+  whether it also fixes this; (b) the database-latency issue is resolved (see Known issues), which would
+  change the cost-benefit of adding an extra Gemini call per `/ask`; (c) the Phase 13 eval harness starts
+  catching ranking regressions from typo-like queries, which would argue for a dedicated golden-set case.
