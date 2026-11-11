@@ -848,6 +848,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Re-verified bug #23 (refusals showing citation cards) live with the report's exact off-topic probes — already fixed as a direct consequence of D-056's threshold raise (2026-11-10); all three now return 0 sources, no new code change |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-076): capped agent runs no longer over-count total_steps (synthesis wrap-up no longer counted) or leak raw Thought/Action/Observation text as the resolution (bug #24, Medium) — both reproduced live before fixing; the leak fix adds a code-level backstop since the prompt instruction alone wasn't reliable (same lesson as D-045) |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Checked bug #25 (/ask latency, Low) — confirmed as the same already-documented get_conn()/database-latency issue (Phase 13.3's eval findings, Known issues); no new fix, cross-referenced only |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Checked bugs #26 (poor throughput under concurrency, Low) and #27 (rate limits work as designed, Info) — #26 is the same already-documented latency root cause measured under load, recorded with connection pooling named as the real (infrastructure) fix; #27 confirmed correct, nothing to change. All 27 items in the external bug report are now accounted for |
 
 ## Deployment
 
@@ -971,9 +972,16 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   capped agent run over-counting `total_steps` and sometimes leaking raw ReAct trace text as the resolution,
   D-076) is fixed, reproduced live before fixing. Bug #25 (Low — `/ask` taking 8–9.5s locally, 14s once in
   prod) is the same `get_conn()`/database-latency issue already measured and recorded above and in Phase
-  13.3's eval harness findings — no new fix applies; cross-referenced by bug number, not duplicated. The
-  other 2 (#26–27) are **not yet fixed or verified against this codebase**. Worth pulling the PDF's test file
-  and results doc into the repo so the rest aren't only tracked in a PDF.
+  13.3's eval harness findings — no new fix applies; cross-referenced by bug number, not duplicated. Bug #26
+  (Low — poor throughput under concurrency) is the same root cause measured under load, also recorded without
+  a new fix (connection pooling is a real infrastructure change). Bug #27 (Info) was the report's own
+  concurrent-request check confirming rate limits work exactly as designed — checked, nothing to fix, not
+  counted as a fix (same treatment as bug #10). **All 27 items from the report are now accounted for:** 20
+  fixed with a code change (#1–9, #11–15, #17, #18, #21–24), 2 checked and confirmed already correct with
+  nothing to change (#10, #27), and 5 measured and recorded rather than code-fixed because the real fix is a
+  genuine architecture/infrastructure tradeoff, not a small patch (#16 ranking, #19 rate-limiter window, #20
+  needs a Neon branch database, #25/#26 need connection pooling). Worth pulling the PDF's test file and
+  results doc into the repo so the methodology is tracked alongside the fixes, not only in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
@@ -1017,6 +1025,17 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   response is produced; live client-side timings showed no measurable difference (see 12.4), but a caller may still wait
   for it on a serverless runtime. `/metrics` has no percentiles (only sums and a max are stored). `METRICS_ENABLED=false`
   turns counting off; if the cost ever shows, batch or sample the writes.
+- **Throughput under concurrency is poor for DB-backed routes (bug #26 in the external report, Low — recorded,
+  not fixed):** the report's load test measured DB routes at p50 3.6–4.0s and only ~2.5 req/s at concurrency 10,
+  while `/auth/me` (no database call) is capped near 10 req/s with a 2s p50 at concurrency 20 — the same root
+  cause already recorded above (a new connection + `register_vector` per call, plus the serialized per-request
+  metrics write), just measured here under load rather than one request at a time. No new fix here beyond what's
+  already on record: a real fix is connection pooling across invocations (e.g. a pooler in front of Neon, or
+  reusing the rate-limiter's persistent-connection pattern more broadly) — an infrastructure/architecture change,
+  not a small patch, and the same class of deferred work as the latency item above.
+- **Bug #27 (Info) checked and confirmed correct, no fix needed:** the report's own concurrent-request test found
+  the rate limits work exactly as designed (`/ask` 10/min, agent 5/min, `Retry-After` present), with the only
+  caveat being the already-recorded fixed-window boundary behavior (bug #19, D-072). Nothing to change.
 - **Tests can't see a changed SQL statement that keeps its matching text** (D-040): `MemoryDB` answers by fragment, so
   e.g. flipping the history query's `ORDER BY` goes unnoticed offline. The `live` variants (`pytest -m live`) catch it;
   run them before a deploy that touches SQL.
