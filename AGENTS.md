@@ -847,6 +847,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-075): /ask retrieval now folds the most recent user turn into the query (bug #22, Medium) — a pronoun-style follow-up used to embed alone and miss the conversation's actual topic, confirmed live (retrieved unrelated sections, model refused); fixed without an extra Gemini call, same latency tradeoff already weighed in D-069 |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Re-verified bug #23 (refusals showing citation cards) live with the report's exact off-topic probes — already fixed as a direct consequence of D-056's threshold raise (2026-11-10); all three now return 0 sources, no new code change |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-076): capped agent runs no longer over-count total_steps (synthesis wrap-up no longer counted) or leak raw Thought/Action/Observation text as the resolution (bug #24, Medium) — both reproduced live before fixing; the leak fix adds a code-level backstop since the prompt instruction alone wasn't reliable (same lesson as D-045) |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Checked bug #25 (/ask latency, Low) — confirmed as the same already-documented get_conn()/database-latency issue (Phase 13.3's eval findings, Known issues); no new fix, cross-referenced only |
 
 ## Deployment
 
@@ -968,9 +969,11 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   #2's threshold raise) — re-verified live here, 2026-11-11, with the report's exact off-topic probes ("what
   is 2+2", "Terraform state locking," a prompt-injection string), all now 0 sources. Bug #24 (Medium — a
   capped agent run over-counting `total_steps` and sometimes leaking raw ReAct trace text as the resolution,
-  D-076) is fixed, reproduced live before fixing. The other 3 (#25–27) are **not yet fixed or verified
-  against this codebase**. Worth pulling the PDF's test file and results doc into the repo so the rest aren't
-  only tracked in a PDF.
+  D-076) is fixed, reproduced live before fixing. Bug #25 (Low — `/ask` taking 8–9.5s locally, 14s once in
+  prod) is the same `get_conn()`/database-latency issue already measured and recorded above and in Phase
+  13.3's eval harness findings — no new fix applies; cross-referenced by bug number, not duplicated. The
+  other 2 (#26–27) are **not yet fixed or verified against this codebase**. Worth pulling the PDF's test file
+  and results doc into the repo so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
@@ -989,7 +992,8 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   distributed attack from many real addresses. It used to also trust the client-IP headers unconditionally even off
   Vercel (found as bug #7 in the external report, fixed as D-061, 2026-11-10) — now it only trusts them when
   `settings.vercel` is set, and uses the real socket address everywhere else.
-- **`get_conn()` latency — worse on Production than measured locally:** each call costs ~1.2s against the remote Neon DB
+- **`get_conn()` latency — worse on Production than measured locally (bug #25 in the external report, Low —
+  the same issue, no new fix applies):** each call costs ~1.2s against the remote Neon DB
   locally, ~0.8s of it `register_vector`, which only `scripts/ingest.py` needs (found while measuring 10.5). `/ask` pays
   it 3×. `/metrics` on Production (2026-11-06) shows `/health` averaging 4.5 s (max 4.6 s), `/tickets/{id}` 4.3 s and
   `/tickets/stats` 2.5 s, against 1.9 ms for `/auth/me`, which makes no database call. A `vectors=False` default would
