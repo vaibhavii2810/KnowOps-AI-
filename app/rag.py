@@ -22,6 +22,10 @@ Flow:
 
 from __future__ import annotations
 
+import re
+import time
+from difflib import get_close_matches
+
 from app.db import get_conn
 from app.llm import embed_query
 from app.schemas import ChunkResult
@@ -33,6 +37,69 @@ from app.schemas import ChunkResult
 # 0.55 threshold — while the lowest-scoring in-scope golden question (g16) was 0.699. 0.65 sits
 # in that measured gap with margin on both sides.
 SIMILARITY_THRESHOLD = 0.65
+
+
+# ---------------------------------------------------------------------------
+# Query typo correction (D-077, bug #16 — revisited after initially being declined in D-069)
+# ---------------------------------------------------------------------------
+# D-069 declined fixing typo-degraded ranking because every option considered (Gemini-based
+# spell-correction, hybrid keyword+vector search) added latency to the already-slow /ask path. This is a
+# third option neither considered there: no network call at all. The knowledge base's own vocabulary
+# (document titles + chunk headings — a few hundred words, not the full corpus) is queried once and cached
+# for _VOCABULARY_TTL_SECONDS; a query word that isn't in it but is a close match (difflib, ratio >= 0.8) to
+# one that is gets corrected before embedding. Only the retrieval query changes — same principle as D-075's
+# history fold-in — chat_completion() and the response still see the user's actual words.
+_VOCABULARY_TTL_SECONDS = 300
+_WORD_RE = re.compile(r"[A-Za-z]{4,}")
+_vocabulary_cache: tuple[float, frozenset[str]] = (0.0, frozenset())
+
+
+def _load_vocabulary() -> frozenset[str]:
+    with get_conn() as conn:
+        titles = conn.execute("SELECT DISTINCT title FROM documents").fetchall()
+        headings = conn.execute("SELECT DISTINCT heading FROM chunks WHERE heading != ''").fetchall()
+    words: set[str] = set()
+    for (text,) in [*titles, *headings]:
+        words.update(w.lower() for w in _WORD_RE.findall(text))
+    return frozenset(words)
+
+
+def _vocabulary() -> frozenset[str]:
+    global _vocabulary_cache
+    cached_at, words = _vocabulary_cache
+    if time.monotonic() - cached_at > _VOCABULARY_TTL_SECONDS:
+        words = _load_vocabulary()
+        _vocabulary_cache = (time.monotonic(), words)
+    return words
+
+
+def correct_typos(query: str, vocabulary: "frozenset[str] | None" = None) -> str:
+    """
+    Replace a query word with a close vocabulary match if it isn't itself a known word — fixes the measured
+    case (bug #16): "kubernetis rolbak" ranked the wrong-but-related runbook section first because neither
+    typo'd word matched the real heading text at all. `vocabulary=None` uses the cached, lazily-loaded
+    knowledge-base vocabulary; a real set is used directly (for tests, without touching the database).
+    """
+    words = _vocabulary() if vocabulary is None else vocabulary
+    if not words:
+        return query
+
+    def _fix(match: "re.Match[str]") -> str:
+        word = match.group(0)
+        lower = word.lower()
+        if lower in words:
+            return word
+        candidates = get_close_matches(lower, words, n=1, cutoff=0.82)
+        if not candidates:
+            return word
+        candidate = candidates[0]
+        # A bare singular/plural mismatch isn't a typo (ratio overlaps real typos too closely to separate
+        # by cutoff alone — e.g. "step"→"steps" scores higher than "rolbak"→"rollback") — leave it alone.
+        if candidate in (lower + "s", lower + "es") or lower in (candidate + "s", candidate + "es"):
+            return word
+        return candidate
+
+    return _WORD_RE.sub(_fix, query)
 
 
 def retrieve(

@@ -30,6 +30,8 @@ _STATEMENT_KINDS = (
     ("CREATE TABLE IF NOT EXISTS rate_limits", "create rate_limits table"),  # once per limiter connection
     ("INSERT INTO rate_limits", "rate-limit hit"),
     ("INSERT INTO conversations", "new conversation"),
+    ("SELECT DISTINCT title FROM documents", "load typo vocabulary (titles)"),  # D-077, cache cold each test
+    ("SELECT DISTINCT heading FROM chunks", "load typo vocabulary (headings)"),
     ("FROM chunks c", "vector search"),
     ("INSERT INTO messages", "save turn"),
 )
@@ -90,7 +92,8 @@ def test_ask_round_trip_with_the_llm_mocked(client, auth_headers, backend):
 
     # Postgres, in order: rate-limit hit, new conversation, vector search (top_k reached the SQL), saved turn
     assert [_kind(sql) for sql, _ in fake_db.executed] == [
-        "create rate_limits table", "rate-limit hit", "new conversation", "vector search", "save turn",
+        "create rate_limits table", "rate-limit hit", "new conversation",
+        "load typo vocabulary (titles)", "load typo vocabulary (headings)", "vector search", "save turn",
     ]
     assert fake_db.queries("FROM chunks c")[0][1][4] == 2
     assert fake_db.queries("INSERT INTO messages")[0][1] == (101, QUESTION, 101, ANSWER)

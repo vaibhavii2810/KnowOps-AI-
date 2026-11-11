@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.rag import SIMILARITY_THRESHOLD, retrieve, format_context_for_llm, retrieve_and_format
+from app.rag import SIMILARITY_THRESHOLD, correct_typos, retrieve, format_context_for_llm, retrieve_and_format
 from app.schemas import ChunkResult, AskResponse, HealthResponse
 
 
@@ -203,3 +203,69 @@ def test_every_in_scope_golden_question_still_retrieves_something():
     starved = [item.id for item in load_golden_set()
                if not item.must_refuse and not retrieve(item.question, top_k=1)]
     assert starved == []
+
+
+# --- Bug #16 (external bug report, Low, D-077 — revisited after D-069 declined a fix) ----------------------
+# A typo'd query used to rank the wrong-but-related runbook section first because neither typo'd word
+# matched real heading/title text at all. correct_typos() fixes this without a Gemini call (the latency
+# tradeoff that made D-069 decline a fix) by correcting against the knowledge base's own small vocabulary
+# (document titles + chunk headings), offline/CPU-only.
+
+_TEST_VOCAB = frozenset({
+    "kubernetes", "rollback", "disaster", "recovery", "runbook", "failover", "first", "steps", "escalation",
+})
+
+
+@pytest.mark.parametrize("typo,expected", [
+    ("kubernetis rolbak", "kubernetes rollback"),
+    ("rollbak the deployment", "rollback the deployment"),
+    ("whats the escalaton proccess", "whats the escalation proccess"),  # "proccess" isn't in the vocabulary
+])
+def test_correct_typos_fixes_known_misspellings(typo, expected):
+    assert correct_typos(typo, vocabulary=_TEST_VOCAB) == expected
+
+
+@pytest.mark.parametrize("already_correct", [
+    "How do I perform a database failover?",
+    "What is the first step of that procedure?",  # "step" singular must not become "steps"
+    "What triggers a 502 error?",
+    "What is RTO?",
+])
+def test_correct_typos_leaves_correctly_spelled_queries_unchanged(already_correct):
+    assert correct_typos(already_correct, vocabulary=_TEST_VOCAB) == already_correct
+
+
+def test_correct_typos_does_not_treat_a_plain_plural_as_a_typo():
+    """"step" -> "steps" was a real false positive found while building this (ratio 0.889, higher than the
+    real typo "rolbak"->"rollback" at 0.857) — cutoff tuning alone can't separate them, so plural-only
+    matches are excluded explicitly."""
+    assert correct_typos("the first step", vocabulary=_TEST_VOCAB) == "the first step"
+
+
+def test_correct_typos_does_not_corrupt_a_real_word_into_an_unrelated_close_one():
+    """"fires" -> "first" was a second real false positive (ratio 0.8, right at the original cutoff) —
+    the cutoff was raised to 0.82 specifically to exclude this while still catching real typos."""
+    assert correct_typos("the alert fires", vocabulary=_TEST_VOCAB) == "the alert fires"
+
+
+def test_correct_typos_with_empty_vocabulary_is_a_no_op():
+    assert correct_typos("kubernetis rolbak", vocabulary=frozenset()) == "kubernetis rolbak"
+
+
+def test_correct_typos_only_touches_words_it_can_confidently_fix():
+    """A word with no close vocabulary match at all (not a typo of anything known) is left alone."""
+    assert correct_typos("xyzzyplugh", vocabulary=_TEST_VOCAB) == "xyzzyplugh"
+
+
+@pytest.mark.live
+def test_correct_typos_fixes_the_reported_ranking_regression_live():
+    """D-069's original measurement: the DR runbook's rollback section outranked the actually-relevant
+    Kubernetes rollback section on the raw typo'd query. Confirms the fix end to end against real
+    embeddings, not just the string transform."""
+    corrected = correct_typos("kubernetis rolbak")
+    assert corrected == "kubernetes rollback"
+
+    results = retrieve(corrected, top_k=5)
+    assert results, "expected at least one result"
+    assert results[0].document_title == "Kubernetes Cluster Operations Guide"
+    assert results[0].heading == "4.3 Rollback"

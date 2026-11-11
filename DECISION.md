@@ -1508,6 +1508,10 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Revisit if:** another secret comparison is added anywhere in the codebase using a plain `==`/`!=`.
 
 ### D-069 · Typo-degraded retrieval ranking (bug #16) is recorded as a known limitation, not fixed
+- **Superseded by D-077** (2026-11-11, same day — the user asked to revisit this specifically after the rest
+  of the report was closed out, and a third option neither considered here nor there was found: a
+  no-network-call typo correction against the knowledge base's own vocabulary). Kept for the record of what
+  was considered and why it was declined at the time.
 - **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #16, Low)
 - **Decision:** No code change. Measured and documented instead, in `AGENTS.md` Known issues.
 - **What was measured (2026-11-11, live, real Gemini + real database):** `retrieve("kubernetis rolbak", top_k=5)`
@@ -1764,3 +1768,58 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Revisit if:** a legitimate agent answer is ever seen starting with text matching `_REACT_CONTINUATION`
   coincidentally (e.g. a report that opens by literally quoting "Thought 1: ..." as evidence) — narrow the
   regex then; not observed in testing.
+
+### D-077 · Typo-degraded retrieval ranking (bug #16) fixed with local, no-network-call query correction
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (revisiting bug #16 after D-069 declined a fix)
+- **Decision:** new `app/rag.py` function `correct_typos(query, vocabulary=None)`: tokenizes the query into
+  4+ letter words; any word not already a case-insensitive match in a vocabulary gets replaced with the
+  closest vocabulary word (`difflib.get_close_matches`, cutoff 0.82) if one is close enough, except when the
+  only difference is a trailing "s"/"es" (a plain plural, not a typo). The vocabulary is the knowledge base's
+  own `documents.title` and `chunks.heading` values — a few hundred words, not the full corpus — loaded with
+  one extra query pair and cached in-process for 5 minutes (`_VOCABULARY_TTL_SECONDS`). Wired into `/ask`:
+  `app/main.py` now runs `correct_typos(request.question)` before building the retrieval query (composing
+  with D-075's history fold-in); `chat_completion()` and the response still see the user's real, uncorrected
+  question — only what gets embedded for vector search changes.
+- **Why this wasn't considered in D-069:** that decision only weighed two options, both costing an extra
+  Gemini call on the already-measured-slow `/ask` path (query spell-correction via the model, or hybrid
+  keyword+vector search) — and declined both on latency grounds. A local correction against the KB's own
+  vocabulary needs no network call at all: it's a handful of CPU-bound string comparisons against a cached,
+  few-hundred-word set, not a new request in the critical path. This was the missing third option.
+- **Verified live, repeating D-069's own measurement:** `retrieve("kubernetis rolbak")` still ranks the
+  wrong-but-related section first (0.665 vs. 0.659) on the *raw* query — unchanged, since nothing about
+  `retrieve()` itself changed. `correct_typos("kubernetis rolbak")` returns `"kubernetes rollback"`, and
+  `retrieve()` on the corrected string now ranks Kubernetes Cluster Operations Guide › 4.3 Rollback first
+  (0.773) ahead of the Disaster Recovery Runbook's section (0.764) — the order is reversed, fixing the exact
+  case D-069 measured.
+- **Two real false positives found and fixed while building this, each confirmed by measuring the actual
+  ratio, not guessed:** (1) "step" → "steps" (ratio 0.889, *higher* than the real typo "rolbak"→"rollback" at
+  0.857 — cutoff tuning alone can't separate them) — fixed with an explicit plural-mismatch exclusion, not a
+  cutoff change; (2) "fires" → "first" (ratio 0.8, exactly the original cutoff) — fixed by raising the cutoff
+  to 0.82, confirmed this still keeps both real typo cases (0.857, 0.9) while excluding this one. Checked
+  against all 19 golden-set questions (`evals/golden_set.json`) before and after both fixes: 0 unwanted
+  changes with both guards in place.
+- **Why cache the vocabulary instead of a bare query per request:** the extra query pair (`SELECT DISTINCT
+  title FROM documents`, `SELECT DISTINCT heading FROM chunks WHERE heading != ''`) is cheap on its own, but
+  `/ask` already makes 3 database round trips (D-056/Known issues) and is the slowest-measured endpoint in
+  the app (Phase 13.3) — adding a 4th unconditionally would make an already-recorded problem worse for no
+  benefit, since the knowledge base's vocabulary only changes on a reindex (daily cron, D-054). A 5-minute TTL
+  was chosen over wiring an explicit cache-invalidation hook into `scripts/ingest.py`'s reindex path — simpler,
+  and a few minutes of staleness after a rare reindex is an acceptable tradeoff.
+- **A real test-isolation bug found and fixed on the way:** the module-level cache is a real-time TTL, so
+  whichever test happened to populate it first would decide every other test's vocabulary for 5 minutes of
+  wall-clock time, via whatever fake database was active at that moment — order-dependent test behavior.
+  Fixed with a new autouse fixture in `tests/conftest.py` resetting the cache before and after every test.
+- **Alternatives considered:** a Gemini-based query rewrite — rejected for the same latency reason as D-069
+  and D-075; hybrid keyword+vector search — rejected as a bigger architecture change than this bug needs,
+  when the actual measured failure mode (two specific misspelled words) is addressed directly by vocabulary
+  correction; correcting on the full chunk content vocabulary instead of just titles/headings — rejected,
+  it would be a much larger word set (slower to load and to search) for no accuracy benefit, since the
+  failure mode is about topic words, which titles and headings already carry.
+- **Tradeoff accepted:** a typo of a word that never appears in any document title or heading (only in body
+  text) will not be corrected — e.g. "proccess" (for "process") isn't fixed, confirmed in testing, since
+  "process" isn't a heading/title word in this knowledge base. Acceptable: the measured failure mode (bug
+  #16) was specifically about topic words, which do appear in headings/titles.
+- **Revisit if:** a real query is seen where this vocabulary is too narrow to catch a genuine topic typo —
+  widen the source to include the first few words of each chunk's content, weighed against the added
+  load/cache cost; or if a false positive on a real heading/title word surfaces, tighten the cutoff or the
+  plural guard further, the same way the two found during this fix were handled.

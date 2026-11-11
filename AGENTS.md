@@ -161,6 +161,28 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   mutation checks (the route reverted to the plain question, the fold-in logic disabled entirely, the first
   user turn used instead of the most recent) each fail the right tests. 632 passed offline, 136 live
   deselected; `pytest -m live tests/test_ask_integration.py`: passes against real Postgres.
+- **6.1 addendum #4 (2026-11-11, D-077 — revisits bug #16, supersedes D-069's "recorded, not fixed"):** after
+  closing out the rest of the external bug report, bug #16 (typo-degraded ranking) was revisited and found to
+  have a third option neither D-069 nor D-075 considered — a local, no-network-call fix. New
+  `correct_typos(query)` in `app/rag.py`: corrects a query word against the knowledge base's own small
+  vocabulary (`documents.title` + `chunks.heading`, loaded once and cached 5 minutes) using `difflib`, cutoff
+  0.82, with an explicit guard against treating a plain plural as a typo. Wired into `/ask` before
+  `_build_retrieval_query` (D-075); `chat_completion()` and the response still see the real question. Verified
+  live, repeating D-069's own measurement: `retrieve("kubernetis rolbak")` still ranks the wrong section first
+  on the raw query (unchanged), but `correct_typos()` turns it into `"kubernetes rollback"`, and `retrieve()`
+  on that now ranks the correct Kubernetes rollback section first (0.773 vs 0.764) — the order is reversed.
+  **Two real false positives found and fixed while building this** (not guessed, measured): "step"→"steps"
+  (ratio 0.889, higher than the real typo "rolbak"→"rollback" at 0.857 — fixed with a plural-mismatch
+  exclusion, not a cutoff change) and "fires"→"first" (ratio 0.8 — fixed by raising the cutoff to 0.82, which
+  keeps both real typo cases). Checked against all 19 golden-set questions before and after: 0 unwanted
+  changes. **A real test-isolation bug found on the way:** the module-level vocabulary cache's real-time TTL
+  meant whichever test ran first would decide every other test's vocabulary for 5 minutes — fixed with a new
+  autouse fixture in `tests/conftest.py` resetting it before and after every test. 10 new tests in
+  `tests/test_rag.py` (the function directly, both false positives as named regression cases, empty-vocabulary
+  no-op, a live end-to-end re-measurement); `MemoryDB` gained the two new statements. 3 mutation checks (the
+  plural guard removed, the cutoff lowered back to 0.8, the route's call to `correct_typos()` removed) each
+  fail the right tests. 647 passed offline, 137 live deselected; `pytest -m live tests/test_rag.py
+  tests/test_ask_integration.py`: 10/10 pass.
 - **6.1 addendum (2026-11-10, D-056):** an external bug report (bug #2, High) found that D-012's 0.55 `/ask`
   threshold let off-topic text through: live probes scored "what is 2+2", "Terraform state locking" and "AWS S3
   lifecycle policy" at 0.518–0.583 — above 0.55 — so they were retrieved and shown as cited sources. Re-measured
@@ -849,6 +871,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-076): capped agent runs no longer over-count total_steps (synthesis wrap-up no longer counted) or leak raw Thought/Action/Observation text as the resolution (bug #24, Medium) — both reproduced live before fixing; the leak fix adds a code-level backstop since the prompt instruction alone wasn't reliable (same lesson as D-045) |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Checked bug #25 (/ask latency, Low) — confirmed as the same already-documented get_conn()/database-latency issue (Phase 13.3's eval findings, Known issues); no new fix, cross-referenced only |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Checked bugs #26 (poor throughput under concurrency, Low) and #27 (rate limits work as designed, Info) — #26 is the same already-documented latency root cause measured under load, recorded with connection pooling named as the real (infrastructure) fix; #27 confirmed correct, nothing to change. All 27 items in the external bug report are now accounted for |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-077, supersedes D-069): bug #16 (typo-degraded ranking) revisited and fixed — correct_typos() corrects a query against the knowledge base's own vocabulary (titles + headings) locally, no Gemini call, reversing the originally-measured ranking regression; two real false positives (a plural, an unrelated close word) found and fixed while building it |
 
 ## Deployment
 
@@ -976,12 +999,15 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   (Low — poor throughput under concurrency) is the same root cause measured under load, also recorded without
   a new fix (connection pooling is a real infrastructure change). Bug #27 (Info) was the report's own
   concurrent-request check confirming rate limits work exactly as designed — checked, nothing to fix, not
-  counted as a fix (same treatment as bug #10). **All 27 items from the report are now accounted for:** 20
-  fixed with a code change (#1–9, #11–15, #17, #18, #21–24), 2 checked and confirmed already correct with
-  nothing to change (#10, #27), and 5 measured and recorded rather than code-fixed because the real fix is a
-  genuine architecture/infrastructure tradeoff, not a small patch (#16 ranking, #19 rate-limiter window, #20
-  needs a Neon branch database, #25/#26 need connection pooling). Worth pulling the PDF's test file and
-  results doc into the repo so the methodology is tracked alongside the fixes, not only in a PDF.
+  counted as a fix (same treatment as bug #10). **Bug #16 (Low — typo-degraded ranking) was revisited and
+  fixed on 2026-11-11 (D-077, superseding D-069's "recorded, not fixed")** — a local, no-network-call
+  correction against the knowledge base's own vocabulary, a third option neither D-069 nor D-075 had
+  considered. **All 27 items from the report are now accounted for:** 21 fixed with a code change (#1–9,
+  #11–18, #21–24), 2 checked and confirmed already correct with nothing to change (#10, #27), and 4 measured
+  and recorded rather than code-fixed because the real fix is a genuine architecture/infrastructure tradeoff,
+  not a small patch (#19 rate-limiter window, #20 needs a Neon branch database, #25/#26 need connection
+  pooling). Worth pulling the PDF's test file and results doc into the repo so the methodology is tracked
+  alongside the fixes, not only in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
@@ -1045,12 +1071,16 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - **Evaluation results vary run to run** (temperature 0.2): treat a single run as a sample. A run with `--judge` takes ~3 minutes
   on the free tier and can hit Gemini's quota (the runner waits and retries). Two runbook sections that cover the same incident
   (e.g. pool exhaustion in the playbooks and the on-call guide) can make the answer's facts differ between runs (`g12`, once).
-- **A typo'd query can rank the wrong-but-related section first (bug #16 in the external report, Low, D-069 — recorded, not
-  fixed):** measured live, 2026-11-11 — `retrieve("kubernetis rolbak", top_k=5)` ranked Disaster Recovery Runbook › 5.2
-  Rollback first (similarity 0.665) ahead of the actually relevant Kubernetes Cluster Operations Guide › 4.3 Rollback (0.659,
-  position 2 of 5 — still present, not lost). This is normal embedding-search behavior on garbled text, not a logic bug; every
-  real fix (spell-correcting the query, hybrid keyword+vector search) is a genuine engineering tradeoff, not a small patch — see
-  D-069 for why none was made, including that spell-correction would add another Gemini call to the already-slow `/ask` path.
+- **Fixed, 2026-11-11 (D-077, supersedes D-069):** bug #16 — a typo'd query used to rank the wrong-but-related
+  runbook section first (`retrieve("kubernetis rolbak")` ranked Disaster Recovery Runbook › 5.2 Rollback,
+  0.665, ahead of the actually relevant Kubernetes Cluster Operations Guide › 4.3 Rollback, 0.659). D-069 had
+  declined a fix because the two options it considered (Gemini-based spell-correction, hybrid search) both
+  added latency to the already-slow `/ask` path. The fix found on revisiting: `app/rag.py`'s
+  `correct_typos()` corrects a query word against the knowledge base's own vocabulary (document titles +
+  chunk headings) locally, with no network call at all — `retrieve()` on the corrected query now ranks the
+  Kubernetes section first (0.773 vs 0.764), reversing the original ranking. See D-077 for the two false
+  positives found and fixed while building it, and why titles/headings (not full chunk content) were chosen
+  as the vocabulary source.
 - **The rate limiter's fixed window allows a boundary burst (bug #19 in the external report, Info, D-072 — recorded, not
   fixed):** `app/ratelimit.py`'s window is `int(now // 60) * 60` (D-036); a client can send up to the configured per-minute
   limit at the very end of one window and the same limit again at the start of the next, getting roughly 2x the stated

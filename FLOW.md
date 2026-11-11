@@ -104,9 +104,12 @@ Depends(auth.get_current_user_required)
 ```
 ask(AskRequest, Depends(ratelimit.rate_limited("ask")))   ← JWT required (Phase 5.4) + 10/min per user (Phase 10.5)
   1. [DB] create a conversation, or load its history via main._recent_history() (latest 8 messages, oldest first — D-058, was the first 8)
-  2. main._build_retrieval_query(question, history) → question, with the most recent user turn prepended if
-     history is non-empty (D-075, 2026-11-11 — fixes a pronoun follow-up losing retrieval context)
-  3. rag.retrieve_and_format(retrieval_query, top_k)
+  2. rag.correct_typos(question) → question, with a word corrected against the KB's own title/heading
+     vocabulary ([DB] loaded once, cached 5 min) if it's a close-enough non-match (D-077, 2026-11-11 —
+     fixes typo-degraded ranking, no Gemini call)
+  3. main._build_retrieval_query(corrected_question, history) → that, with the most recent user turn
+     prepended if history is non-empty (D-075, 2026-11-11 — fixes a pronoun follow-up losing retrieval context)
+  4. rag.retrieve_and_format(retrieval_query, top_k)
        → rag.retrieve(query, top_k, threshold=0.65)  # D-056, 2026-11-10 — was 0.55
             → llm.embed_query → llm.embed_text(task_type="RETRIEVAL_QUERY")
                  → llm.get_client() → [Gemini] embed_content, 768 dims
@@ -117,13 +120,13 @@ ask(AskRequest, Depends(ratelimit.rate_limited("ask")))   ← JWT required (Phas
             → list[ChunkResult]
        → rag.format_context_for_llm(chunks) → "Source: <title> › <heading>\n\n<content>" per chunk
      (503 if retrieval fails)
-  4. llm.chat_completion(question, context_strings, history)
+  5. llm.chat_completion(question, context_strings, history)
        → chunks carrying embedded instructions are DROPPED (guardrails.find_injection); the rest are fenced as
          <untrusted_data> → grounded prompt = context block + question, after the history turns (Phase 10.3, D-034)
        → [Gemini] generate_content (SYSTEM_INSTRUCTION, temperature 0.2, max 1024 tokens; same retry_call policy as above, D-032)
      (503 if generation fails)
-  5. [DB] INSERT the user + model messages (a failure here is logged as `history_persist_failed`, not raised)
-  6. AskResponse(answer, sources=chunks, question, conversation_id)
+  6. [DB] INSERT the user + model messages (a failure here is logged as `history_persist_failed`, not raised)
+  7. AskResponse(answer, sources=chunks, question, conversation_id)
 ```
 
 ### Conversations (all `Depends(auth.get_current_user_required)` — Phase 5.4)

@@ -53,7 +53,7 @@ from app.db import get_conn
 from app.llm import chat_completion
 from app.logs import RequestLogMiddleware, configure_logging, log_event
 from app.metrics import RequestMetricsMiddleware, read_metrics
-from app.rag import retrieve_and_format
+from app.rag import correct_typos, retrieve_and_format
 from app.ratelimit import login_rate_limited, rate_limited
 from scripts.ingest import reindex_knowledge_base
 from app.schemas import (
@@ -465,8 +465,9 @@ def ask(
 
     # ── Step 2: Retrieve relevant chunks via RAG ─────────────────────────────
     try:
+        retrieval_question = correct_typos(request.question)
         chunks, context_strings = retrieve_and_format(
-            query=_build_retrieval_query(request.question, history),
+            query=_build_retrieval_query(retrieval_question, history),
             top_k=request.top_k,
         )
     except Exception as exc:

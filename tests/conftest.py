@@ -43,6 +43,18 @@ def metrics_off_by_default(monkeypatch):
     monkeypatch.setattr(settings, "metrics_enabled", False)
 
 
+@pytest.fixture(autouse=True)
+def rag_vocabulary_cache_reset():
+    """D-077's typo-correction vocabulary is cached at module level with a real-time TTL (300s) — without
+    this, whichever test happens to run first within that window would decide every other test's vocabulary
+    for the rest of the suite (via whatever fake_db/memory_db happened to be active then), making behavior
+    order-dependent. Reset before and after every test so each one starts cold."""
+    import app.rag as rag
+    rag._vocabulary_cache = (0.0, frozenset())
+    yield
+    rag._vocabulary_cache = (0.0, frozenset())
+
+
 # ---------------------------------------------------------------------------
 # Phase 11.1: no real network, a fake Gemini client and a fake database
 # ---------------------------------------------------------------------------
@@ -320,6 +332,9 @@ class MemoryDB:
         on("SELECT COUNT(*) FROM documents", lambda p: [(len(self.documents),)])
         on("SELECT COUNT(*) FROM chunks", lambda p: [(len(self.chunks),)])
         on("SELECT source FROM documents", lambda p: [(d["source"],) for d in self.documents.values()])
+        # D-077 (bug #16): typo-correction vocabulary, loaded from the same two columns a real reindex fills.
+        on("SELECT DISTINCT title FROM documents", lambda p: [(d["title"],) for d in self.documents.values()])
+        on("SELECT DISTINCT heading FROM chunks", lambda p: [(c["heading"],) for c in self.chunks if c["heading"]])
         on("SELECT id FROM documents WHERE source = %s", lambda p: [(i,) for i in self._docs_by_source(p[0])])
         on("SELECT id, content_hash FROM documents WHERE source = %s",
            lambda p: [(i, self.documents[i]["content_hash"]) for i in self._docs_by_source(p[0])])
