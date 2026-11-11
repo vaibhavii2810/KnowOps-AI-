@@ -107,6 +107,18 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   one, locally (40/40 pytest) and live — checked directly against the `sprint-2` Vercel deployment
   (commit `b03a462`): `/tickets`, `/conversations`, `/ask` all 401 without a token, login succeeds, `/tickets`
   with the token returns 200.
+- **5.3 addendum (2026-11-11, D-067):** an external bug report (bug #14, Low) found `decode_access_token()`'s
+  401 echoed PyJWT's own exception text verbatim — verified live across four forged-token shapes before
+  fixing: `alg: none` → "The specified alg value is not allowed", garbage → "Not enough segments", a wrong
+  secret → "Signature verification failed", a wrong issuer → "Invalid issuer". Each told an attacker exactly
+  which check their forgery failed, letting them fix one thing and retry. Fixed with a single fixed message,
+  `"Invalid token: authentication failed."`, for every rejection reason; the specific reason is logged
+  server-side instead (`log_event`, error type only — never sent to the caller). The separate, already
+  distinct "Token has expired." message is unchanged on purpose — expiry isn't the kind of thing worth
+  hiding here. 1 new parametrized test (4 cases) in `tests/test_auth.py`, checking both that the specific
+  leaked phrase is gone and that the message is the exact fixed string; the 5 existing tests needed no
+  changes — they only ever checked the `"Invalid token:"` prefix. 1 mutation check (reverted to echoing the
+  library's text) fails all 4 cases. 617 passed offline, 130 live deselected.
 
 **Phase 6 — RAG retrieval + `/ask`** ✅
 - 6.1 `app/rag.py` `retrieve()`: embeds the question, cosine search (`<=>`) on `chunks`; default `top_k=5`,
@@ -733,6 +745,7 @@ Append one line per finished phase (newest last).
 | 2026-11-10 | — | Vaishnavi (with Claude) | Checked bug #10 (stale local GEMINI_CHAT_MODEL) against the real local .env — already correct, nothing to fix; live Gemini call confirmed working. Post-launch fix (D-064): top_k / conversation_id / max_steps now use strict=True so a JSON boolean is rejected (422) instead of silently coercing to 1/0 |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-065): get_crm_stats() now counts closed tickets too, so total_tickets == open + in_progress + resolved + closed — same function as D-057 (bug #3), a different fix, deliberately kept separate |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-066): path-level ids (ticket_id, conversation_id) now reject float-shaped strings like "1.0" and oversized values the same way body ids already did — checked strict=True first and found it would break normal "/tickets/1" lookups too, so used a custom validator instead |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-067): the 401 for an invalid JWT no longer echoes PyJWT's exception text (which check, alg/signature/issuer/structure, failed) — a single fixed message now, with the specific reason logged server-side only |
 
 ## Deployment
 
@@ -828,12 +841,13 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   header spoofing off Vercel, D-061), bug #8 (Medium — CORS wildcard origin echoed back with
   credentials, D-062), bug #9 (Medium — silent insecure defaults, D-063) and bug #11 (Low — a JSON
   boolean silently coerced to an integer, D-064), bug #12 (Medium — the `closed`-tickets stats gap,
-  D-065) and bug #13 (Low — a path id's "1.0"/oversized-value gap, D-066) are fixed, each
-  independently verified against the real code/data before fixing, not taken on the PDF's word alone.
-  Bug #10 (Low — a stale local `GEMINI_CHAT_MODEL`) was checked and found already correct — nothing to
-  fix, not counted as a fix. The other 14 (including #21, High — stored-XSS in the console via
-  `formatMarkdown`) are **not yet fixed or verified against this codebase**. Worth pulling the PDF's
-  test file and results doc into the repo so the rest aren't only tracked in a PDF.
+  D-065), bug #13 (Low — a path id's "1.0"/oversized-value gap, D-066) and bug #14 (Low — the 401
+  echoing PyJWT's exception text, D-067) are fixed, each independently verified against the real
+  code/data before fixing, not taken on the PDF's word alone. Bug #10 (Low — a stale local
+  `GEMINI_CHAT_MODEL`) was checked and found already correct — nothing to fix, not counted as a fix.
+  The other 13 (including #21, High — stored-XSS in the console via `formatMarkdown`) are **not yet
+  fixed or verified against this codebase**. Worth pulling the PDF's test file and results doc into
+  the repo so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any

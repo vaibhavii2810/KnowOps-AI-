@@ -24,7 +24,8 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import settings
-from app.logs import set_request_user
+from app.logs import log_event, set_request_user
+
 
 # HTTP Bearer scheme for Swagger UI and header extraction
 security_bearer = HTTPBearer(auto_error=False)
@@ -130,9 +131,10 @@ def decode_access_token(token: str) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
     except jwt.InvalidTokenError as exc:
+        log_event("jwt_rejected", "info", error_type=type(exc).__name__)  # operator visibility, nothing sent to the client
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid token: {exc}",
+            detail="Invalid token: authentication failed.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 

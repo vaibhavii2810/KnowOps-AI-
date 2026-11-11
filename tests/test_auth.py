@@ -154,6 +154,22 @@ def test_wrong_or_missing_issuer_is_rejected(issuer):
     _assert_rejected_as_invalid(jwt.encode(_claims(iss=issuer), settings.jwt_secret, algorithm=settings.jwt_algorithm))
 
 
+@pytest.mark.parametrize("token,leaked_phrase", [
+    (jwt.encode({"sub": "admin", "iss": "knowops-ai", "exp": 9999999999}, "", algorithm="none"), "alg"),
+    ("not-a-jwt-at-all", "segments"),
+    (jwt.encode(_claims(), "wrong-secret", algorithm="HS256"), "signature"),
+    (jwt.encode(_claims(iss="someone-else"), settings.jwt_secret, algorithm=settings.jwt_algorithm), "issuer"),
+])
+def test_the_401_does_not_leak_which_specific_check_failed(token, leaked_phrase):
+    """Bug #14 (external bug report, Low, D-067): the 401 used to echo PyJWT's own exception text verbatim
+    (e.g. "The specified alg value is not allowed"), telling an attacker exactly which validation rule
+    rejected their forged token instead of a flat, uninformative rejection."""
+    with pytest.raises(HTTPException) as excinfo:
+        decode_access_token(token)
+    assert leaked_phrase.lower() not in excinfo.value.detail.lower()
+    assert excinfo.value.detail == "Invalid token: authentication failed."
+
+
 @pytest.mark.parametrize("garbage", ["", "not-a-jwt", "a.b.c", "Bearer abc"])
 def test_garbage_tokens_are_rejected(garbage):
     _assert_rejected_as_invalid(garbage)

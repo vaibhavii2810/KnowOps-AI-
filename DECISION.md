@@ -1447,3 +1447,29 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Tradeoff accepted:** none found — a real id (`"1"`, `"01"`, padded) is accepted exactly as before;
   only a float-shaped or out-of-range string changes behavior, and it was never meaningful input.
 - **Revisit if:** another route takes a database row id from the path and needs the same treatment.
+
+### D-067 · The 401 for an invalid JWT no longer echoes the library's exception text
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #14, Low)
+- **Decision:** `decode_access_token()`'s `except jwt.InvalidTokenError` branch returns a fixed message,
+  `"Invalid token: authentication failed."`, for every kind of rejection (bad algorithm, bad signature,
+  malformed structure, wrong issuer, tampered payload). The specific reason is logged server-side instead
+  (`log_event("jwt_rejected", ..., error_type=type(exc).__name__)`) — visible to an operator reading logs,
+  never sent to the caller. The separate, already-distinct "Token has expired." message for
+  `jwt.ExpiredSignatureError` is unchanged — expiry isn't a secret worth hiding the way "which specific
+  forgery check failed" is.
+- **Why:** Verified live before fixing — four different forged-token shapes each got back PyJWT's own
+  exception text verbatim: `alg: none` → "The specified alg value is not allowed", a garbage string →
+  "Not enough segments", a wrong secret → "Signature verification failed", a wrong issuer → "Invalid
+  issuer". Each message tells an attacker exactly which rule their forgery attempt tripped, letting them
+  fix that one thing and retry — the algorithm, then the issuer, then the signature — instead of hitting a
+  wall that reveals nothing about what to try next.
+- **Alternatives considered:** reword each case's message to something less library-specific but still
+  distinct per failure type (rejected — still leaks *which* check failed, just in different words); say
+  nothing at all server-side either (rejected — a real integration bug becomes much harder to diagnose with
+  zero trace anywhere, and nothing here is sent to the client either way, so there's no cost to keeping it
+  in the logs).
+- **Tradeoff accepted:** an operator debugging a real integration issue can no longer see the specific
+  PyJWT reason directly in an HTTP response — they need the logs. That's the intended tradeoff: the
+  information still exists, just not in a place a prober can read it.
+- **Revisit if:** a legitimate need to surface the specific reason to the caller ever outweighs this
+  (unlikely for an auth endpoint).
