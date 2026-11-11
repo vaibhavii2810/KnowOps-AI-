@@ -14,7 +14,7 @@ from app import ratelimit
 from app.config import settings
 from app.db import get_conn
 from app.llm import SYSTEM_INSTRUCTION
-from app.main import _recent_history, app
+from app.main import _build_retrieval_query, _recent_history, app
 
 QUESTION = "How do I perform a database failover?"
 ANSWER = "Promote the replica, then repoint db.internal (Disaster Recovery Runbook › 4.2 Failover)."
@@ -116,6 +116,70 @@ def test_ask_follow_up_sends_the_conversation_history_to_the_model(client, auth_
     ]
     assert turns[2].role == "user" and turns[2].parts[0].text.rstrip().endswith(QUESTION)
     assert fake_db.queries("INSERT INTO messages")[0][1] == (101, QUESTION, 101, ANSWER)
+
+
+def test_build_retrieval_query_folds_in_the_most_recent_user_turn():
+    history = [
+        {"role": "user", "content": "How do I perform a database failover?"},
+        {"role": "model", "content": "Promote the replica."},
+    ]
+    assert _build_retrieval_query("What is the first step?", history) == \
+        "How do I perform a database failover? What is the first step?"
+
+
+def test_build_retrieval_query_with_no_history_returns_the_question_unchanged():
+    assert _build_retrieval_query("How do I perform a database failover?", []) == \
+        "How do I perform a database failover?"
+
+
+def test_build_retrieval_query_uses_the_latest_user_turn_not_the_first():
+    history = [
+        {"role": "user", "content": "What is RTO?"},
+        {"role": "model", "content": "15 minutes."},
+        {"role": "user", "content": "How do I perform a database failover?"},
+        {"role": "model", "content": "Promote the replica."},
+    ]
+    assert _build_retrieval_query("What is the first step?", history) == \
+        "How do I perform a database failover? What is the first step?"
+
+
+def test_build_retrieval_query_with_only_model_turns_in_history_returns_the_question_unchanged():
+    """Defensive: shouldn't happen in practice (every conversation starts with a user turn), but a history
+    with no user role at all must not crash or fold in an empty string."""
+    history = [{"role": "model", "content": "Some leftover system message."}]
+    assert _build_retrieval_query("A question.", history) == "A question."
+
+
+def test_ask_follow_up_retrieval_folds_in_the_last_user_turn(client, auth_headers, backend):
+    """Bug #22 (external bug report, Medium, D-075): retrieve() only ever saw the new question, so a
+    pronoun-style follow-up ("what is the first step of that procedure?") embedded to something generic
+    and missed the runbook section the conversation was actually about — confirmed live, where it matched
+    unrelated "first response"/"triage" sections instead of the failover procedure being discussed. The
+    retrieval query (what reaches embed_text) now folds in the most recent user turn; the question sent to
+    the model and returned in the response is untouched."""
+    fake_gemini, fake_db = backend
+    fake_db.on("SELECT id FROM conversations", [(101,)])
+    fake_db.on("FROM messages", [("user", "How do I perform a database failover?"), ("model", "Promote the replica.")])
+    follow_up = "What is the first step of that procedure?"
+
+    response = client.post(
+        "/ask", json={"question": follow_up, "conversation_id": 101}, headers=auth_headers
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["question"] == follow_up  # the response still reports the real question asked
+    assert fake_gemini.embed_calls[0]["contents"] == "How do I perform a database failover? " + follow_up
+    # the model-facing prompt still ends on the real question, not the folded retrieval query
+    assert fake_gemini.chat_calls[0]["contents"][-1].parts[0].text.rstrip().endswith(follow_up)
+
+
+def test_ask_retrieval_query_is_unchanged_on_a_first_question_with_no_history(client, auth_headers, backend):
+    """No history means nothing to fold in — the retrieval query is just the question, same as before."""
+    fake_gemini, fake_db = backend
+
+    client.post("/ask", json={"question": QUESTION}, headers=auth_headers)
+
+    assert fake_gemini.embed_calls[0]["contents"] == QUESTION
 
 
 def test_ask_history_sends_the_latest_messages_not_the_oldest(client, auth_headers, fake_gemini, memory_db):

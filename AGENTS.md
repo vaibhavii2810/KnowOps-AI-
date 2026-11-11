@@ -144,6 +144,23 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   too (couldn't exist before — the old `backend` fixture only seeded 2). 583 passed offline (116 live
   deselected, +1 new live test); mutation checks on both the real SQL and `MemoryDB`'s predicate each fail
   the right test.
+- **6.1 addendum #3 (2026-11-11, D-075):** an external bug report (bug #22, Medium) found that `retrieve()`
+  only ever embedded the new question on its own, so a pronoun-style follow-up ("what is the first step of
+  that procedure?") lost the conversation's actual topic and retrieved unrelated sections — confirmed live:
+  right after a database-failover question (5 sources ≥0.65), that follow-up alone matched generic
+  "first response"/"triage" sections (0.652–0.675) instead of the failover procedure, and the model correctly
+  refused given that context. Fixed with new `_build_retrieval_query(question, history)`: with history
+  present, the most recent **user** turn is prepended to the new question before embedding (chosen over a
+  Gemini query-rewrite call, which would add latency to the already-measured-slow `/ask` path, same tradeoff
+  as D-069); `chat_completion()` and the response's `question` field are unaffected. Verified live after the
+  fix: the same two-turn conversation now retrieves §4.2 Manual Failover Steps first (0.72) and answers
+  correctly. 6 new tests in `tests/test_ask_integration.py`: `_build_retrieval_query()` directly (folds in
+  the latest user turn, not the first; no history is a no-op; a history with no user turn at all is a
+  no-op, not a crash) and through the real route (the embed call receives the folded query while the model
+  prompt and response still show the real question; a first question with no history is unchanged). 3
+  mutation checks (the route reverted to the plain question, the fold-in logic disabled entirely, the first
+  user turn used instead of the most recent) each fail the right tests. 632 passed offline, 136 live
+  deselected; `pytest -m live tests/test_ask_integration.py`: passes against real Postgres.
 - **6.1 addendum (2026-11-10, D-056):** an external bug report (bug #2, High) found that D-012's 0.55 `/ask`
   threshold let off-topic text through: live probes scored "what is 2+2", "Terraform state locking" and "AWS S3
   lifecycle policy" at 0.518–0.583 — above 0.55 — so they were retrieved and shown as cited sources. Re-measured
@@ -809,6 +826,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Checked bug #19 (fixed-window rate limiter allows a ~2x boundary burst, D-072) against the real code — confirmed as the report itself says, "by design; document," not fixed; real fixes are genuine algorithm changes (sliding window, token bucket), not small patches |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Checked bug #20 (local .env points at the live database, D-073) and confirmed directly (a Phase 14.4 production ticket is readable locally) — documented as a known risk pending a Neon branch database; user chose to defer provisioning it |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-074): fixed stored XSS in the console's formatMarkdown() (bug #21, High) — the whole answer is now escaped before any markdown transform runs, closing the gap where plain text, bold and inline-code spans (unlike code fences) let a hostile payload execute; the JWT-in-localStorage theft vector itself is a separate, unaddressed architecture decision |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-075): /ask retrieval now folds the most recent user turn into the query (bug #22, Medium) — a pronoun-style follow-up used to embed alone and miss the conversation's actual topic, confirmed live (retrieved unrelated sections, model refused); fixed without an extra Gemini call, same latency tradeoff already weighed in D-069 |
 
 ## Deployment
 
@@ -925,8 +943,9 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   Phase-14.4 production ticket is readable through it) and recorded as a known risk pending an operational
   fix (a Neon branch database), not a code change. Bug #21 (High — stored XSS in `formatMarkdown()`, D-074)
   is fixed; its JWT-in-`localStorage` theft vector is a separate, unaddressed architecture decision — see
-  Known issues. The other 6 (#22–27) are **not yet fixed or verified against this codebase**. Worth pulling
-  the PDF's test file and results doc into the repo so the rest aren't only tracked in a PDF.
+  Known issues. Bug #22 (Medium — follow-up questions losing retrieval context, D-075) is fixed. The other 5
+  (#23–27) are **not yet fixed or verified against this codebase**. Worth pulling the PDF's test file and
+  results doc into the repo so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any

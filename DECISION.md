@@ -1678,3 +1678,43 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   replaces, with identical visible output for honest input.
 - **Revisit if:** the console ever needs richer markdown (tables, lists, links) — reconsider a real
   library+sanitizer combination then, rather than growing more hand-rolled regex transforms on escaped text.
+
+### D-075 · `/ask` retrieval folds in the most recent user turn, so pronoun-style follow-ups find the right section
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #22, Medium)
+- **Decision:** new `app/main.py` helper `_build_retrieval_query(question, history)`: with no history, returns
+  the question unchanged; with history, prepends the most recent **user** turn (not the model's reply, and
+  not the first turn of the conversation) to the new question before it's embedded. The `/ask` route now
+  calls `retrieve_and_format(query=_build_retrieval_query(request.question, history), ...)` instead of
+  passing `request.question` directly. Everything else is untouched: `chat_completion()` still receives
+  `request.question` as the real user message and the full `history` separately, and `AskResponse.question`
+  still reports exactly what was asked — only the text that gets embedded for vector search changes.
+- **Why:** verified live before fixing, not assumed from the report — asked "How do I perform a database
+  failover?" (got the full §4.2 procedure, 5 sources ≥0.65 similarity), then in the same conversation asked
+  "What is the first step of that procedure?" alone. `retrieve()` had nothing but that second sentence to
+  embed — no mention of failover, database, or any runbook term — and its top matches (0.652–0.675) were
+  unrelated sections ("3. First Response," "4. Alert Triage Decision Tree") that happened to clear the 0.65
+  threshold (D-056) on generic incident-response vocabulary alone. The model, correctly grounded only in
+  those irrelevant chunks, refused: "I don't have enough information." After the fix, the same two-turn
+  conversation retrieves §4.2 Manual Failover Steps first (0.72) and answers "SSH into the standby replica
+  host," correctly citing it.
+- **Why the most recent user turn, not something richer:** a Gemini-based query-rewrite step (ask the model
+  to turn the follow-up into a standalone question) was considered and rejected — it's a second LLM call on
+  the already-measured-slow `/ask` path (every golden question already over 5s per Phase 13.3; see Known
+  issues), the same latency tradeoff D-069 weighed against for query spell-correction. Concatenating the
+  last user turn is free (same single embed call, just different input text) and directly fixes the
+  measured failure mode: the follow-up alone lacked the *topic* words ("failover," "database"), and the
+  prior user turn is exactly where those words are.
+- **Alternatives considered:** folding in the model's last *answer* instead of (or as well as) the user's
+  last question — rejected for this fix; the user's own phrasing of the topic is the more direct signal, and
+  mixing in a full prior answer (which can be long, with code blocks) risks diluting the embedding with
+  procedural text rather than topic words. Using the whole `history` list (all 8 messages) instead of just
+  the one most recent user turn — rejected as unnecessary for the measured failure mode and adds more noise
+  to what's embedded for no measured benefit.
+- **Tradeoff accepted:** a follow-up that pivots to a genuinely new, unrelated topic ("...and also, what's
+  the Kubernetes rollback command?") now has the *previous* topic's words mixed into its retrieval query too,
+  which could in principle compete with the new topic for relevance. Not observed as a real problem in
+  testing — the new topic's own words still dominate a short combined string — but noted as the shape of
+  tradeoff this fix makes.
+- **Revisit if:** a live or eval-harness case surfaces a topic-pivot follow-up that retrieves worse because of
+  this fold-in; consider then whether to fold in only when the new question looks pronoun-like (a cheap
+  heuristic) rather than unconditionally.

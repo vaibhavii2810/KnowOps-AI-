@@ -408,6 +408,26 @@ def _recent_history(conn, conversation_id: int, limit: int = HISTORY_LIMIT) -> l
     return [{"role": r[0], "content": r[1]} for r in rows]
 
 
+def _build_retrieval_query(question: str, history: list[dict]) -> str:
+    """
+    Fold the most recent user turn into the retrieval query (bug #22, external bug report, Medium, D-075).
+
+    retrieve() only ever saw the new question on its own, so a pronoun-style follow-up ("what is the first
+    step of that procedure?") embeds to something generic and misses the runbook section the conversation is
+    actually about — confirmed live: that question alone, right after asking about database failover, scored
+    its highest matches (0.65-0.68) against unrelated "first response"/"triage" sections instead of the
+    failover procedure, and the model correctly refused given that context. Only the retrieval query changes
+    here — chat_completion() still gets the real question and the full history separately, so the answer and
+    what it's grounded in stay accurate to what was actually asked; this only widens what gets found.
+    """
+    if not history:
+        return question
+    last_user = next((m["content"] for m in reversed(history) if m["role"] == "user"), None)
+    if not last_user:
+        return question
+    return f"{last_user} {question}"
+
+
 @app.post(
     "/ask",
     response_model=AskResponse,
@@ -446,7 +466,7 @@ def ask(
     # ── Step 2: Retrieve relevant chunks via RAG ─────────────────────────────
     try:
         chunks, context_strings = retrieve_and_format(
-            query=request.question,
+            query=_build_retrieval_query(request.question, history),
             top_k=request.top_k,
         )
     except Exception as exc:
