@@ -86,6 +86,10 @@ HOSTILE_REQUESTS = [
     # --- path parameters ---
     ("ticket-id-text", "GET", "/tickets/abc", {}),
     ("ticket-id-float", "GET", "/tickets/1.5", {}),
+    ("ticket-id-whole-float", "GET", "/tickets/1.0", {}),
+    ("conversation-id-whole-float", "GET", "/conversations/1.0", {}),
+    ("ticket-id-zero", "GET", "/tickets/0", {}),
+    ("ticket-id-negative", "GET", "/tickets/-5", {}),
     ("ticket-id-huge", "GET", "/tickets/99999999999999999999", {}),
     ("conversation-id-huge", "GET", "/conversations/99999999999999999999", {}),
     ("triage-id-text", "POST", "/agent/triage/abc", {}),
@@ -152,6 +156,32 @@ def test_limit_bounds_are_enforced_on_both_list_routes(client, auth_headers):
     assert _first_error(client.get("/conversations?limit=101", headers=auth_headers))[0] == "query.limit"
     assert client.get("/tickets?limit=200", headers=auth_headers).status_code == 200
     assert client.get("/conversations?limit=100", headers=auth_headers).status_code == 200
+
+
+def test_oversized_path_id_is_a_422_matching_the_body_contract(client, auth_headers):
+    """Bug #13 (external bug report, Low, D-066): a path id above int4 max used to 404 (silently reaching
+    the database) where the equivalent body field (e.g. AskRequest.conversation_id) was already a 422 at
+    MAX_DB_ID — now both sides of the id contract agree."""
+    loc, msg = _first_error(client.get("/tickets/99999999999999999999", headers=auth_headers))
+    assert loc == "path.ticket_id"
+    assert "2147483647" in msg
+
+
+def test_a_whole_number_float_string_is_rejected_for_a_path_id(client, auth_headers):
+    """Bug #13: GET /tickets/1.0 used to be silently accepted as ticket 1 — pydantic's default int
+    parsing tolerates a float-shaped string the same way it tolerates "01" or padded whitespace. A
+    genuinely fractional id ("1.5") was already rejected before this fix; the whole-number-float form
+    wasn't."""
+    loc, _ = _first_error(client.get("/tickets/1.0", headers=auth_headers))
+    assert loc == "path.ticket_id"
+    # Ordinary forms a real client sends are unaffected.
+    assert client.get("/tickets/1", headers=auth_headers).status_code in (200, 404)
+    assert client.get("/tickets/01", headers=auth_headers).status_code in (200, 404)
+
+
+def test_zero_and_negative_path_ids_are_rejected(client, auth_headers):
+    assert _first_error(client.get("/tickets/0", headers=auth_headers))[0] == "path.ticket_id"
+    assert _first_error(client.get("/tickets/-5", headers=auth_headers))[0] == "path.ticket_id"
 
 
 # ---------------------------------------------------------------------------

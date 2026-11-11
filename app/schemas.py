@@ -49,6 +49,23 @@ TicketStatus = Annotated[Literal["open", "in_progress", "resolved", "closed"], B
 # Largest value a Postgres SERIAL (int4) id can take; anything above can never match a row.
 MAX_DB_ID = 2_147_483_647
 
+
+def _reject_float_like_id(value):
+    """Path params arrive as raw URL strings, and pydantic's default (lenient) int parsing tolerates
+    "1.0" / "01" / padded whitespace the same as "1" — fine for whitespace and leading zeros, not fine
+    for a float-shaped string silently becoming an int (bug #13, D-066). Reject anything that isn't a
+    plain (optionally signed) digit string; a real digit string still reaches pydantic's own int parsing
+    unchanged, same as before."""
+    if isinstance(value, str) and not value.strip().lstrip("+-").isdigit():
+        raise ValueError("Input should be a valid integer, not a float-like string")
+    return value
+
+
+# A database row id taken from the URL path (ticket_id, conversation_id, ...): same bounds as the
+# equivalent body field (MAX_DB_ID), plus rejecting "1.0"-style strings a body field never sees in the
+# first place (D-066) — the path and body contracts for an id now agree.
+PathId = Annotated[int, BeforeValidator(_reject_float_like_id), Field(gt=0, le=MAX_DB_ID)]
+
 QuestionText = _clean_text(3, 2000)
 TicketSubjectText = _clean_text(3, 200)
 TicketDescriptionText = _clean_text(5, 5000)

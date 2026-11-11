@@ -1420,3 +1420,30 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Tradeoff accepted:** none.
 - **Revisit if:** `VALID_STATUSES` ever grows again; each new status needs its own count here too, or this
   same "doesn't add up" bug recurs under a different name.
+
+### D-066 · Path-level ids get the same bound and the same float-string rejection as body ids
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #13, Low)
+- **Decision:** New `app/schemas.py` type `PathId` (`Annotated[int, BeforeValidator(_reject_float_like_id),
+  Field(gt=0, le=MAX_DB_ID)]`), used for `ticket_id` (`GET`/`PATCH /tickets/{id}`, `POST
+  /agent/triage/{id}`) and `conversation_id` (`GET /conversations/{id}`) in place of a bare `int`.
+- **Why:** Verified live before fixing: `GET /tickets/1.0` returned 200 (ticket 1), and
+  `GET /tickets/99999999999999999999` returned 404 — a plain "not found," not a validation error, because
+  the oversized id reached the database with no bound to stop it first. The equivalent body field
+  (`AskRequest.conversation_id`) was already `le=MAX_DB_ID` and a clean 422 at the same value. Two separate
+  gaps, same underlying cause (a bare `int` on the path parameters, no bound, no check beyond "parses as an
+  int"): pydantic's default (non-strict) int parsing tolerates a string like `"1.0"` the same way it
+  tolerates `"01"` or padded whitespace, which is normally fine — path params always arrive as raw strings —
+  but means a float-shaped id silently becomes an int rather than being rejected as the wrong shape.
+- **Why not `strict=True` (the fix used for bug #11, D-064):** verified directly first — `strict=True` on an
+  `int` field rejects a plain digit *string* too (`"1"` fails, not just `True`/`1.0`), which would break
+  every normal path lookup, since every path parameter is a string by construction. A custom
+  `BeforeValidator` that only rejects strings containing something other than optional sign + digits (after
+  stripping whitespace) is what's actually needed here; `strict=True` is right for body fields receiving
+  native JSON types, wrong for path parameters that are always strings.
+- **Alternatives considered:** leave path ids as a bare `int` and only add the bound (closes the 404-should-
+  be-422 half, not the `"1.0"` half — only solving part of what the report names); declare the path
+  parameter as `str` and parse it by hand in the route body (more code spread across four routes for the
+  same outcome a single reusable annotated type gives in one place).
+- **Tradeoff accepted:** none found — a real id (`"1"`, `"01"`, padded) is accepted exactly as before;
+  only a float-shaped or out-of-range string changes behavior, and it was never meaningful input.
+- **Revisit if:** another route takes a database row id from the path and needs the same treatment.

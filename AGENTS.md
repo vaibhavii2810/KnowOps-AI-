@@ -281,6 +281,23 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   mutation checks (each field's `strict=True` removed independently) each fail only that field's own tests,
   proving the three guards are independent, not one shared check. 605 passed offline, 122 live deselected;
   `pytest -m live tests/test_input_validation.py`: 61/61 pass.
+- **10.2 addendum #2 (2026-11-11, D-066):** an external bug report (bug #13, Low) found `GET /tickets/1.0`
+  silently accepted as ticket 1, while an oversized id (above int4 max) returned a plain 404 instead of a
+  422 — inconsistent with the equivalent body field, which was already bounded and a clean 422 at the same
+  value. Verified both live before fixing. **Why not `strict=True`** (the fix used for bug #11 above):
+  checked first — `strict=True` on `int` also rejects a plain digit *string* like `"1"`, which would break
+  every normal path lookup, since a path parameter is always a string by construction; the wrong tool for
+  this half of the input contract. Fixed with a new `app/schemas.py` type, `PathId` — a custom validator
+  that rejects only float-shaped strings (`"1.0"`) while leaving ordinary forms (`"1"`, `"01"`, padded
+  whitespace) untouched, plus the same `gt=0, le=MAX_DB_ID` bound the body fields already had. Used for all
+  four path-level ids that take a database row id: `ticket_id` (`GET`/`PATCH /tickets/{id}`,
+  `POST /agent/triage/{id}`) and `conversation_id` (`GET /conversations/{id}`) — the report named only
+  `/tickets/{id}`, but the same bare-`int` gap existed at all four, so all four got the fix. 6 new rows in
+  `HOSTILE_REQUESTS` plus 3 precise tests (naming `path.ticket_id`, confirming the exact bound message, and
+  that ordinary ids still work). 3 mutation checks (the float-string validator removed, the bound removed,
+  the validator's condition disabled) each fail the right tests, proving the bound and the validator guard
+  independent halves of the fix. 613 passed offline, 130 live deselected; `pytest -m live
+  tests/test_input_validation.py`: 68/68 pass.
 - 10.3 Done. Measured first: of 5 attack cases against live Gemini, **E (a poisoned `lookup_runbook` result) hijacked
   the agent into calling `execute_recovery_action` 1 time in 3** (intermittent; the other cases held; some runs were
   inconclusive because of Gemini 429s). New `app/guardrails.py` (D-034): untrusted text is fenced as `<untrusted_data>`
@@ -715,6 +732,7 @@ Append one line per finished phase (newest last).
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-063): the app now refuses to start on Vercel if JWT_SECRET or APP_PASSWORD is still at its insecure default — exactly the condition D-007 named as its own revisit trigger; proven with a real subprocess cold-start test, not just the extracted check function |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Checked bug #10 (stale local GEMINI_CHAT_MODEL) against the real local .env — already correct, nothing to fix; live Gemini call confirmed working. Post-launch fix (D-064): top_k / conversation_id / max_steps now use strict=True so a JSON boolean is rejected (422) instead of silently coercing to 1/0 |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-065): get_crm_stats() now counts closed tickets too, so total_tickets == open + in_progress + resolved + closed — same function as D-057 (bug #3), a different fix, deliberately kept separate |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-066): path-level ids (ticket_id, conversation_id) now reject float-shaped strings like "1.0" and oversized values the same way body ids already did — checked strict=True first and found it would break normal "/tickets/1" lookups too, so used a custom validator instead |
 
 ## Deployment
 
@@ -809,12 +827,13 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   (Medium — short sections silently dropped from the index, D-060), bug #7 (Medium — login-limit
   header spoofing off Vercel, D-061), bug #8 (Medium — CORS wildcard origin echoed back with
   credentials, D-062), bug #9 (Medium — silent insecure defaults, D-063) and bug #11 (Low — a JSON
-  boolean silently coerced to an integer, D-064) and bug #12 (Medium — the `closed`-tickets stats gap,
-  D-065) are fixed, each independently verified against the real code/data before fixing, not taken on
-  the PDF's word alone. Bug #10 (Low — a stale local `GEMINI_CHAT_MODEL`) was checked and found already
-  correct — nothing to fix, not counted as a fix. The other 15 (including #21, High — stored-XSS in the
-  console via `formatMarkdown`) are **not yet fixed or verified against this codebase**. Worth pulling
-  the PDF's test file and results doc into the repo so the rest aren't only tracked in a PDF.
+  boolean silently coerced to an integer, D-064), bug #12 (Medium — the `closed`-tickets stats gap,
+  D-065) and bug #13 (Low — a path id's "1.0"/oversized-value gap, D-066) are fixed, each
+  independently verified against the real code/data before fixing, not taken on the PDF's word alone.
+  Bug #10 (Low — a stale local `GEMINI_CHAT_MODEL`) was checked and found already correct — nothing to
+  fix, not counted as a fix. The other 14 (including #21, High — stored-XSS in the console via
+  `formatMarkdown`) are **not yet fixed or verified against this codebase**. Worth pulling the PDF's
+  test file and results doc into the repo so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any

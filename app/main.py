@@ -68,6 +68,7 @@ from app.schemas import (
     HealthResponse,
     LoginRequest,
     MetricsResponse,
+    PathId,
     Priority,
     MessageRecord,
     TicketCreateRequest,
@@ -265,7 +266,7 @@ def list_conversations_endpoint(
     tags=["Conversations"],
 )
 def get_conversation_endpoint(
-    conversation_id: int,
+    conversation_id: PathId,
     current_user: dict = Depends(get_current_user_required),
 ) -> ConversationDetail:
     """Retrieve full message history for a specific conversation thread."""
@@ -549,7 +550,7 @@ def api_get_ticket_stats(
     tags=["CRM"],
 )
 def api_get_ticket(
-    ticket_id: int,
+    ticket_id: PathId,
     current_user: dict = Depends(get_current_user_required),
 ) -> TicketResponse:
     """Retrieve a single incident ticket by ID."""
@@ -569,7 +570,7 @@ def api_get_ticket(
     tags=["CRM"],
 )
 def api_update_ticket(
-    ticket_id: int,
+    ticket_id: PathId,
     request: TicketUpdateRequest,
     current_user: dict = Depends(get_current_user_required),
 ) -> TicketResponse:
@@ -625,7 +626,7 @@ def api_agent_chat(
     tags=["Agent"],
 )
 def api_agent_triage(
-    ticket_id: int,
+    ticket_id: PathId,
     current_user: dict = Depends(rate_limited("agent")),
 ) -> AgentTriageResponse:
     """
