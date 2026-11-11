@@ -209,11 +209,13 @@ def get_crm_stats() -> dict:
         open_count = conn.execute("SELECT COUNT(*) FROM tickets WHERE status = 'open'").fetchone()[0]
         in_progress = conn.execute("SELECT COUNT(*) FROM tickets WHERE status = 'in_progress'").fetchone()[0]
         resolved = conn.execute("SELECT COUNT(*) FROM tickets WHERE status = 'resolved'").fetchone()[0]
+        closed = conn.execute("SELECT COUNT(*) FROM tickets WHERE status = 'closed'").fetchone()[0]
         p1_count = conn.execute("SELECT COUNT(*) FROM tickets WHERE priority = 'P1' AND status IN ('open', 'in_progress')").fetchone()[0]
     return {
         "total_tickets": total,
         "open": open_count,
         "in_progress": in_progress,
         "resolved": resolved,
+        "closed": closed,  # D-065: without this, total_tickets != open + in_progress + resolved once any ticket is closed
         "active_p1_incidents": p1_count,
     }

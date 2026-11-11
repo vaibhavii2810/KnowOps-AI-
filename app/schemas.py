@@ -259,6 +259,7 @@ class CRMStatsResponse(BaseModel):
     open: int
     in_progress: int
     resolved: int
+    closed: int
     active_p1_incidents: int
 
 

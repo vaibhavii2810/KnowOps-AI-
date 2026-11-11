@@ -136,7 +136,8 @@ GET  /conversations/{id}    → get_conversation_endpoint()    → [DB] conversa
 POST  /tickets         → api_create_ticket()    → crm.create_ticket()        → [DB] INSERT (priority is validated P1–P4 → 422 otherwise, default P2)
 GET   /tickets         → api_list_tickets()     → crm.list_tickets()         → [DB] SELECT, P1 first, newest first
                          (?status= and ?priority= validated → 422 for unknown values; ?limit= 1–200)
-GET   /tickets/stats   → api_get_ticket_stats() → crm.get_crm_stats()        → [DB] 5 COUNT queries
+GET   /tickets/stats   → api_get_ticket_stats() → crm.get_crm_stats()        → [DB] 6 COUNT queries (open,
+                          in_progress, resolved, closed, total, active P1 — D-065 added closed)
 GET   /tickets/{id}    → api_get_ticket()       → crm.get_ticket()           → [DB] (404 if None)
 PATCH /tickets/{id}    → api_update_ticket()    → crm.update_ticket_status() → [DB] UPDATE (bad status → 422 at validation, was 400; missing → 404)
 ```

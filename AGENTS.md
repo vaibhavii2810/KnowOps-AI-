@@ -191,9 +191,20 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   SQL, reverted only `MemoryDB`'s predicate while keeping the real fix) each fail it — the second one proves
   the test wasn't just passing by fragment-matching coincidence. 582 passed offline (115 live deselected);
   `pytest -m live tests/test_crm.py`: passes against real Postgres too.
-  **Related, not fixed here (kept out of scope on purpose):** bug #12 — `get_crm_stats()` never counts
-  `closed` tickets at all, so `total_tickets != open + in_progress + resolved`. Same function, same root
-  gap, but a different fix (adding a field to the returned dict, not changing a filter) — tracked separately.
+  Bug #12 (same function, a different fix) was deliberately left out of this commit — see the addendum below.
+- **8.1 addendum #2 (2026-11-10, D-065):** bug #12 (Medium), kept out of D-057 above on purpose: `get_crm_stats()`
+  never counted `closed` tickets at all, so `total_tickets != open + in_progress + resolved` as soon as any
+  ticket was closed — a dashboard's own numbers didn't add up. Fixed: a `closed` count added to the returned
+  dict and to `CRMStatsResponse`. `MemoryDB`'s status-count loop (`tests/conftest.py`) gained `"closed"`. New
+  test in `tests/test_crm.py` creates one closed and one still-open ticket (not just one ticket total — see
+  below) and checks the full breakdown sums to `total_tickets`. **A real test-writing mistake found by
+  mutation testing:** the first version used only one ticket; removing `MemoryDB`'s new `"closed"` fragment
+  made the query fall through to the broader `SELECT COUNT(*) FROM tickets` fragment, returning the *total*
+  — which, with exactly one ticket, coincidentally equals the correct `closed` count, so that mutation passed
+  when it should have failed. Added a second, still-open ticket so the two counts can't coincidentally agree;
+  the same mutation then correctly failed. 3 mutation checks (the field removed, the count hardcoded to 0,
+  `MemoryDB`'s fragment removed) each fail the strengthened test. 606 passed offline (123 live deselected,
+  +1 new live test); `pytest -m live tests/test_crm.py -k closed_tickets`: passes against real Postgres too.
 
 **Phase 9 — Automation (cron + n8n)** ✅
 - 9.1 `GET /cron/reindex` (was `POST`, counted rows only) now actually re-ingests new/changed `data/docs/`
@@ -703,6 +714,7 @@ Append one line per finished phase (newest last).
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-062): CORS allow_credentials switched to False — paired with allow_origins=["*"], it had made Starlette echo back any requesting origin with credentials allowed; verified live before fixing, then closed (auth is a Bearer token, never a cookie, so nothing was actually protected) |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Post-launch fix (D-063): the app now refuses to start on Vercel if JWT_SECRET or APP_PASSWORD is still at its insecure default — exactly the condition D-007 named as its own revisit trigger; proven with a real subprocess cold-start test, not just the extracted check function |
 | 2026-11-10 | — | Vaishnavi (with Claude) | Checked bug #10 (stale local GEMINI_CHAT_MODEL) against the real local .env — already correct, nothing to fix; live Gemini call confirmed working. Post-launch fix (D-064): top_k / conversation_id / max_steps now use strict=True so a JSON boolean is rejected (422) instead of silently coercing to 1/0 |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-065): get_crm_stats() now counts closed tickets too, so total_tickets == open + in_progress + resolved + closed — same function as D-057 (bug #3), a different fix, deliberately kept separate |
 
 ## Deployment
 
@@ -797,13 +809,12 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   (Medium — short sections silently dropped from the index, D-060), bug #7 (Medium — login-limit
   header spoofing off Vercel, D-061), bug #8 (Medium — CORS wildcard origin echoed back with
   credentials, D-062), bug #9 (Medium — silent insecure defaults, D-063) and bug #11 (Low — a JSON
-  boolean silently coerced to an integer, D-064) are fixed, each independently verified against the
-  real code/data before fixing, not taken on the PDF's word alone. Bug #10 (Low — a stale local
-  `GEMINI_CHAT_MODEL`) was checked and found already correct — nothing to fix, not counted as a fix.
-  The other 16 (including #21, High — stored-XSS in the console via `formatMarkdown`, and #12,
-  Medium — the related `closed`-tickets gap in the same stats function D-057 touched, left out on
-  purpose) are **not yet fixed or verified against this codebase**. Worth pulling the PDF's test file
-  and results doc into the repo so the rest aren't only tracked in a PDF.
+  boolean silently coerced to an integer, D-064) and bug #12 (Medium — the `closed`-tickets stats gap,
+  D-065) are fixed, each independently verified against the real code/data before fixing, not taken on
+  the PDF's word alone. Bug #10 (Low — a stale local `GEMINI_CHAT_MODEL`) was checked and found already
+  correct — nothing to fix, not counted as a fix. The other 15 (including #21, High — stored-XSS in the
+  console via `formatMarkdown`) are **not yet fixed or verified against this codebase**. Worth pulling
+  the PDF's test file and results doc into the repo so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any

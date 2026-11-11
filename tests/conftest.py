@@ -294,7 +294,7 @@ class MemoryDB:
         on("UPDATE tickets SET status = %s, resolution_notes = %s, updated_at = %s WHERE id = %s",
            lambda p: self._update_ticket(p[3], p[0], p[2], p[1]))
         on("SELECT COUNT(*) FROM tickets", lambda p: [(len(self.tickets),)])
-        for status in ("open", "in_progress", "resolved"):
+        for status in ("open", "in_progress", "resolved", "closed"):
             on(f"SELECT COUNT(*) FROM tickets WHERE status = '{status}'",
                lambda p, status=status: [(sum(t[4] == status for t in self.tickets.values()),)])
         on("SELECT COUNT(*) FROM tickets WHERE priority = 'P1' AND status IN ('open', 'in_progress')",

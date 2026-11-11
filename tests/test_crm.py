@@ -94,6 +94,24 @@ def test_closed_p1_ticket_is_not_counted_as_an_active_incident():
     assert after == before - 1
 
 
+def test_closed_tickets_are_counted_so_the_stats_add_up():
+    """Bug #12 (external bug report, Medium, D-065): get_crm_stats() counted open/in_progress/resolved but
+    never closed, so total_tickets != open + in_progress + resolved once any ticket was closed — the
+    dashboard's own numbers didn't add up. Related to bug #3/D-057 (same function), fixed separately.
+    Keeps a second, still-open ticket around on purpose: with only one ticket total, a "closed" count that
+    wrongly fell back to the total-tickets count would coincidentally match anyway — this is what actually
+    caught that in mutation testing."""
+    before = get_crm_stats()
+    stays_open = create_ticket(subject="Stays open", description="Full probe.", priority="P4")
+    to_close = create_ticket(subject="To be closed", description="Full probe.", priority="P3")
+    update_ticket_status(ticket_id=to_close["id"], status="closed")
+
+    after = get_crm_stats()
+    assert after["closed"] == before["closed"] + 1
+    assert after["open"] == before["open"] + 1  # stays_open, not folded into "closed"
+    assert after["total_tickets"] == after["open"] + after["in_progress"] + after["resolved"] + after["closed"]
+
+
 def test_api_create_ticket_endpoint(client, auth_headers):
     """POST /tickets should create a new ticket and return 200 with a valid token."""
     payload = {

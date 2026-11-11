@@ -1396,3 +1396,27 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   changes behavior, and that's the point.
 - **Revisit if:** another request field is added that takes a plain integer from a client and should get
   the same guard.
+
+### D-065 · `get_crm_stats()` now counts `closed` tickets too
+- **Date · by · source:** 2026-11-10 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #12, Medium)
+- **Decision:** `get_crm_stats()` adds a `closed` count (`SELECT COUNT(*) FROM tickets WHERE status = 'closed'`)
+  to the dict it returns, and `CRMStatsResponse` gains a matching `closed: int` field. `total_tickets` is
+  unchanged (it already counted every row); the fix is that the breakdown now adds up to it.
+- **Why:** `VALID_STATUSES` is `{open, in_progress, resolved, closed}`, but the stats function only ever
+  broke out three of those four — `total_tickets != open + in_progress + resolved` as soon as any ticket was
+  closed, which is exactly what a dashboard built on this endpoint would show as numbers that don't add up.
+  Same root function as D-057 (bug #3), but a different fix — D-057 changed which statuses count as
+  "active," this adds a status that wasn't reported at all — so it was deliberately kept out of that commit
+  and done separately here.
+- **A real test-writing mistake found and fixed via mutation testing:** the first version of the regression
+  test used only one ticket total (created, then closed). Removing `MemoryDB`'s new `'closed'` status
+  fragment made that query fall through to the broader `SELECT COUNT(*) FROM tickets` fragment, returning
+  the *total* count instead — which, with exactly one ticket, coincidentally equals the correct `closed`
+  count anyway, so the mutation passed when it should have failed. Fixed by adding a second, still-open
+  ticket, so a wrongly total-shaped "closed" count diverges from the correct one and the test actually
+  proves the fragment is being used, not coincidentally safe.
+- **Alternatives considered:** none seriously — this is the direct, minimal fix for a stat that was simply
+  missing; no design tradeoff to weigh.
+- **Tradeoff accepted:** none.
+- **Revisit if:** `VALID_STATUSES` ever grows again; each new status needs its own count here too, or this
+  same "doesn't add up" bug recurs under a different name.
