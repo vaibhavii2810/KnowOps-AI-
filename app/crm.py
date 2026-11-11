@@ -19,6 +19,11 @@ from app.db import get_conn
 VALID_STATUSES = {"open", "in_progress", "resolved", "closed"}
 VALID_PRIORITIES = {"P1", "P2", "P3", "P4"}
 
+# D-071: a sentinel distinct from None, so update_ticket_status() can tell "the caller didn't mention
+# resolution_notes at all" (leave it alone) apart from "the caller explicitly sent null" (clear it) —
+# PATCH /tickets/{id} previously had no way to say the second thing; both collapsed to None.
+UNSET = object()
+
 
 def create_ticket(
     subject: str,
@@ -160,10 +165,15 @@ def list_tickets(
 def update_ticket_status(
     ticket_id: int,
     status: str,
-    resolution_notes: Optional[str] = None,
+    resolution_notes=UNSET,
 ) -> Optional[dict]:
     """
-    Transition ticket status and optionally append resolution notes.
+    Transition ticket status and optionally set resolution notes.
+
+    resolution_notes has three states (D-071, bug #18): leave `UNSET` (the default) to leave the existing
+    notes untouched; pass a string to set them; pass `None` explicitly to clear them to NULL. Before this,
+    "not mentioned" and "explicitly null" were both just the Python value `None`, so PATCH /tickets/{id}
+    had no way to actually clear a wrong note once set.
     """
     status = status.lower()
     if status not in VALID_STATUSES:
@@ -171,14 +181,15 @@ def update_ticket_status(
 
     now = datetime.now(timezone.utc)
 
-    if resolution_notes is not None:
+    if resolution_notes is not UNSET:
+        cleaned_notes = resolution_notes.strip() if isinstance(resolution_notes, str) else None
         sql = """
             UPDATE tickets
             SET status = %s, resolution_notes = %s, updated_at = %s
             WHERE id = %s
             RETURNING id, subject, description, priority, status, created_at, updated_at, resolution_notes
         """
-        params = (status, resolution_notes.strip(), now, ticket_id)
+        params = (status, cleaned_notes, now, ticket_id)
     else:
         sql = """
             UPDATE tickets

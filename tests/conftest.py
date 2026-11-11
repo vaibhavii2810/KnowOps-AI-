@@ -245,6 +245,7 @@ def fake_db(monkeypatch, no_network):
 # ---------------------------------------------------------------------------
 
 _PRIORITY_RANK = {"P1": 1, "P2": 2, "P3": 3, "P4": 4}
+_NOTES_UNSET = object()  # D-071 (bug #18): distinct from a real None (explicit clear) in _update_ticket
 
 
 class MemoryDB:
@@ -290,7 +291,7 @@ class MemoryDB:
         on("FROM tickets WHERE priority = %s ORDER BY", lambda p: self._list_tickets(None, p[0], p[1]))
         on("FROM tickets WHERE status = %s AND priority = %s ORDER BY", lambda p: self._list_tickets(p[0], p[1], p[2]))
         on("UPDATE tickets SET status = %s, updated_at = %s WHERE id = %s",
-           lambda p: self._update_ticket(p[2], p[0], p[1], None))
+           lambda p: self._update_ticket(p[2], p[0], p[1], _NOTES_UNSET))
         on("UPDATE tickets SET status = %s, resolution_notes = %s, updated_at = %s WHERE id = %s",
            lambda p: self._update_ticket(p[3], p[0], p[2], p[1]))
         on("SELECT COUNT(*) FROM tickets", lambda p: [(len(self.tickets),)])
@@ -372,7 +373,9 @@ class MemoryDB:
         if ticket is None:
             return []
         ticket[4], ticket[6] = status, updated_at
-        if notes is not None:
+        if notes is not _NOTES_UNSET:
+            # D-071 (bug #18): notes=None here means "explicitly clear" (the real SQL sets it to NULL
+            # unconditionally on this branch), distinct from the other branch's _NOTES_UNSET ("not mentioned").
             ticket[7] = notes
         return self._ticket_rows([ticket_id])
 

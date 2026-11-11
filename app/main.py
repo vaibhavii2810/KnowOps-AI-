@@ -576,12 +576,13 @@ def api_update_ticket(
     current_user: dict = Depends(get_current_user_required),
 ) -> TicketResponse:
     """Update status ('open', 'in_progress', 'resolved', 'closed') and resolution notes."""
+    update_kwargs = {"ticket_id": ticket_id, "status": request.status}
+    if "resolution_notes" in request.model_fields_set:
+        # Present in the body at all — a string sets it, an explicit null clears it (D-071, bug #18).
+        # Omitted entirely: don't pass it, so update_ticket_status()'s own UNSET default leaves it alone.
+        update_kwargs["resolution_notes"] = request.resolution_notes
     try:
-        updated = update_ticket_status(
-            ticket_id=ticket_id,
-            status=request.status,
-            resolution_notes=request.resolution_notes,
-        )
+        updated = update_ticket_status(**update_kwargs)
     except ValueError as val_err:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(val_err))
 

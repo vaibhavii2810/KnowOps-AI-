@@ -120,6 +120,82 @@ def test_create_ticket_rejects_an_invalid_priority_instead_of_silently_defaultin
         create_ticket(subject="Test", description="Full probe for the regression test.", priority="P9")
 
 
+def test_update_ticket_status_leaves_notes_untouched_when_omitted():
+    """Bug #18 (external bug report, D-071): calling update_ticket_status() without resolution_notes at
+    all (the UNSET default) must leave an existing note alone."""
+    ticket = create_ticket(subject="Leave notes alone", description="Full probe.", priority="P3")
+    update_ticket_status(ticket_id=ticket["id"], status="in_progress", resolution_notes="Initial note.")
+
+    updated = update_ticket_status(ticket_id=ticket["id"], status="resolved")
+
+    assert updated["resolution_notes"] == "Initial note."
+
+
+def test_update_ticket_status_clears_notes_when_explicitly_none():
+    """Bug #18 (external bug report, D-071): passing resolution_notes=None explicitly must clear a
+    previously-set note to NULL — before this fix, None and "omitted" were indistinguishable."""
+    ticket = create_ticket(subject="Clear notes", description="Full probe.", priority="P3")
+    update_ticket_status(ticket_id=ticket["id"], status="in_progress", resolution_notes="Wrong note.")
+
+    updated = update_ticket_status(ticket_id=ticket["id"], status="in_progress", resolution_notes=None)
+
+    assert updated["resolution_notes"] is None
+
+
+def test_update_ticket_status_still_sets_a_real_note():
+    """The third state: a real string sets the note, same as before this fix."""
+    ticket = create_ticket(subject="Set notes", description="Full probe.", priority="P3")
+
+    updated = update_ticket_status(ticket_id=ticket["id"], status="resolved", resolution_notes="Fixed it.")
+
+    assert updated["resolution_notes"] == "Fixed it."
+
+
+def test_api_patch_ticket_can_clear_resolution_notes_via_explicit_null(client, auth_headers):
+    """Bug #18 at the HTTP layer: PATCH with resolution_notes: null must clear it, not leave it alone."""
+    create_res = client.post(
+        "/tickets",
+        json={"subject": "Clear via API", "description": "Full probe.", "priority": "P4"},
+        headers=auth_headers,
+    )
+    ticket_id = create_res.json()["id"]
+    client.patch(
+        f"/tickets/{ticket_id}",
+        json={"status": "in_progress", "resolution_notes": "Wrong note."},
+        headers=auth_headers,
+    )
+
+    patch_res = client.patch(
+        f"/tickets/{ticket_id}",
+        json={"status": "in_progress", "resolution_notes": None},
+        headers=auth_headers,
+    )
+
+    assert patch_res.status_code == 200
+    assert patch_res.json()["resolution_notes"] is None
+
+
+def test_api_patch_ticket_without_resolution_notes_field_leaves_it_untouched(client, auth_headers):
+    """Bug #18 at the HTTP layer: PATCH that omits resolution_notes entirely must leave the existing
+    note alone, not wipe it the way an explicit null does."""
+    create_res = client.post(
+        "/tickets",
+        json={"subject": "Omit leaves alone", "description": "Full probe.", "priority": "P4"},
+        headers=auth_headers,
+    )
+    ticket_id = create_res.json()["id"]
+    client.patch(
+        f"/tickets/{ticket_id}",
+        json={"status": "in_progress", "resolution_notes": "Keep me."},
+        headers=auth_headers,
+    )
+
+    patch_res = client.patch(f"/tickets/{ticket_id}", json={"status": "resolved"}, headers=auth_headers)
+
+    assert patch_res.status_code == 200
+    assert patch_res.json()["resolution_notes"] == "Keep me."
+
+
 def test_api_create_ticket_endpoint(client, auth_headers):
     """POST /tickets should create a new ticket and return 200 with a valid token."""
     payload = {

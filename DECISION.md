@@ -1559,3 +1559,41 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   would need to pass a valid priority explicitly. No such caller exists today.
 - **Revisit if:** `status`'s own silent fallback in `create_ticket()` is ever reachable by a real caller —
   then it should get the same treatment for the same reason.
+
+### D-071 · `PATCH /tickets/{id}` can now clear `resolution_notes` with an explicit `null`
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #18)
+- **Decision:** `app/crm.py`'s `update_ticket_status()` gained a module-level sentinel, `UNSET`, as
+  `resolution_notes`'s new default (was `None`). The route (`app/main.py`'s `api_update_ticket`) now checks
+  `"resolution_notes" in request.model_fields_set`: omitted entirely → don't pass the kwarg at all, so the
+  function's own `UNSET` default leaves the existing note untouched; present with a real string → sets it;
+  present as an explicit `null` → passed through as `None`, which now clears the stored note to `NULL`
+  (`cleaned_notes = resolution_notes.strip() if isinstance(resolution_notes, str) else None`). `app/schemas.py`
+  needed no change — `TicketUpdateRequest.resolution_notes: Optional[...] = Field(default=None, ...)` already
+  accepts `null`; Pydantic's `model_fields_set` is what actually distinguishes "omitted" from "sent as null,"
+  not the field's own type.
+- **Why:** verified directly before fixing — `TicketUpdateRequest(status="open").model_fields_set` is
+  `{"status"}` while `TicketUpdateRequest(status="open", resolution_notes=None).model_fields_set` is
+  `{"status", "resolution_notes"}`, confirmed through all three construction paths (direct, `model_validate`
+  on parsed JSON, and FastAPI's real request-parsing path). Before this, both cases produced the identical
+  Python value `request.resolution_notes is None`, so `update_ticket_status()` had no way to tell "the
+  caller didn't mention this field" apart from "the caller explicitly wants it cleared" — there was no way to
+  ever clear a wrong resolution note once one was set; every PATCH either set a new one or silently kept the
+  old one forever.
+- **A matching gap found in the offline test double:** `tests/conftest.py`'s `MemoryDB._update_ticket()` had
+  the identical bug one layer down — `if notes is not None: ticket[7] = notes` meant the real SQL's
+  unconditional `SET resolution_notes = %s` (which can legitimately bind `NULL`) was silently ignored by the
+  fake when the value was `None`, because the *other* branch (status-only update) also called `_update_ticket`
+  with `notes=None` to mean "don't touch." Fixed with the same sentinel pattern: a `_NOTES_UNSET` constant
+  passed only by the status-only branch; the with-notes branch passes `None` or a real string straight
+  through, and `_update_ticket` now checks `is not _NOTES_UNSET` instead of `is not None`. Without this,
+  the fix would have looked tested offline while `MemoryDB` quietly kept the old buggy behavior.
+- **Alternatives considered:** a separate `clear_resolution_notes()` function — rejected, it duplicates the
+  status-transition SQL and `update_ticket_status()` already has the `if/else` branching needed; a
+  dedicated `ResolutionNotesPatch` wrapper type (`{"set": "..."} | {"clear": True} | None`) instead of relying
+  on `model_fields_set` — rejected as a bigger contract change than this bug needs, when Pydantic already
+  tracks the distinction for free.
+- **Tradeoff accepted:** none identified — `tool_update_ticket` in `app/agent.py` takes `resolution_notes: str`
+  as a required (non-`Optional`) parameter, so the agent's own tool-calling path always supplies a real string
+  and is entirely unaffected by this change; no existing caller relied on the old "can't ever clear" behavior.
+- **Revisit if:** a future PATCH field needs the same three-state omitted/null/value distinction — reuse this
+  `model_fields_set` + sentinel pattern rather than inventing a new one.

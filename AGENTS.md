@@ -232,6 +232,22 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   'P9' ..." and that nothing was written to the database. 1 mutation check (reverted to the silent default)
   fails both new tests. 621 passed offline, 131 live deselected; `pytest -m live tests/test_crm.py -k
   invalid_priority`: passes.
+- **8.1 addendum #4 (2026-11-11, D-071):** an external bug report (bug #18) found `PATCH /tickets/{id}` could
+  never clear a `resolution_notes` field once set — omitting it and explicitly sending `null` both produced
+  the identical Python value `None`, so `update_ticket_status()` had no way to tell "not mentioned" apart
+  from "explicitly clear this." Fixed with a module-level `UNSET` sentinel as the function's new default
+  (was `None`), and the route now checks Pydantic's `request.model_fields_set` to decide which of the three
+  states applies (omitted → don't pass the kwarg; `null` → pass `None` through, clearing to `NULL`; a string
+  → sets it). **A matching gap found one layer down:** the offline `MemoryDB._update_ticket()` test double
+  had the identical bug — its status-only branch also used `None` to mean "don't touch notes," so it
+  couldn't distinguish that from a real caller explicitly clearing to `None`; fixed with the same sentinel
+  pattern (`_NOTES_UNSET`) so the fix is actually exercised offline, not just by a test that happened to pass
+  anyway. 5 new tests (`tests/test_crm.py`): 3 direct against `update_ticket_status()` (omit/clear/set) and 2
+  through the real HTTP route. 3 mutation checks (the route's `model_fields_set` check removed, the crm-layer
+  `UNSET` check loosened to also treat `None` as leave-alone, and `MemoryDB`'s own sentinel reverted) each
+  fail exactly the tests they should. No `app/schemas.py` or `FLOW.md` change needed — the fix is entirely in
+  which Python value reaches `update_ticket_status()`, not in the request's shape or the call chain. 626
+  passed offline, 136 live deselected; `pytest -m live tests/test_crm.py`: 19/19 pass against real Postgres.
 
 **Phase 9 — Automation (cron + n8n)** ✅
 - 9.1 `GET /cron/reindex` (was `POST`, counted rows only) now actually re-ingests new/changed `data/docs/`
@@ -777,6 +793,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-068): CRON_SECRET now compared with secrets.compare_digest, not != (a theoretical timing side-channel) — encoded to UTF-8 bytes first, avoiding the non-ASCII crash a naive switch would have reintroduced (same class as D-033) |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Measured and documented bug #16 (D-069) — a typo'd query can rank the wrong-but-related section first (0.665 vs 0.659, correct one still position 2 of 5); not fixed, since every real mitigation (spell-correction, hybrid search) is a genuine architecture tradeoff, not a small patch, and spell-correction would add latency to the already-slow /ask path |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-070): create_ticket() now rejects an invalid priority (ValueError) instead of silently defaulting to P2, matching update_ticket_status()'s existing pattern — closes the gap where the agent's create_ticket tool had no Pydantic layer the HTTP API already had |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-071): PATCH /tickets/{id} can now clear resolution_notes with an explicit null — omitted vs. null used to collapse to the same None, so a wrong note could never be cleared; fixed with a model_fields_set check plus an UNSET sentinel, including a matching gap in MemoryDB's own test double |
 
 ## Deployment
 
@@ -878,10 +895,10 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   word alone. Bug #10 (Low — a stale local `GEMINI_CHAT_MODEL`) was checked and found already correct —
   nothing to fix, not counted as a fix. Bug #16 (Low — typo-degraded ranking, D-069) was measured and
   recorded as a known limitation rather than fixed — every real mitigation is an architecture tradeoff,
-  not a small patch. Bug #17 (Low — create_ticket's silent priority fallback, D-070) is fixed. The
-  other 10 (including #21, High — stored-XSS in the console via `formatMarkdown`) are **not yet fixed
-  or verified against this codebase**. Worth pulling the PDF's test file and results doc into the repo
-  so the rest aren't only tracked in a PDF.
+  not a small patch. Bug #17 (Low — create_ticket's silent priority fallback, D-070) and bug #18 (PATCH
+  /tickets/{id} could never clear resolution_notes, D-071) are fixed. The other 9 (including #21, High —
+  stored-XSS in the console via `formatMarkdown`) are **not yet fixed or verified against this codebase**.
+  Worth pulling the PDF's test file and results doc into the repo so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
