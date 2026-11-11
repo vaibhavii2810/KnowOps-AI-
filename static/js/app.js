@@ -444,9 +444,16 @@
   function formatMarkdown(text) {
     if (!text) return '';
 
+    // Escape the whole answer first (bug #21, external bug report, High, D-074): every transform below
+    // then runs on already-escaped text, so hostile markup in a model answer (a poisoned runbook, or the
+    // model echoing an injected <img onerror=...> payload) can never reach innerHTML as real HTML — not in
+    // a code block, inline code, bold text or plain paragraphs. None of the syntax characters these
+    // transforms look for (#, *, `, newline) are touched by escapeHtml.
+    let parsed = escapeHtml(text);
+
     // Replace ```bash ... ``` or ``` ... ```
-    let parsed = text.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (match, lang, code) => {
-      return `<pre><button class="copy-code-btn">Copy</button><code>${escapeHtml(code.trim())}</code></pre>`;
+    parsed = parsed.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (match, lang, code) => {
+      return `<pre><button class="copy-code-btn">Copy</button><code>${code.trim()}</code></pre>`;
     });
 
     // Replace inline `code`

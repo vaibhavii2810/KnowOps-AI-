@@ -415,6 +415,18 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   default-detection disabled, one secret's comparison broken, **the call removed from `app/main.py`
   entirely**) each fail the right tests — the last one is caught only by the subprocess tests, which is why
   both kinds exist. 601 passed offline, 118 live deselected.
+- **Stored-XSS addendum (2026-11-11, D-074):** an external bug report (bug #21, High) found `formatMarkdown()`
+  in `static/js/app.js` escaped HTML only inside fenced code blocks — an `<img src=x onerror=...>` payload in
+  plain answer text, inside `**bold**`, or inside inline `` `code` `` ran as real HTML (proved in Chrome per
+  the report), letting a poisoned runbook or a model echoing hostile text execute script in the console and
+  read the JWT out of `localStorage`. Fixed: the whole answer is now escaped first (`escapeHtml(text)`), and
+  every markdown transform runs on the already-escaped string — none of the markdown syntax characters
+  (`` ` ``, `*`, newline, the fence marker) are touched by escaping, so real formatting still renders
+  identically; only HTML-shaped content inside it is now inert. No JS test runner exists in this repo;
+  verified with a standalone Node script exercising the real function body against the report's exact payload
+  shapes in all four positions (plain text, bold, inline code, and the already-safe code fence) — all four
+  render as inert escaped text, and ordinary markdown is unchanged. The JWT-in-`localStorage` half of the
+  report's impact statement is not addressed by this fix — see Known issues.
 - **Phase 10 done-when check:** the 45 permanent hostile requests (and the 76-request fuzz before them) return no 5xx,
   with the limiter on; the 5 injection cases are blocked by the guardrails even for a fully hijacked model
   (D-034). Residual risk is recorded there: the detector is a heuristic.
@@ -796,6 +808,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-071): PATCH /tickets/{id} can now clear resolution_notes with an explicit null — omitted vs. null used to collapse to the same None, so a wrong note could never be cleared; fixed with a model_fields_set check plus an UNSET sentinel, including a matching gap in MemoryDB's own test double |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Checked bug #19 (fixed-window rate limiter allows a ~2x boundary burst, D-072) against the real code — confirmed as the report itself says, "by design; document," not fixed; real fixes are genuine algorithm changes (sliding window, token bucket), not small patches |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Checked bug #20 (local .env points at the live database, D-073) and confirmed directly (a Phase 14.4 production ticket is readable locally) — documented as a known risk pending a Neon branch database; user chose to defer provisioning it |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-074): fixed stored XSS in the console's formatMarkdown() (bug #21, High) — the whole answer is now escaped before any markdown transform runs, closing the gap where plain text, bold and inline-code spans (unlike code fences) let a hostile payload execute; the JWT-in-localStorage theft vector itself is a separate, unaddressed architecture decision |
 
 ## Deployment
 
@@ -910,9 +923,10 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   note — not a defect, and every real fix (sliding window, token bucket) is a genuine algorithm change.
   Bug #20 (Info — local `.env` points at the real production database, D-073) was confirmed directly (a
   Phase-14.4 production ticket is readable through it) and recorded as a known risk pending an operational
-  fix (a Neon branch database), not a code change. The other 7 (including #21, High — stored-XSS in the
-  console via `formatMarkdown`) are **not yet fixed or verified against this codebase**. Worth pulling the
-  PDF's test file and results doc into the repo so the rest aren't only tracked in a PDF.
+  fix (a Neon branch database), not a code change. Bug #21 (High — stored XSS in `formatMarkdown()`, D-074)
+  is fixed; its JWT-in-`localStorage` theft vector is a separate, unaddressed architecture decision — see
+  Known issues. The other 6 (#22–27) are **not yet fixed or verified against this codebase**. Worth pulling
+  the PDF's test file and results doc into the repo so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
@@ -939,6 +953,13 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   function running in `bom1`/`sfo1`/`iad1`, the database being in Singapore) — pinning the function's region next to
   Neon is worth testing. Not done. **The Phase 13.3 evaluation shows the cost from the user's side:** every golden question is
   over 5 s even in-process (median 5.6 s), and 14.2–14.4 s against the deployed site.
+- **The JWT is stored in `localStorage`, readable by any script on the page (part of bug #21's impact, High,
+  D-074 — not fixed):** `static/js/app.js`'s stored-XSS gap itself is fixed (D-074), removing the main way a
+  hostile payload could reach the page, but the token's storage location is unchanged — any other script
+  injection vector (a future XSS bug, a compromised dependency) could still read it straight out of
+  `localStorage` and act as the logged-in operator. Moving it to an httpOnly cookie is a real
+  auth-architecture change (server-side cookie issuance, CSRF protection, `SameSite` policy), not a small
+  patch, and was out of scope for the XSS fix itself.
 - **n8n triage workflow has no auth:** `n8n/incident_triage_workflow.json` calls `POST /tickets` and
   `/agent/triage/{id}` without an `Authorization` header, so since Phase 5.4 it would get 401s.
 - **Phase 7.1 (partial, remainder of D-015):** `create_ticket`/`escalate_to_human` were added (D-025), but

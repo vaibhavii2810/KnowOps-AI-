@@ -1642,3 +1642,39 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   risk (D-024) but understated it as "a different database" rather than confirming it as the same live one.
 - **Revisit if:** the user is ready to provision a Neon branch database — at that point, update `AGENTS.md`'s
   Deployment section and `.env.example` guidance to point local dev at the branch instead of production.
+
+### D-074 · Stored XSS in `formatMarkdown()` fixed by escaping the whole answer first
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #21, High)
+- **Decision:** `static/js/app.js`'s `formatMarkdown()` now calls `escapeHtml(text)` on the entire answer
+  *first*, then runs every markdown transform (code fences, inline code, bold, paragraph/`<br/>` splitting)
+  on the already-escaped string. Previously only the code-fence branch escaped its contents
+  (`escapeHtml(code.trim())`); plain text, inline `` `code` `` and `**bold**` spans were interpolated
+  straight into the HTML returned to `appendModelMessage()`'s `row.innerHTML =` assignment with no escaping
+  at all.
+- **Why this is safe:** `escapeHtml()` only touches `&`, `<`, `>`, `"`, `'` — none of the characters the
+  markdown regexes look for (`` ` ``, `*`, newline, the ` ```lang\n ` fence marker). Escaping first and then
+  matching markdown syntax on the escaped text therefore still finds every real code fence, inline-code span
+  and bold span exactly as before; the only change is that any `<`, `>` etc. inside the matched content is
+  now inert text, not live markup, regardless of which of the four paths (fence, inline code, bold, or plain
+  paragraph text) it arrives through.
+- **Verified before and after:** no JS test runner exists in this repo (`static/` is plain vanilla JS, no
+  `package.json`); verified instead with a standalone Node script exercising the real function body against
+  the report's exact payload shapes — `<img src=x onerror=alert(1)>` in plain text, inside `**bold**`, and
+  inside inline `` `code` ``, plus a `<script>` tag inside a fenced code block (already safe before this fix,
+  confirmed still safe after) — all four now render as inert escaped text (`&lt;img ...&gt;`), and an
+  ordinary answer with real bold/inline-code/paragraph markdown still renders identically to before.
+- **Alternatives considered:** a real markdown library (e.g. `marked` + `DOMPurify`) — more correct for
+  richer markdown, but a new dependency and a bigger change than this fix needs for the narrow set of
+  constructs the console actually renders (fences, inline code, bold, paragraphs); `textContent`-only
+  rendering (no HTML at all) — rejected, it would also kill the deliberate code-block/bold formatting that is
+  the whole point of `formatMarkdown()`.
+- **Scope note — the JWT-in-localStorage half of the report's impact statement is not addressed here:** the
+  report observes that XSS lets a hostile payload steal the JWT because it's stored in `localStorage`
+  (readable by any script in the page). This fix removes the XSS itself, which removes the *delivery
+  mechanism* for that theft; moving the token to an httpOnly cookie is a separate, much larger change
+  (cookie-based issuance, CSRF protection, SameSite policy — a real auth-architecture decision, not a small
+  patch) and is not attempted here. Recorded as a residual risk below the Known-issues line for this fix.
+- **Tradeoff accepted:** none identified for the fix itself — it is strictly more correct than the code it
+  replaces, with identical visible output for honest input.
+- **Revisit if:** the console ever needs richer markdown (tables, lists, links) — reconsider a real
+  library+sanitizer combination then, rather than growing more hand-rolled regex transforms on escaped text.
