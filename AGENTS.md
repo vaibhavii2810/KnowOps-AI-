@@ -217,6 +217,21 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   the same mutation then correctly failed. 3 mutation checks (the field removed, the count hardcoded to 0,
   `MemoryDB`'s fragment removed) each fail the strengthened test. 606 passed offline (123 live deselected,
   +1 new live test); `pytest -m live tests/test_crm.py -k closed_tickets`: passes against real Postgres too.
+- **8.1 addendum #3 (2026-11-11, D-070):** an external bug report (bug #17, Low) found `create_ticket(...,
+  priority="P9")` silently became `priority="P2"` while `POST /tickets` already rejected the same value with
+  a 422 (`TicketCreateRequest.priority` is a Pydantic `Literal`) — the two paths disagreed because the HTTP
+  route's validation happens entirely in Pydantic before `crm.create_ticket()` is called, but the agent's
+  `create_ticket` tool calls it directly with no such layer in front of it. `update_ticket_status()`, right
+  next to it in the same file, already raised `ValueError` for an invalid status — `create_ticket()` now
+  matches that exact pattern for priority. **No change needed anywhere else:** the agent loop's tool dispatch
+  already wraps every tool call in a generic `except Exception as e: observation = f"Tool execution error:
+  {e}"`, used for exactly this purpose already (e.g. a hallucinated keyword argument) — once
+  `create_ticket()` raises, that existing machinery turns it into a clear observation on its own. New tests:
+  a direct unit check in `tests/test_crm.py`, and an agent-level test in `tests/test_agent_dispatch.py` using
+  the real tool (not a spy) that confirms the model actually sees "Tool execution error: Invalid priority
+  'P9' ..." and that nothing was written to the database. 1 mutation check (reverted to the silent default)
+  fails both new tests. 621 passed offline, 131 live deselected; `pytest -m live tests/test_crm.py -k
+  invalid_priority`: passes.
 
 **Phase 9 — Automation (cron + n8n)** ✅
 - 9.1 `GET /cron/reindex` (was `POST`, counted rows only) now actually re-ingests new/changed `data/docs/`
@@ -761,6 +776,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-067): the 401 for an invalid JWT no longer echoes PyJWT's exception text (which check, alg/signature/issuer/structure, failed) — a single fixed message now, with the specific reason logged server-side only |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-068): CRON_SECRET now compared with secrets.compare_digest, not != (a theoretical timing side-channel) — encoded to UTF-8 bytes first, avoiding the non-ASCII crash a naive switch would have reintroduced (same class as D-033) |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Measured and documented bug #16 (D-069) — a typo'd query can rank the wrong-but-related section first (0.665 vs 0.659, correct one still position 2 of 5); not fixed, since every real mitigation (spell-correction, hybrid search) is a genuine architecture tradeoff, not a small patch, and spell-correction would add latency to the already-slow /ask path |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-070): create_ticket() now rejects an invalid priority (ValueError) instead of silently defaulting to P2, matching update_ticket_status()'s existing pattern — closes the gap where the agent's create_ticket tool had no Pydantic layer the HTTP API already had |
 
 ## Deployment
 
@@ -862,9 +878,10 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   word alone. Bug #10 (Low — a stale local `GEMINI_CHAT_MODEL`) was checked and found already correct —
   nothing to fix, not counted as a fix. Bug #16 (Low — typo-degraded ranking, D-069) was measured and
   recorded as a known limitation rather than fixed — every real mitigation is an architecture tradeoff,
-  not a small patch. The other 11 (including #21, High — stored-XSS in the console via `formatMarkdown`)
-  are **not yet fixed or verified against this codebase**. Worth pulling the PDF's test file and results
-  doc into the repo so the rest aren't only tracked in a PDF.
+  not a small patch. Bug #17 (Low — create_ticket's silent priority fallback, D-070) is fixed. The
+  other 10 (including #21, High — stored-XSS in the console via `formatMarkdown`) are **not yet fixed
+  or verified against this codebase**. Worth pulling the PDF's test file and results doc into the repo
+  so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any

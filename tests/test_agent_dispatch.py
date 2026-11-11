@@ -127,6 +127,27 @@ def test_wrong_argument_names_are_reported_back_to_the_model_not_raised(fake_gem
     assert "verb" in result["steps"][0]["observation"]
 
 
+def test_create_ticket_with_an_invalid_priority_is_reported_back_not_silently_defaulted(fake_gemini, memory_db):
+    """
+    Bug #17 (external bug report, Low, D-070): the agent's create_ticket tool has no Pydantic layer in
+    front of it the way POST /tickets does, so a hallucinated or prompt-injected priority used to be
+    silently downgraded to P2 with no signal. Uses the real tool (not a spy): create_ticket() now raises,
+    and the loop's existing generic tool-error handling turns that into a clear observation on its own —
+    no change needed anywhere else.
+    """
+    fake_gemini.reply(
+        step("create_ticket", {"subject": "Test", "description": "Full probe.", "priority": "P9"}),
+        step(final=True, answer="Done."),
+    )
+
+    result = run_agent("Log a critical ticket.", max_steps=3)
+
+    observation = result["steps"][0]["observation"]
+    assert observation.startswith("Tool execution error:")
+    assert "Invalid priority 'P9'" in observation
+    assert memory_db.tickets == {}  # nothing was created
+
+
 def test_a_tool_call_bundled_with_is_final_still_runs_and_ends_the_loop(spies, fake_gemini):
     """Offline twin of the live D-027 regression test in test_agent.py."""
     fake_gemini.reply(step("update_ticket", TOOL_CALLS["update_ticket"], final=True, answer="Ticket resolved."))

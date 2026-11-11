@@ -1532,3 +1532,30 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   whether it also fixes this; (b) the database-latency issue is resolved (see Known issues), which would
   change the cost-benefit of adding an extra Gemini call per `/ask`; (c) the Phase 13 eval harness starts
   catching ranking regressions from typo-like queries, which would argue for a dedicated golden-set case.
+
+### D-070 · `create_ticket()` rejects an invalid priority instead of silently defaulting to P2
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #17, Low)
+- **Decision:** `app/crm.py`'s `create_ticket()` now raises `ValueError(f"Invalid priority '{priority}'. Must
+  be one of {VALID_PRIORITIES}")` for a priority outside `{P1, P2, P3, P4}`, matching the pattern
+  `update_ticket_status()` (right next to it, in the same file) already used for an invalid status. `status`'s
+  own silent fallback to `"open"` is untouched — out of scope here, since no real caller (the HTTP route, the
+  agent tool) ever passes a custom `status` into `create_ticket` today.
+- **Why:** Verified directly — `create_ticket(..., priority="P9")` silently became `priority="P2"` with no
+  signal, while `POST /tickets` with the same value was already a 422 (`TicketCreateRequest.priority` is a
+  Pydantic `Literal["P1","P2","P3","P4"]`). The two paths disagreed because the HTTP route's validation
+  happens entirely in Pydantic *before* `crm.create_ticket()` is ever called, while the agent's
+  `create_ticket` tool calls it directly with whatever priority the model supplies — no Pydantic layer in
+  front of it at all. A hallucinated or prompt-injected priority was silently mislabeled with nothing in the
+  tool's own observation to flag it.
+- **The fix required no change anywhere else:** the agent loop's tool dispatch already wraps every tool call
+  in a generic `except Exception as e: observation = f"Tool execution error: {e}"` (used for exactly this
+  purpose already, e.g. a hallucinated keyword argument). Once `create_ticket()` raises, that existing
+  machinery turns it into a clear observation on its own.
+- **Alternatives considered:** validate only inside `tool_create_ticket()` (the agent-specific wrapper)
+  instead of in `crm.create_ticket()` itself — rejected, `app/crm.py` is the one place both callers
+  (the HTTP route, defensively, and the agent tool, for real) converge, and `update_ticket_status()` already
+  set this exact precedent there.
+- **Tradeoff accepted:** a hypothetical future direct Python caller relying on the old silent-P2 fallback
+  would need to pass a valid priority explicitly. No such caller exists today.
+- **Revisit if:** `status`'s own silent fallback in `create_ticket()` is ever reachable by a real caller —
+  then it should get the same treatment for the same reason.

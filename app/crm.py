@@ -38,7 +38,13 @@ def create_ticket(
     Returns:
         The newly created ticket record as a dictionary.
     """
-    priority = priority.upper() if priority.upper() in VALID_PRIORITIES else "P2"
+    # D-070: match update_ticket_status()'s existing pattern (raise, don't silently default) — the HTTP
+    # route already rejects an invalid priority via Pydantic before it gets here, but the agent's
+    # create_ticket tool calls this function directly with whatever the model supplies, with no such
+    # layer in front of it.
+    priority = priority.upper()
+    if priority not in VALID_PRIORITIES:
+        raise ValueError(f"Invalid priority '{priority}'. Must be one of {VALID_PRIORITIES}")
     status = status.lower() if status.lower() in VALID_STATUSES else "open"
     now = datetime.now(timezone.utc)
 

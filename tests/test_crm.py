@@ -112,6 +112,14 @@ def test_closed_tickets_are_counted_so_the_stats_add_up():
     assert after["total_tickets"] == after["open"] + after["in_progress"] + after["resolved"] + after["closed"]
 
 
+def test_create_ticket_rejects_an_invalid_priority_instead_of_silently_defaulting():
+    """Bug #17 (external bug report, Low, D-070): create_ticket("…","…","P9") used to silently become P2
+    while POST /tickets already rejected the same value with a 422 — update_ticket_status() right next to
+    it already raised ValueError the same way for an invalid status; create_ticket() now matches it."""
+    with pytest.raises(ValueError, match="Invalid priority 'P9'"):
+        create_ticket(subject="Test", description="Full probe for the regression test.", priority="P9")
+
+
 def test_api_create_ticket_endpoint(client, auth_headers):
     """POST /tickets should create a new ticket and return 200 with a valid token."""
     payload = {
