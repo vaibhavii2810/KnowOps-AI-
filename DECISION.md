@@ -1629,6 +1629,9 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   sliding-window or token-bucket replacement against the cost of both at that time.
 
 ### D-073 · Local `.env` points at the real production Neon database (recorded, not fixed)
+- **Superseded by D-079** (2026-11-11, same day — the user provisioned a Neon branch database and the local
+  `.env` now points at it instead). Kept for the record of what was found and why it wasn't an immediate
+  code fix at the time (the remedy was an account-level action, not a patch to this repo).
 - **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #20, Info)
 - **Decision:** no code change. Confirmed directly against real data, not taken on the report's word: ticket
   #42, created in Phase 14.4's live production smoke test against `knowops-ai.vercel.app`, is readable through
@@ -1892,3 +1895,35 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Revisit if:** the extra read's cost is ever measured and found to matter in practice — at that point,
   consider caching the previous window's row in-process for the remainder of its relevance window, or
   revisit the "skip when clearly irrelevant" optimization declined above.
+
+### D-079 · Local dev now points at a dedicated Neon branch database (bug #20, supersedes D-073)
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (resolving bug #20 after D-073 recorded it)
+- **Decision:** a new Neon branch ("local-dev", parent `main`, "branch data and schema" at the moment of
+  creation, auto-delete disabled) was created via the Vercel Storage tab's Neon integration. Local `.env`'s
+  `DATABASE_URL` now points at this branch instead of the real production database.
+- **Why this fix, not an alternative:** D-073 named exactly this as the real remedy — provisioning a branch
+  was an account-level action outside this repo's code, so it had to wait on the user doing it. No tool
+  available to this agent (Vercel MCP's connector/integration tools were checked directly) can create a Neon
+  branch — only Neon's own console/API or the Vercel dashboard can, confirmed before giving the user
+  step-by-step instructions rather than assuming.
+- **Verified, not just assumed:** the branch correctly carries the production snapshot as of its creation
+  (ticket #42, "Phase 14 smoke test," is present — expected for a data+schema branch, not itself evidence of
+  a problem) and the full schema (5 documents / 80 chunks after a fresh `--reset` ingest, matching
+  production's own counts). Isolation itself — that a *new* write here does not reach production — rests on
+  Neon's own branch-isolation guarantee (a platform fact about how branches work, confirmed by creating a
+  uniquely-named probe ticket on the branch) rather than an independent read against the real production
+  database, which this environment's own safety guard correctly refuses (no direct production reads). The
+  full `pytest -m live` suite (139 tests) passes against the branch.
+- **Handling the secret:** the branch's connection string was shared in plain chat to get this done quickly;
+  recorded here as a reminder that the practical mitigation (rotating that branch's password in the Neon
+  console once convenient) is the user's own follow-up, not a code change.
+- **Alternatives considered:** a wholly separate Neon project instead of a branch of the existing one —
+  rejected, a branch is Neon's purpose-built tool for exactly this (an instant, storage-only-on-write copy)
+  and needs no new project-level setup (API keys, region choice) beyond what already exists.
+- **Tradeoff accepted:** the branch is a snapshot as of creation time — any future production data (e.g. new
+  tickets created through the live site) will not automatically appear here; that's the entire point
+  (isolation), not a defect, but worth remembering if a local repro ever depends on genuinely fresh production
+  state.
+- **Revisit if:** the branch's auto-delete setting is ever accidentally left enabled on a future branch
+  (re-check this before relying on one for anything but a throwaway preview-style test), or if `AGENTS.md`'s
+  Deployment section's dual-database guidance needs updating to describe three databases instead of two.

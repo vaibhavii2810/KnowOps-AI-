@@ -894,6 +894,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Checked bugs #26 (poor throughput under concurrency, Low) and #27 (rate limits work as designed, Info) — #26 is the same already-documented latency root cause measured under load, recorded with connection pooling named as the real (infrastructure) fix; #27 confirmed correct, nothing to change. All 27 items in the external bug report are now accounted for |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-077, supersedes D-069): bug #16 (typo-degraded ranking) revisited and fixed — correct_typos() corrects a query against the knowledge base's own vocabulary (titles + headings) locally, no Gemini call, reversing the originally-measured ranking regression; two real false positives (a plural, an unrelated close word) found and fixed while building it |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-078, supersedes D-072): bug #19 (fixed-window rate limiter allows a boundary burst) revisited and fixed — check_rate_limit() now blends the previous fixed window's hits in by a linearly-decaying weight, one extra cheap read, no new storage; found and fixed a real fragment-matching collision in MemoryDB's test double along the way, and rewrote one existing test that had encoded the bug itself as correct behavior |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-079, supersedes D-073): bug #20 (local .env pointed at the real production database) resolved — a dedicated Neon branch database provisioned via Vercel's Storage tab, local .env repointed, knowledge base re-ingested, pytest -m live (139/139) verified against it; no Vercel MCP tool exists to create a Neon branch, confirmed before giving the user manual step-by-step instructions |
 
 ## Deployment
 
@@ -903,17 +904,16 @@ Append one line per finished phase (newest last).
   bundles `static/` and `data/`. These exist on the `sprint-2` branch.
 - Env vars live in that project's dashboard (Preview + Production), never in git. `.env` is gitignored.
 - Hobby plan: Git deploys only build commits by the project owner's account.
-- **Two Neon databases exist — and the local one is confirmed to be the real production database, not a safe
-  separate copy (bug #20 in the external report, Info, D-073 — recorded, not fixed):** the Vercel app's
-  `DATABASE_URL` points at a different Neon database from the one first used in a local `.env` (D-024).
-  Confirmed directly, 2026-11-11: ticket #42 ("Phase 14 smoke test," created live against production in
-  Phase 14.4) is readable through the *local* `.env`'s connection — it is the same database, not merely a
-  look-alike. Re-ingest after any `data/docs/` or chunker change into **each** one you care about:
-  `DATABASE_URL='<url>' python scripts/ingest.py --reset --quiet` (the env var overrides `.env`). A local
-  `.env` pointing at the live database means `pytest -m live` and any local write test write real rows into
-  production (plain `pytest` never touches any database, D-040). No code fix applies here — the real remedy
-  is operational (point local dev at a separate Neon branch database), not a patch to this repo; left open
-  pending that infra step.
+- **Fixed, 2026-11-11 (D-079, supersedes D-073):** bug #20 — local `.env`'s `DATABASE_URL` used to be
+  confirmed as the real production Neon database itself (ticket #42, "Phase 14 smoke test," was readable
+  through it), not merely "a different database" as the Deployment section used to describe it (D-024). Fixed
+  by provisioning a dedicated Neon branch ("local-dev," parent `main`, data+schema at creation, auto-delete
+  disabled) via the Vercel Storage tab, and repointing local `.env` at the branch. Re-ingested (5 docs / 80
+  chunks, matching production) and `pytest -m live` (139/139) verified against it. Local dev and `pytest -m
+  live` now write to this branch, not production. Re-ingest after any `data/docs/` or chunker change into
+  **each** database you care about: `DATABASE_URL='<url>' python scripts/ingest.py --reset --quiet` (the env
+  var overrides `.env`). See D-079 for how isolation was verified without a direct production read (this
+  environment's own safety guard correctly refuses those).
 - `GEMINI_API_KEY` must exist in Vercel for **Preview** as well as Production (a missing key shows as a 503
   "No API key was provided" from `/ask`); variables only apply to new deployments.
 
@@ -1006,9 +1006,7 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   limiter can let ~2x the configured limit through at a window boundary, D-072) was confirmed against the
   real code and recorded as an accepted, by-design limitation, per the report's own "by design; document"
   note — not a defect, and every real fix (sliding window, token bucket) is a genuine algorithm change.
-  Bug #20 (Info — local `.env` points at the real production database, D-073) was confirmed directly (a
-  Phase-14.4 production ticket is readable through it) and recorded as a known risk pending an operational
-  fix (a Neon branch database), not a code change. Bug #21 (High — stored XSS in `formatMarkdown()`, D-074)
+  Bug #21 (High — stored XSS in `formatMarkdown()`, D-074)
   is fixed; its JWT-in-`localStorage` theft vector is a separate, unaddressed architecture decision — see
   Known issues. Bug #22 (Medium — follow-up questions losing retrieval context, D-075) is fixed. Bug #23
   (Medium — refusals still showing citation cards) was already fixed as a direct consequence of D-056 (bug
@@ -1024,18 +1022,18 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   counted as a fix (same treatment as bug #10). **Bug #16 (Low — typo-degraded ranking) was revisited and
   fixed on 2026-11-11 (D-077, superseding D-069's "recorded, not fixed")** — a local, no-network-call
   correction against the knowledge base's own vocabulary, a third option neither D-069 nor D-075 had
-  considered. **Bug #16 (Low — typo-degraded ranking) was revisited and
-  fixed on 2026-11-11 (D-077, superseding D-069's "recorded, not fixed")** — a local, no-network-call
-  correction against the knowledge base's own vocabulary, a third option neither D-069 nor D-075 had
   considered. **Bug #19 (Info — the rate-limiter's fixed-window boundary burst) was also revisited and fixed
   on 2026-11-11 (D-078, superseding D-072's "recorded, not fixed")** — a sliding-window blend of the current
   and previous fixed windows, with one extra cheap primary-key read and no new storage, a third option
-  neither D-072 nor D-077 had considered for this particular bug. **All 27 items from the report are now
-  accounted for:** 22 fixed with a code change (#1–9, #11–19, #21–24), 2 checked and confirmed already
-  correct with nothing to change (#10, #27), and 3 measured and recorded rather than code-fixed because the
-  real fix is a genuine architecture/infrastructure tradeoff, not a small patch (#20 needs a Neon branch
-  database, #25/#26 need connection pooling). Worth pulling the PDF's test file and results doc into the repo
-  so the methodology is tracked alongside the fixes, not only in a PDF.
+  neither D-072 nor D-077 had considered for this particular bug. **Bug #20 (Info — local `.env` pointed at
+  the real production database) was also revisited and fixed on 2026-11-11 (D-079, superseding D-073's
+  "recorded, not fixed")** — a dedicated Neon branch database ("local-dev") was provisioned and local `.env`
+  repointed at it, re-ingested, and verified with the full `pytest -m live` suite (139/139). **All 27 items
+  from the report are now accounted for:** 23 fixed with a code change (#1–9, #11–20, #21–24), 2 checked and
+  confirmed already correct with nothing to change (#10, #27), and 2 measured and recorded rather than
+  code-fixed because the real fix is a genuine infrastructure tradeoff, not a small patch (#25/#26 need
+  connection pooling across serverless invocations). Worth pulling the PDF's test file and results doc into
+  the repo so the methodology is tracked alongside the fixes, not only in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
