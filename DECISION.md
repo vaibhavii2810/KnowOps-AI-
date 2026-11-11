@@ -1927,3 +1927,53 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Revisit if:** the branch's auto-delete setting is ever accidentally left enabled on a future branch
   (re-check this before relying on one for anything but a throwaway preview-style test), or if `AGENTS.md`'s
   Deployment section's dual-database guidance needs updating to describe three databases instead of two.
+
+### D-080 · `get_conn()` skips registering pgvector's adapter unless a caller actually needs it (bug #25)
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User ("go and fixed the 25" — bug #25 in `KnowOps_AI_Bug_Report.pdf`)
+- **Decision:** `app/db.py`'s `get_conn()` gained a `vectors: bool = False` parameter; `register_vector(conn)`
+  — pgvector's Python-list ↔ `vector`-column adapter — now runs only when a caller passes `vectors=True`.
+  `scripts/ingest.py`'s two `get_conn()` call sites (both of which eventually call `insert_chunk()`, which
+  binds a raw Python `list[float]` as the `embedding` column) now pass `vectors=True` explicitly; every other
+  call site in the app (CRM, conversations, the rate limiter, `/health`, the agent's DB diagnostic, and
+  `rag.py`'s `retrieve()`) keeps the new default.
+- **Why this is safe for every caller that keeps the default:** audited directly, not assumed — grepped every
+  `SELECT` in the codebase for the `embedding` column and found none outside a `<=>` distance expression
+  (never selected as a bare, typed value anywhere); `retrieve()` itself never binds the query vector as a raw
+  parameter at all — it formats it as a pgvector text literal (`"[" + ",".join(...) + "]"`) and casts it
+  server-side with `::vector`, a path this decision didn't even need to touch. `insert_chunk()` is the one
+  genuine write of a raw Python list into a `vector` column anywhere in the app.
+- **A finding that changed how this is described, caught by testing the actual behavior rather than assuming
+  it:** confirmed directly against real Postgres that an INSERT of a raw Python list into a `vector` column
+  *without* `register_vector` registered still succeeds — psycopg3 falls back to a text representation of the
+  list that happens to match pgvector's own `[0.1,0.2,0.3]` text-input syntax. So `insert_chunk()` would not
+  actually crash without the adapter; `vectors=True` is kept there anyway because it is the explicit,
+  documented way to handle this column, not because the fallback can't be trusted to keep behaving the same
+  way across library versions. (The same probe also showed that *reading* a vector column back without the
+  adapter returns a plain Python `str`, not a parsed list — irrelevant here since nothing ever reads it, but
+  worth recording for whoever adds a feature that does.)
+- **Measured, not estimated:** a direct timing probe — three `get_conn()` calls with each setting, warmed up
+  first — showed ~0.42s average with the default (`vectors=False`) against ~1.13s average with
+  `vectors=True`, matching the ~0.8s the Known issues section had already estimated from the rate limiter's
+  own earlier measurement (D-036) without this ever having been isolated and confirmed on its own. A live
+  `/ask` call (in-process, against the new Neon branch from D-079) averaged ~4.0s after this fix, down from
+  the Phase 13.3 baseline's median 5.6s / mean 5.9s for the same kind of call.
+- **Alternatives considered:** connection pooling across invocations (the fix named for bugs #25/#26's
+  shared, broader latency/throughput finding) — not done here; it is a genuine infrastructure change (a
+  pooler in front of Neon, or persistent connections reused across serverless invocations more broadly) and
+  remains open. Pinning the Vercel function's region next to Neon's (also named in Known issues as unexplored)
+  — also not done here; a deployment/infra change, out of scope for this particular, narrower fix. This
+  decision is deliberately the one piece of bug #25 that *was* a small, safe code patch — cutting an
+  unconditional ~0.8s cost that no caller but one actually needed — not a claim that it resolves the rest of
+  the latency finding.
+- **A real test-writing limitation found and recorded honestly, not hidden:** no test fails if `vectors=True`
+  is removed from `scripts/ingest.py`'s own `get_conn()` calls — confirmed by mutation-testing the removal
+  directly — because the fallback described above happens to still work. The explicit adapter's value here
+  is forward-compatibility and correctness-by-contract, not something today's test suite (or psycopg's
+  current behavior) can prove is load-bearing. A new live test instead proves the thing that *is*
+  load-bearing and observable: a real (non-mocked) Gemini embedding, ingested through the explicit
+  `vectors=True` path, is correctly stored and still findable by `retrieve()` afterward.
+- **Tradeoff accepted:** none identified for the app's current code. If a future feature ever reads a raw
+  `embedding` column back and expects a parsed list/array (not just a distance computed server-side), that
+  caller's own `get_conn()` would need `vectors=True` too — flagged above as something to watch for.
+- **Revisit if:** a future code path ever binds a raw vector as a query parameter, or reads the `embedding`
+  column directly — pass `vectors=True` at that call site then, following `insert_chunk()`'s pattern.

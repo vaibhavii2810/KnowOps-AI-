@@ -92,6 +92,26 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
 - 4.5 Repo deploys through Vaishnavi's Vercel project **`knowops-ai-`**, Git-connected to
   `vaibhavii2810/KnowOps-AI-` (see Deployment)
 - 4.6–4.7 Env vars and the live `/health` check are on that same project
+- **4.3 addendum (2026-11-11, D-080):** an external bug report (bug #25, Low — `/ask` latency, cross-referenced
+  to the already-documented `get_conn()` cost) led to isolating and fixing the one concrete, safe piece of it:
+  `get_conn()` registered pgvector's Python-list adapter (`register_vector`) unconditionally, though nothing
+  in the app ever selects a raw `embedding` column and `rag.py`'s `retrieve()` never binds one either (it
+  casts a text literal server-side with `::vector`) — only `scripts/ingest.py`'s `insert_chunk()` writes a raw
+  Python list into one. New `vectors: bool = False` parameter; ingest's two call sites pass `vectors=True`,
+  every other call site keeps the new default. Measured directly (not estimated): ~0.42s average per
+  connection with the new default vs. ~1.13s with the adapter registered, confirming the ~0.8s the Known
+  issues section had already guessed at. Live `/ask` averaged ~4.0s after the fix, down from Phase 13.3's
+  baseline median 5.6s. **A finding that reshaped the fix's own justification:** confirmed directly that an
+  INSERT of a raw Python list into a `vector` column still works even *without* the adapter registered —
+  psycopg's fallback text form happens to match pgvector's own syntax — so `insert_chunk()` keeps
+  `vectors=True` for explicit, documented correctness, not because it would otherwise crash; recorded
+  honestly that no test can observe this difference (mutation-tested), alongside a new live test proving
+  what *is* observable — a real Gemini embedding, ingested through the explicit path, is still findable by
+  `retrieve()` afterward. 2 new tests (`tests/test_fixtures.py` direct, `tests/test_ingest.py` live
+  round-trip); 1 mutation check (the `vectors` flag ignored) fails the direct test. 650 passed offline, 141
+  live deselected; `pytest -m live`: 141/141 pass. This fixes the one safe, code-level piece of bug #25 — the
+  rest of the latency finding (function-to-database distance, serialized connections) is unchanged and
+  remains a real infrastructure question, same as #26.
 
 **Phase 5 — JWT auth** ✅
 - 5.1 `APP_USERNAME`, `APP_PASSWORD`, `JWT_SECRET` in `.env` and Vercel (Preview + Production)
@@ -895,6 +915,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-077, supersedes D-069): bug #16 (typo-degraded ranking) revisited and fixed — correct_typos() corrects a query against the knowledge base's own vocabulary (titles + headings) locally, no Gemini call, reversing the originally-measured ranking regression; two real false positives (a plural, an unrelated close word) found and fixed while building it |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-078, supersedes D-072): bug #19 (fixed-window rate limiter allows a boundary burst) revisited and fixed — check_rate_limit() now blends the previous fixed window's hits in by a linearly-decaying weight, one extra cheap read, no new storage; found and fixed a real fragment-matching collision in MemoryDB's test double along the way, and rewrote one existing test that had encoded the bug itself as correct behavior |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-079, supersedes D-073): bug #20 (local .env pointed at the real production database) resolved — a dedicated Neon branch database provisioned via Vercel's Storage tab, local .env repointed, knowledge base re-ingested, pytest -m live (139/139) verified against it; no Vercel MCP tool exists to create a Neon branch, confirmed before giving the user manual step-by-step instructions |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-080): bug #25 (/ask latency) partially fixed — get_conn() no longer registers pgvector's adapter unconditionally (only scripts/ingest.py's write path needs it, confirmed by auditing every embedding read/write site); measured ~0.8s saved per connection, /ask down to ~4.0s from a 5.6s median baseline; the function-to-database distance half of the finding is unchanged and remains open, same as bug #26 |
 
 ## Deployment
 
@@ -1013,13 +1034,11 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   #2's threshold raise) — re-verified live here, 2026-11-11, with the report's exact off-topic probes ("what
   is 2+2", "Terraform state locking," a prompt-injection string), all now 0 sources. Bug #24 (Medium — a
   capped agent run over-counting `total_steps` and sometimes leaking raw ReAct trace text as the resolution,
-  D-076) is fixed, reproduced live before fixing. Bug #25 (Low — `/ask` taking 8–9.5s locally, 14s once in
-  prod) is the same `get_conn()`/database-latency issue already measured and recorded above and in Phase
-  13.3's eval harness findings — no new fix applies; cross-referenced by bug number, not duplicated. Bug #26
-  (Low — poor throughput under concurrency) is the same root cause measured under load, also recorded without
-  a new fix (connection pooling is a real infrastructure change). Bug #27 (Info) was the report's own
-  concurrent-request check confirming rate limits work exactly as designed — checked, nothing to fix, not
-  counted as a fix (same treatment as bug #10). **Bug #16 (Low — typo-degraded ranking) was revisited and
+  D-076) is fixed, reproduced live before fixing. Bug #26 (Low — poor throughput under concurrency) is the
+  same root cause bug #25 shared, measured under load, also recorded without a new fix (connection pooling is
+  a real infrastructure change). Bug #27 (Info) was the report's own concurrent-request check confirming rate
+  limits work exactly as designed — checked, nothing to fix, not counted as a fix (same treatment as bug
+  #10). **Bug #16 (Low — typo-degraded ranking) was revisited and
   fixed on 2026-11-11 (D-077, superseding D-069's "recorded, not fixed")** — a local, no-network-call
   correction against the knowledge base's own vocabulary, a third option neither D-069 nor D-075 had
   considered. **Bug #19 (Info — the rate-limiter's fixed-window boundary burst) was also revisited and fixed
@@ -1028,12 +1047,17 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   neither D-072 nor D-077 had considered for this particular bug. **Bug #20 (Info — local `.env` pointed at
   the real production database) was also revisited and fixed on 2026-11-11 (D-079, superseding D-073's
   "recorded, not fixed")** — a dedicated Neon branch database ("local-dev") was provisioned and local `.env`
-  repointed at it, re-ingested, and verified with the full `pytest -m live` suite (139/139). **All 27 items
-  from the report are now accounted for:** 23 fixed with a code change (#1–9, #11–20, #21–24), 2 checked and
-  confirmed already correct with nothing to change (#10, #27), and 2 measured and recorded rather than
-  code-fixed because the real fix is a genuine infrastructure tradeoff, not a small patch (#25/#26 need
-  connection pooling across serverless invocations). Worth pulling the PDF's test file and results doc into
-  the repo so the methodology is tracked alongside the fixes, not only in a PDF.
+  repointed at it, re-ingested, and verified with the full `pytest -m live` suite (139/139). **Bug #25
+  (Low — `/ask` latency) was also revisited and partially fixed on 2026-11-11 (D-080)** — `get_conn()` no
+  longer registers pgvector's adapter unconditionally (only `scripts/ingest.py`'s write path needs it),
+  cutting ~0.8s from every other database connection; `/ask` measured ~4.0s afterward, down from the Phase
+  13.3 baseline's median 5.6s. The rest of the finding (function-to-database distance) is unchanged and
+  remains open, same as #26. **All 27 items from the report are now accounted for:** 24 fixed with a code
+  change (#1–9, #11–20, #21–25), 2 checked and confirmed already correct with nothing to change (#10, #27),
+  and 1 measured and recorded rather than code-fixed because the real fix is a genuine infrastructure
+  tradeoff, not a small patch (#26 needs connection pooling across serverless invocations). Worth pulling the
+  PDF's test file and results doc into the repo so the methodology is tracked alongside the fixes, not only
+  in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
@@ -1052,15 +1076,18 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   distributed attack from many real addresses. It used to also trust the client-IP headers unconditionally even off
   Vercel (found as bug #7 in the external report, fixed as D-061, 2026-11-10) — now it only trusts them when
   `settings.vercel` is set, and uses the real socket address everywhere else.
-- **`get_conn()` latency — worse on Production than measured locally (bug #25 in the external report, Low —
-  the same issue, no new fix applies):** each call costs ~1.2s against the remote Neon DB
-  locally, ~0.8s of it `register_vector`, which only `scripts/ingest.py` needs (found while measuring 10.5). `/ask` pays
-  it 3×. `/metrics` on Production (2026-11-06) shows `/health` averaging 4.5 s (max 4.6 s), `/tickets/{id}` 4.3 s and
-  `/tickets/stats` 2.5 s, against 1.9 ms for `/auth/me`, which makes no database call. A `vectors=False` default would
-  cut the `register_vector` part (~0.8 s per call); the rest looks like function-to-database distance (the logs show the
-  function running in `bom1`/`sfo1`/`iad1`, the database being in Singapore) — pinning the function's region next to
-  Neon is worth testing. Not done. **The Phase 13.3 evaluation shows the cost from the user's side:** every golden question is
-  over 5 s even in-process (median 5.6 s), and 14.2–14.4 s against the deployed site.
+- **`get_conn()` latency — partially fixed, 2026-11-11 (D-080, bug #25):** each call used to cost ~1.2s
+  against the remote Neon DB locally, ~0.8s of it `register_vector`, called unconditionally even though only
+  `scripts/ingest.py`'s write path needs it (found while measuring 10.5, confirmed and fixed under bug #25).
+  `get_conn()` now defaults to `vectors=False`; `/ask` no longer pays that ~0.8s on any of its 3 calls.
+  Measured: ~0.42s average per connection now vs. ~1.13s before; live `/ask` averaged ~4.0s after the fix,
+  down from Phase 13.3's median 5.6s. **What this does not fix:** `/metrics` on Production (2026-11-06) showed
+  `/health` averaging 4.5s, `/tickets/{id}` 4.3s, `/tickets/stats` 2.5s against 1.9ms for `/auth/me` (no
+  database call) — most of that gap looks like function-to-database distance (the logs show the function
+  running in `bom1`/`sfo1`/`iad1`, the database in Singapore), not the `register_vector` cost just removed;
+  pinning the function's region next to Neon is still untested. **The Phase 13.3 evaluation's baseline numbers
+  (median 5.6s in-process, 14.2–14.4s deployed) predate this fix** and haven't been re-run against production
+  since — re-running `python -m evals` would show the new baseline there.
 - **The JWT is stored in `localStorage`, readable by any script on the page (part of bug #21's impact, High,
   D-074 — not fixed):** `static/js/app.js`'s stored-XSS gap itself is fixed (D-074), removing the main way a
   hostile payload could reach the page, but the token's storage location is unchanged — any other script

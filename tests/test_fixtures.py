@@ -10,7 +10,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from app import llm, ratelimit
+from app import db, llm, ratelimit
 from app.agent import run_agent
 from app.db import get_conn
 from app.main import app
@@ -142,3 +142,22 @@ def test_no_network_records_calls_the_app_swallows(no_network, monkeypatch):
     assert result.allowed  # fail-open hid the error...
     assert no_network.attempts == ["psycopg.connect (real Postgres)"]  # ...the guard did not
     no_network.attempts.clear()
+
+
+# --- get_conn(vectors=...) (D-080, bug #25) -----------------------------------
+
+def test_get_conn_does_not_register_the_vector_adapter_by_default(fake_db, monkeypatch):
+    """register_vector() is ~0.8s of get_conn()'s ~1.2s cost (measured in D-036) and is only needed by a
+    caller that binds a raw Python list/array as a vector-typed parameter — scripts/ingest.py's
+    insert_chunk(), the only place that does. Every other caller (including /ask's retrieve(), which
+    formats the vector as a text literal and casts it server-side) needs no adapter at all."""
+    calls = []
+    monkeypatch.setattr(db, "register_vector", lambda conn: calls.append(conn))
+
+    with get_conn():
+        pass
+    assert calls == []
+
+    with get_conn(vectors=True):
+        pass
+    assert len(calls) == 1

@@ -1,3 +1,5 @@
+import pytest
+
 from scripts.ingest import (
     CHUNK_SIZE, DOCS_DIR, MIN_CHUNK_CHARS, compute_content_hash, ingest_file, make_chunks, reindex_knowledge_base,
 )
@@ -113,6 +115,35 @@ def test_ingest_file_skips_unchanged_content_without_embedding(tmp_path, monkeyp
             third = ingest_file(test_file, conn, verbose=False)
             assert third["unchanged"] is False
             assert len(embed_calls) > calls_before
+    finally:
+        test_file.unlink(missing_ok=True)
+        with get_conn() as conn:
+            conn.execute("DELETE FROM documents WHERE source = %s", (source,))
+
+
+@pytest.mark.live
+def test_ingest_stores_a_real_embedding_that_is_still_findable_by_retrieve():
+    """Bug #25 (external bug report, Low, D-080): get_conn() no longer registers pgvector's adapter by
+    default — insert_chunk() keeps it explicitly (get_conn(vectors=True)). This is the live round trip
+    proving that explicit path still works end to end with a real Gemini embedding, not a mocked one:
+    ingest a temp file, then retrieve() a matching question and confirm the chunk comes back."""
+    test_file = DOCS_DIR / "_test_25_tmp.md"
+    source = test_file.relative_to(DOCS_DIR.parents[1]).as_posix()
+    unique_phrase = "Zorbatron flux capacitor realignment procedure"
+    test_file.write_text(
+        f"# Temp Doc\n\n## {unique_phrase}\n\n"
+        f"To realign the zorbatron flux capacitor, first power down the quantum relay. " * 3,
+        encoding="utf-8",
+    )
+    try:
+        with get_conn(vectors=True) as conn:
+            result = ingest_file(test_file, conn, verbose=False)
+            assert result["inserted"] > 0
+
+        from app.rag import retrieve
+        hits = retrieve(unique_phrase, top_k=1, threshold=0.0)
+        assert hits
+        assert hits[0].heading == unique_phrase
     finally:
         test_file.unlink(missing_ok=True)
         with get_conn() as conn:

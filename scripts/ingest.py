@@ -383,7 +383,7 @@ def reindex_knowledge_base(force: bool = False, verbose: bool = True) -> dict:
     files = [f for f in files if not f.name.startswith(".")]
 
     summaries: list[dict] = []
-    with get_conn() as conn:
+    with get_conn(vectors=True) as conn:  # insert_chunk() binds a raw Python list as `embedding` (D-080)
         if force:
             if verbose:
                 print("\n🗑️  --reset: wiping documents + chunks tables...")
@@ -465,7 +465,7 @@ def main() -> None:
         if not filepath.exists():
             print(f"❌ File not found: {filepath}")
             sys.exit(1)
-        with get_conn() as conn:
+        with get_conn(vectors=True) as conn:  # insert_chunk() binds a raw Python list as `embedding` (D-080)
             summary = ingest_file(filepath, conn, verbose=verbose, force=True)
         print(f"\n✅ Ingested {summary['source']}: {summary['inserted']} chunks "
               f"({summary['skipped']} failed).")

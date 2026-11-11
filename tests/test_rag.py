@@ -269,3 +269,14 @@ def test_correct_typos_fixes_the_reported_ranking_regression_live():
     assert results, "expected at least one result"
     assert results[0].document_title == "Kubernetes Cluster Operations Guide"
     assert results[0].heading == "4.3 Rollback"
+
+
+@pytest.mark.live
+def test_retrieve_works_against_real_postgres_without_the_vector_adapter_registered():
+    """Bug #25 (external bug report, Low, D-080): get_conn() no longer registers pgvector's Python-list
+    adapter by default (~0.8s of its ~1.2s connect cost, measured in D-036). retrieve() must still work —
+    it never needed the adapter in the first place, since it formats the query vector as a text literal
+    and casts it server-side with ::vector, rather than binding a raw Python list."""
+    results = retrieve("How do I perform a database failover?", top_k=3)
+    assert results
+    assert results[0].document_title == "Disaster Recovery Runbook"

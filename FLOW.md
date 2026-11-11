@@ -3,7 +3,7 @@
 What runs first, what calls what, and in which order. **Any change that adds, removes or renames an
 entry point, route, module or call chain must update this file in the same change** (rule in `AGENTS.md`).
 
-Notation: `→` calls · `[DB]` opens a Postgres connection via `app.db.get_conn()` (the *connect* step retries transient failures, except health probes which fail fast; statements never retry — D-032) · `[Gemini]` calls the Gemini API (every request times out after `GEMINI_TIMEOUT_SECONDS`, 25 s, and every call retries transient failures via `app.retry.retry_call` — D-032 — but starts no new attempt once that same time has passed, so a timed-out call is not retried — D-045).
+Notation: `→` calls · `[DB]` opens a Postgres connection via `app.db.get_conn()` (the *connect* step retries transient failures, except health probes which fail fast; statements never retry — D-032; `vectors=True` registers pgvector's Python-list adapter — only `scripts/ingest.py`'s write path passes it, since nothing else binds a raw vector or reads the `embedding` column back; everywhere else defaults to `False`, D-080, bug #25) · `[Gemini]` calls the Gemini API (every request times out after `GEMINI_TIMEOUT_SECONDS`, 25 s, and every call retries transient failures via `app.retry.retry_call` — D-032 — but starts no new attempt once that same time has passed, so a timed-out call is not retried — D-045).
 
 ## 1. Entry points
 
