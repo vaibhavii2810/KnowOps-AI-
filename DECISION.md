@@ -1473,3 +1473,36 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   information still exists, just not in a place a prober can read it.
 - **Revisit if:** a legitimate need to surface the specific reason to the caller ever outweighs this
   (unlikely for an auth endpoint).
+
+### D-068 · `CRON_SECRET` is compared with `secrets.compare_digest`, not `!=`
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #15, Low)
+- **Decision:** `api_cron_reindex`'s secret check (`app/main.py`) uses
+  `secrets.compare_digest(authorization.encode("utf-8", errors="replace"), f"Bearer {settings.cron_secret}".encode("utf-8"))`
+  instead of `authorization != f"Bearer {settings.cron_secret}"`. Both sides are encoded to UTF-8 bytes
+  before comparing; `authorization` is also checked for `None` first (the header's own default), since
+  `None.encode()` would raise before ever reaching the comparison.
+- **Why:** Plain string `!=` short-circuits at the first mismatched character, which is a textbook timing
+  side-channel — in principle, an attacker measuring response latency closely enough could recover
+  `CRON_SECRET` one byte at a time rather than needing to guess it whole. `secrets.compare_digest` is the
+  stdlib's own audited constant-time primitive for exactly this.
+- **The UTF-8-encoding detail matters on its own, independent of the timing fix:** `secrets.compare_digest`
+  raises `TypeError` on a non-ASCII **str** (not bytes) — confirmed directly before writing this fix. A raw
+  HTTP client can put any byte 0-255 in a header value (ASGI decodes header bytes as latin-1), so a hostile
+  `Authorization` header reaching Python as a `str` with a high-byte character would, if compared as `str`
+  via `compare_digest`, crash with a 500 — the exact bug already found and fixed once for login's non-ASCII
+  JSON body (D-033). Encoding both sides to bytes first avoids it, mirroring `verify_operator_credentials`'s
+  existing pattern in `app/auth.py`.
+- **A real test-coverage limitation, recorded rather than hidden:** reverting this fix back to plain `!=`
+  **does not fail any test** — `!=` and `compare_digest` are behaviorally identical for every case a
+  functional test can check (right secret, wrong secret, missing header, non-ASCII header all give the
+  same status codes either way); only the *timing* differs, which a unit test cannot observe without a
+  flaky timing measurement. The constant-time guarantee here rests on using a documented, audited stdlib
+  function, not on a test proving it.
+- **Alternatives considered:** a timing-based test asserting the comparison takes roughly equal time
+  regardless of where the mismatch is (rejected — inherently flaky in CI, and `compare_digest` is already a
+  trusted primitive that doesn't need re-proving); leaving the non-ASCII risk unaddressed since real HTTP
+  headers are conventionally ASCII (rejected — "conventionally" isn't "cannot," and the fix to avoid it
+  costs nothing once `compare_digest` is already being added).
+- **Tradeoff accepted:** none — behavior for every real caller is unchanged; only a forged or malformed
+  request's processing time, which is not observable in practice over a network in any case, differs.
+- **Revisit if:** another secret comparison is added anywhere in the codebase using a plain `==`/`!=`.

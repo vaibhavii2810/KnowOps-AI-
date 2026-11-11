@@ -23,6 +23,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import secrets
 from datetime import timedelta
 from pathlib import Path
 from typing import Optional
@@ -683,7 +684,13 @@ def api_cron_reindex(
                 detail="CRON_SECRET is not configured.",
             )
         # else: genuinely local dev with no secret set — unchanged, unenforced (D-030's original intent).
-    elif authorization != f"Bearer {settings.cron_secret}":
+    elif not authorization or not secrets.compare_digest(
+        # Encode to bytes first (D-068): compare_digest raises on a non-ASCII *str*, and a raw client can
+        # send any byte 0-255 in a header value (ASGI decodes header bytes as latin-1) — the exact crash
+        # class already found and fixed once for login (D-033). Bytes have no such restriction.
+        authorization.encode("utf-8", errors="replace"),
+        f"Bearer {settings.cron_secret}".encode("utf-8"),
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized cron execution.",

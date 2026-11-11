@@ -209,7 +209,8 @@ api_agent_triage(ticket_id) → agent.triage_ticket_with_agent(ticket_id)
 ```
 api_cron_reindex(Authorization header)
   → if CRON_SECRET is unset and settings.vercel (deployed with no secret configured): 503, before any [DB]/[Gemini] (D-055)
-  → if CRON_SECRET is set and header ≠ "Bearer <secret>": 401, in every environment (Phase 9.2, D-030)
+  → if CRON_SECRET is set and header ≠ "Bearer <secret>": 401, in every environment (Phase 9.2, D-030) —
+    compared with secrets.compare_digest as UTF-8 bytes, not `!=` (D-068), same pattern as login above
   → scripts.ingest.reindex_knowledge_base(force=False)
        → glob data/docs/**/*.md
        → [DB] ONE connection for the whole run

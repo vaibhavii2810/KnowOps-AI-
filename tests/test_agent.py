@@ -5,6 +5,7 @@ Tests for Autonomous ReAct Agent tools, triage pipeline, and cron re-indexing.
 
 import json
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.agent import (
@@ -19,7 +20,7 @@ from app.agent import (
 )
 from app.config import settings
 from app.crm import create_ticket, get_ticket
-from app.main import app
+from app.main import api_cron_reindex, app
 
 
 @pytest.fixture
@@ -324,6 +325,33 @@ def test_api_cron_reindex_requires_cron_secret_in_every_environment(client, no_n
     assert client.get(
         "/cron/reindex", headers={"Authorization": "Bearer wrong-secret"}
     ).status_code == 401
+
+
+def test_cron_secret_check_uses_constant_time_comparison(no_network, monkeypatch):
+    """
+    Bug #15 (external bug report, Low, D-068): the check used `!=`, a short-circuiting string comparison
+    and a theoretical timing side-channel for recovering CRON_SECRET byte by byte. Fixed with
+    secrets.compare_digest — correctness is checked here (right/wrong secret still behave the same); the
+    constant-time property itself comes from using that audited stdlib primitive, not from a timing
+    measurement, which would be flaky in CI.
+    """
+    monkeypatch.setattr(settings, "cron_secret", "test-cron-secret")
+    with pytest.raises(HTTPException) as excinfo:
+        api_cron_reindex(authorization="Bearer wrong-secret")
+    assert excinfo.value.status_code == 401
+
+
+def test_cron_reindex_rejects_a_non_ascii_authorization_header_without_a_500(monkeypatch):
+    """
+    A raw client can put any byte 0-255 in a header value (ASGI decodes header bytes as latin-1) — calling
+    the route directly simulates exactly that, since httpx's own test client refuses to send non-ASCII
+    header values at all. Naively switching to compare_digest without encoding both sides to bytes first
+    would crash with the exact TypeError already found and fixed once for login's non-ASCII body (D-033).
+    """
+    monkeypatch.setattr(settings, "cron_secret", "test-cron-secret")
+    with pytest.raises(HTTPException) as excinfo:
+        api_cron_reindex(authorization="Bearer caf\xe9")
+    assert excinfo.value.status_code == 401  # not a 500 / TypeError
 
 
 def test_api_cron_reindex_refuses_when_deployed_with_no_secret_configured(client, no_network, monkeypatch):

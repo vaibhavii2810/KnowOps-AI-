@@ -253,6 +253,19 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   unchanged. 2 new tests in `tests/test_agent.py` (one per branch); 3 mutation checks (the deployed-no-secret
   branch removed, the wrong status code, the local-dev branch always refusing) each fail them. 580 passed,
   109 live deselected.
+- **9.2 addendum #2 (2026-11-11, D-068):** an external bug report (bug #15, Low) found the secret check
+  used plain `!=`, a short-circuiting string comparison — a theoretical timing side-channel for recovering
+  `CRON_SECRET` byte by byte. Fixed with `secrets.compare_digest`, both sides encoded to UTF-8 bytes first.
+  The encoding matters on its own: `compare_digest` raises `TypeError` on a non-ASCII **str** — confirmed
+  directly — and a raw client can put any byte 0-255 in a header value (ASGI decodes header bytes as
+  latin-1), so a naive switch without encoding would have crashed with the exact TypeError already found
+  and fixed once for login's non-ASCII body (D-033). 2 new tests in `tests/test_agent.py` (the comparison
+  still behaves correctly; a non-ASCII header is a 401, not a 500 — called the route function directly,
+  since httpx's own test client refuses to send non-ASCII header values at all). **Recorded honestly, not
+  hidden:** reverting this fix to plain `!=` fails none of these tests — `!=` and `compare_digest` give
+  identical status codes for every case a functional test can check; only the timing differs, which a unit
+  test cannot observe without a flaky measurement. The constant-time property rests on using a documented,
+  audited stdlib primitive, not on test coverage proving it. 619 passed offline, 130 live deselected.
 - 9.3 `vercel.json`'s daily cron (`0 3 * * *` → `/cron/reindex`) is syntactically correct and, as of
   2026-10-27, actually deployed to Production for the first time (`main` was fast-forwarded to `sprint-2`).
   Manually confirmed the endpoint behaves exactly as Vercel Cron's own invocation would (`GET`, `Authorization:
@@ -746,6 +759,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-065): get_crm_stats() now counts closed tickets too, so total_tickets == open + in_progress + resolved + closed — same function as D-057 (bug #3), a different fix, deliberately kept separate |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-066): path-level ids (ticket_id, conversation_id) now reject float-shaped strings like "1.0" and oversized values the same way body ids already did — checked strict=True first and found it would break normal "/tickets/1" lookups too, so used a custom validator instead |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-067): the 401 for an invalid JWT no longer echoes PyJWT's exception text (which check, alg/signature/issuer/structure, failed) — a single fixed message now, with the specific reason logged server-side only |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-068): CRON_SECRET now compared with secrets.compare_digest, not != (a theoretical timing side-channel) — encoded to UTF-8 bytes first, avoiding the non-ASCII crash a naive switch would have reintroduced (same class as D-033) |
 
 ## Deployment
 
@@ -841,13 +855,13 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   header spoofing off Vercel, D-061), bug #8 (Medium — CORS wildcard origin echoed back with
   credentials, D-062), bug #9 (Medium — silent insecure defaults, D-063) and bug #11 (Low — a JSON
   boolean silently coerced to an integer, D-064), bug #12 (Medium — the `closed`-tickets stats gap,
-  D-065), bug #13 (Low — a path id's "1.0"/oversized-value gap, D-066) and bug #14 (Low — the 401
-  echoing PyJWT's exception text, D-067) are fixed, each independently verified against the real
-  code/data before fixing, not taken on the PDF's word alone. Bug #10 (Low — a stale local
-  `GEMINI_CHAT_MODEL`) was checked and found already correct — nothing to fix, not counted as a fix.
-  The other 13 (including #21, High — stored-XSS in the console via `formatMarkdown`) are **not yet
-  fixed or verified against this codebase**. Worth pulling the PDF's test file and results doc into
-  the repo so the rest aren't only tracked in a PDF.
+  D-065), bug #13 (Low — a path id's "1.0"/oversized-value gap, D-066), bug #14 (Low — the 401
+  echoing PyJWT's exception text, D-067) and bug #15 (Low — CRON_SECRET compared with !=, D-068) are
+  fixed, each independently verified against the real code/data before fixing, not taken on the PDF's
+  word alone. Bug #10 (Low — a stale local `GEMINI_CHAT_MODEL`) was checked and found already correct —
+  nothing to fix, not counted as a fix. The other 12 (including #21, High — stored-XSS in the console
+  via `formatMarkdown`) are **not yet fixed or verified against this codebase**. Worth pulling the
+  PDF's test file and results doc into the repo so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
