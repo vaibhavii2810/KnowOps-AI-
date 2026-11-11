@@ -794,6 +794,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Measured and documented bug #16 (D-069) — a typo'd query can rank the wrong-but-related section first (0.665 vs 0.659, correct one still position 2 of 5); not fixed, since every real mitigation (spell-correction, hybrid search) is a genuine architecture tradeoff, not a small patch, and spell-correction would add latency to the already-slow /ask path |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-070): create_ticket() now rejects an invalid priority (ValueError) instead of silently defaulting to P2, matching update_ticket_status()'s existing pattern — closes the gap where the agent's create_ticket tool had no Pydantic layer the HTTP API already had |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-071): PATCH /tickets/{id} can now clear resolution_notes with an explicit null — omitted vs. null used to collapse to the same None, so a wrong note could never be cleared; fixed with a model_fields_set check plus an UNSET sentinel, including a matching gap in MemoryDB's own test double |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Checked bug #19 (fixed-window rate limiter allows a ~2x boundary burst, D-072) against the real code — confirmed as the report itself says, "by design; document," not fixed; real fixes are genuine algorithm changes (sliding window, token bucket), not small patches |
 
 ## Deployment
 
@@ -896,9 +897,13 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   nothing to fix, not counted as a fix. Bug #16 (Low — typo-degraded ranking, D-069) was measured and
   recorded as a known limitation rather than fixed — every real mitigation is an architecture tradeoff,
   not a small patch. Bug #17 (Low — create_ticket's silent priority fallback, D-070) and bug #18 (PATCH
-  /tickets/{id} could never clear resolution_notes, D-071) are fixed. The other 9 (including #21, High —
-  stored-XSS in the console via `formatMarkdown`) are **not yet fixed or verified against this codebase**.
-  Worth pulling the PDF's test file and results doc into the repo so the rest aren't only tracked in a PDF.
+  /tickets/{id} could never clear resolution_notes, D-071) are fixed. Bug #19 (Info — a fixed-window rate
+  limiter can let ~2x the configured limit through at a window boundary, D-072) was confirmed against the
+  real code and recorded as an accepted, by-design limitation, per the report's own "by design; document"
+  note — not a defect, and every real fix (sliding window, token bucket) is a genuine algorithm change. The
+  other 8 (including #21, High — stored-XSS in the console via `formatMarkdown`) are **not yet fixed or
+  verified against this codebase**. Worth pulling the PDF's test file and results doc into the repo so the
+  rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
@@ -949,6 +954,12 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   position 2 of 5 — still present, not lost). This is normal embedding-search behavior on garbled text, not a logic bug; every
   real fix (spell-correcting the query, hybrid keyword+vector search) is a genuine engineering tradeoff, not a small patch — see
   D-069 for why none was made, including that spell-correction would add another Gemini call to the already-slow `/ask` path.
+- **The rate limiter's fixed window allows a boundary burst (bug #19 in the external report, Info, D-072 — recorded, not
+  fixed):** `app/ratelimit.py`'s window is `int(now // 60) * 60` (D-036); a client can send up to the configured per-minute
+  limit at the very end of one window and the same limit again at the start of the next, getting roughly 2x the stated
+  limit through in about a second. Confirmed against the actual code. The report itself calls this "by design; document," not
+  a defect — the real fixes (a sliding-window log, a token bucket) are genuine algorithm changes with their own cost/latency
+  tradeoffs, not small patches; see D-072.
 - **Runbook text disagrees with the app in places (found reading them for 13.1):** `api_troubleshooting.md` §7 says `POST /ask` is
   limited to 20 requests/minute and `GET /health` to 100/minute, but the app enforces 10/minute on `/ask` (D-036) and does not
   limit `/health`; it and `on_call_guide.md` also say the Gemini retry is "up to 3 attempts" where the code makes 4 (D-032). `/ask`

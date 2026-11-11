@@ -1597,3 +1597,27 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   and is entirely unaffected by this change; no existing caller relied on the old "can't ever clear" behavior.
 - **Revisit if:** a future PATCH field needs the same three-state omitted/null/value distinction — reuse this
   `model_fields_set` + sentinel pattern rather than inventing a new one.
+
+### D-072 · Fixed-window rate limiting can let ~2x the configured limit through at a window boundary (recorded, not fixed)
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #19, Info)
+- **Decision:** no code change. `app/ratelimit.py`'s `window_start = int(now // WINDOW_SECONDS) * WINDOW_SECONDS`
+  (D-036) is a textbook fixed-window counter: a caller can send up to the configured limit in the last instant
+  of one 60-second window and the same limit again in the first instant of the next, so roughly 2x the
+  stated per-minute limit can pass within a couple of real seconds, right at the boundary. Confirmed directly
+  against the actual code (not just the report's description) — this is exactly the math it implements, with
+  no off-by-one or implementation bug involved.
+- **Why this is recorded as a limitation, not fixed:** the report itself labels this "Info," not a defect, and
+  says "by design; document" — it is the normal, well-known tradeoff of a fixed-window algorithm, not a
+  mistake in this code. The two standard fixes are both real algorithm changes, not small patches: a
+  **sliding-window log** (store every hit's timestamp, count within the trailing 60s) costs more storage and
+  a range query per check, working against D-036's own latency finding (~70ms per check today, already
+  identified as a cost worth minimizing); a **token bucket** changes the stored shape entirely (a refill rate
+  and capacity instead of a window-keyed count) and changes the semantics callers see in `Retry-After` and
+  `X-RateLimit-Remaining`. Either is a genuine design decision for a future phase, not a bug-report-sized fix.
+- **Tradeoff accepted:** a client that paces its own requests exactly at a window edge can burst to roughly
+  double the configured `/ask` or agent rate limit for about a second. This protects cost/quota (the
+  limiter's actual purpose per D-036 — "this is not an access control") against sustained abuse; it does not
+  protect against this specific narrow-window burst.
+- **Revisit if:** real abuse exploiting this boundary is ever observed in production logs, or the limiter is
+  revisited for an unrelated reason (e.g. the latency work already flagged in Known issues) — then weigh a
+  sliding-window or token-bucket replacement against the cost of both at that time.
