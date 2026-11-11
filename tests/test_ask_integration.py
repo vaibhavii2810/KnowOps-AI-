@@ -29,6 +29,8 @@ CHUNK_ROWS = [  # what the vector search returns, already ranked
 _STATEMENT_KINDS = (
     ("CREATE TABLE IF NOT EXISTS rate_limits", "create rate_limits table"),  # once per limiter connection
     ("INSERT INTO rate_limits", "rate-limit hit"),
+    ("SELECT hits FROM rate_limits WHERE user_key = %s AND bucket = %s AND window_start = %s",
+     "rate-limit previous-window read"),  # D-078, sliding-window blend
     ("INSERT INTO conversations", "new conversation"),
     ("SELECT DISTINCT title FROM documents", "load typo vocabulary (titles)"),  # D-077, cache cold each test
     ("SELECT DISTINCT heading FROM chunks", "load typo vocabulary (headings)"),
@@ -92,7 +94,7 @@ def test_ask_round_trip_with_the_llm_mocked(client, auth_headers, backend):
 
     # Postgres, in order: rate-limit hit, new conversation, vector search (top_k reached the SQL), saved turn
     assert [_kind(sql) for sql, _ in fake_db.executed] == [
-        "create rate_limits table", "rate-limit hit", "new conversation",
+        "create rate_limits table", "rate-limit hit", "rate-limit previous-window read", "new conversation",
         "load typo vocabulary (titles)", "load typo vocabulary (headings)", "vector search", "save turn",
     ]
     assert fake_db.queries("FROM chunks c")[0][1][4] == 2

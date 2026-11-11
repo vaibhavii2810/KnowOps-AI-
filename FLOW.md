@@ -48,7 +48,10 @@ context variable as one mutable record; timing starts) → `CORSMiddleware` → 
 `/health`, `/auth/login`, `GET /`, `/static/*`, `/docs`, `/redoc`, `/cron/reindex` — Phase 5.4, D-022 →
 `security_bearer` reads `Authorization: Bearer <jwt>`, missing/invalid/expired → 401; on `/ask`, `/agent/chat` and
 `/agent/triage/{id}` the dependency is `ratelimit.rate_limited(bucket)`, which authenticates first and then counts the
-request — over the per-minute limit → 429 + `Retry-After`; Phase 10.5, D-036) → request body
+request against a sliding-window estimate — [DB] one upsert on the current fixed window + one read of the previous
+fixed window, blended by how much of the previous window's 60s still overlaps the trailing 60s ending now (D-078,
+2026-11-11 — fixes a window-boundary burst letting through up to 2x the limit) — over the limit → 429 + `Retry-After`;
+Phase 10.5, D-036) → request body
 validated against `app/schemas.py` and the routes' `Query(...)` bounds (422 if invalid — text is whitespace-stripped
 before its length check and NUL bytes are refused; priority/status are case-insensitive enums; `limit` is bounded;
 Phase 10.2, D-033) → route handler → response serialised through its

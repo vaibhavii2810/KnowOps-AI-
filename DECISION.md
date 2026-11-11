@@ -1603,6 +1603,8 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   `model_fields_set` + sentinel pattern rather than inventing a new one.
 
 ### D-072 · Fixed-window rate limiting can let ~2x the configured limit through at a window boundary (recorded, not fixed)
+- **Superseded by D-078** (2026-11-11, same day — the user asked to revisit this after the rest of the report
+  was closed out). Kept for the record of what was measured and considered at the time.
 - **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #19, Info)
 - **Decision:** no code change. `app/ratelimit.py`'s `window_start = int(now // WINDOW_SECONDS) * WINDOW_SECONDS`
   (D-036) is a textbook fixed-window counter: a caller can send up to the configured limit in the last instant
@@ -1823,3 +1825,70 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   widen the source to include the first few words of each chunk's content, weighed against the added
   load/cache cost; or if a false positive on a real heading/title word surfaces, tighten the cutoff or the
   plural guard further, the same way the two found during this fix were handled.
+
+### D-078 · Fixed-window rate limiting fixed with a sliding-window blend (bug #19, supersedes D-072)
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (revisiting bug #19 after D-072 declined a fix)
+- **Decision:** `app/ratelimit.py`'s `check_rate_limit()` now estimates the request count as
+  `previous_window_hits * weight + current_window_hits`, where `weight = max(0, (window_seconds - elapsed) /
+  window_seconds)` and `elapsed` is how far `now` is into the current fixed window. `weight` is 1.0 right at
+  a window boundary (the previous window counts almost in full) and decays linearly to 0.0 by the time a full
+  window has passed. A new `_read_hits()` does one extra, cheap primary-key `SELECT` for the previous
+  window's row (0 if it has none) alongside the existing `_upsert_hit()` for the current one; both now go
+  through a shared `_with_conn()` helper (refactored out of `_upsert_hit`'s old connect/retry logic, used
+  by both). The table shape, `WINDOW_SECONDS`, and every other caller-facing behavior (fail-open, headers,
+  `Retry-After` as "time until this fixed window ends") are unchanged.
+- **Why this is the fix D-072 didn't consider:** D-072 only weighed two real alternatives, both bigger
+  changes than the problem needs — a full sliding-window log (store every hit's timestamp, range-query the
+  trailing 60s; more storage and a costlier read per check) and a token bucket (a different stored shape and
+  different caller-facing semantics for `remaining`/`Retry-After`). The sliding-window *counter* (as opposed
+  to a sliding-window *log*) is a third, standard approximation: it needs no new storage at all — the table
+  already keeps one row per `(user, bucket, window)`, so reading the one additional row that already exists
+  (the previous window, if any) is the entire cost. It trades exactness (it's an estimate, not an exact
+  trailing-60s count) for staying inside the existing table shape and roughly doubling, not fundamentally
+  changing, the per-check cost (one extra indexed point read on the same primary key shape, alongside the
+  existing upsert).
+- **Verified the fix actually closes the gap:** with `limit=10`, `window_seconds=60` — 10 hits land in window
+  A right up to the limit; a request 1s into window B (previous weight ≈ 0.983) is still blocked, where the
+  old fixed-window code gave it a fresh, fully independent allowance of 10. A second test confirms this isn't
+  a hard wall either: at 6s into the new window (weight exactly 0.9 with round numbers), 9 of the limit is
+  still "spent" by the carried-over previous window, and by 36s in (weight exactly 0.4) only 4 is — a smooth
+  recovery, not a cliff, which is the whole point of blending rather than just refusing anything in a new
+  window near a maxed-out previous one.
+- **A real fragment-matching collision found and fixed in the offline test double:** `MemoryDB`'s existing
+  `on("SELECT hits FROM rate_limits WHERE user_key = %s", ...)` handler (added for an earlier test's own
+  diagnostic query) is a *substring* of the new, fully-scoped lookup
+  (`...WHERE user_key = %s AND bucket = %s AND window_start = %s`) — `FakeDB`/`MemoryDB` match by substring
+  containment, so the new query was silently answered by the old, unscoped handler (which ignores bucket and
+  window entirely and sums across all of a user's windows), producing wildly inflated estimates and breaking
+  tests that had nothing to do with window boundaries at all. Fixed by registering a second, correctly-scoped
+  handler *after* the old one — `MemoryDB` checks registrations in reverse order, so the more specific one is
+  tried first. This is the same class of collision risk `tests/conftest.py`'s own `FakeDB` docstring warns
+  about ("most recently registered wins"), just encountered for real here.
+- **One existing test encoded the bug itself and had to change, not just gain new tests:**
+  `test_a_new_window_starts_a_fresh_count` asserted that a request 5s into a brand-new window was fully
+  allowed right after the previous window had been maxed out — exactly bug #19's scenario, asserted as
+  correct. Renamed to `test_a_burst_at_a_window_boundary_is_blocked_not_a_fresh_quota` and rewritten to assert
+  the fixed (and correct) behavior instead; a new `test_a_new_window_with_no_prior_activity_starts_a_fresh_count`
+  keeps the *backward-compatible* half of the old test's intent (an idle previous window still gives a fresh
+  count, unaffected by this change) as its own case. A new
+  `test_the_limit_recovers_gradually_through_a_new_window_not_all_at_once` is the gradual-recovery regression
+  test described above. 3 mutation checks (estimate reverted to ignore `previous_hits` entirely, the decay
+  weight frozen at 1.0 so it never recovers, the previous-window read removed and treated as always-0) each
+  fail the right tests; the third is also caught by the `/ask` integration test's statement-order check,
+  since the read is now a real, counted database call in that path.
+- **Alternatives considered:** a full sliding-window log and a token bucket, both from D-072 — rejected for
+  the reasons above (bigger storage/semantics change than this bug needs). Reading the previous window only
+  when `elapsed < window_seconds` (i.e., skip it once the weight would be ~0 anyway) was considered as a
+  latency optimization — not done, since the read is already a single cheap indexed point lookup on the
+  same connection the upsert already uses, and skipping it would mean deciding "is this close enough to a
+  boundary to matter" with its own edge cases, for a saving not worth that complexity.
+- **Tradeoff accepted:** one extra indexed read per rate-limit check (previously: one upsert; now: one upsert
+  + one read, both on the already-open shared connection) — not separately re-measured here, but it is the
+  same class of operation as the upsert D-036 already measured at ~70ms combined for both, so the added cost
+  is expected to be small relative to that baseline, not a new order of magnitude. `remaining` is now reported
+  from a blended estimate rather than an exact count, so it can show e.g. "0 remaining" slightly before the
+  true trailing-60s count would — an intentionally conservative direction (never shows more room than is
+  really safe), consistent with the limiter's own fail-open design elsewhere favoring safety over precision.
+- **Revisit if:** the extra read's cost is ever measured and found to matter in practice — at that point,
+  consider caching the previous window's row in-process for the remainder of its relevance window, or
+  revisit the "skip when clearly irrelevant" optimization declined above.

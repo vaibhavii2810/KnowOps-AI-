@@ -355,6 +355,12 @@ class MemoryDB:
         on("DELETE FROM rate_limits WHERE user_key LIKE 'rltest-%'", self._delete_test_rate_limits)
         on("SELECT hits FROM rate_limits WHERE user_key = %s",
            lambda p: [(hits,) for (user, _, _), hits in (self.rate_limits or {}).items() if user == p[0]])
+        # D-078: the sliding-window limiter's own lookup is fully scoped (user_key + bucket + window_start);
+        # registered after the looser fragment above so it's matched first (reversed(), most-recent wins) —
+        # the looser one is a substring of this one and would otherwise swallow it and ignore the window.
+        on("SELECT hits FROM rate_limits WHERE user_key = %s AND bucket = %s AND window_start = %s",
+           lambda p: [(self.rate_limits[(p[0], p[1], p[2])],)]
+           if self.rate_limits is not None and (p[0], p[1], p[2]) in self.rate_limits else [])
 
         # request counters (app/metrics.py)
         on("CREATE TABLE IF NOT EXISTS request_metrics", lambda p: [])

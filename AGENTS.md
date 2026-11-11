@@ -448,6 +448,27 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   test for the actual bug (headers ignored off-Vercel) overrides it back to unset for itself. 1 mutation
   check (reverted to always-trust) fails it. 588 passed offline (118 live deselected, +1 new live-variant
   test via the file's existing `db_backend`); `pytest -m live tests/test_rate_limit.py`: 26/26 pass.
+- **10.5 / D-036 addendum (2026-11-11, D-078 — revisits bug #19, supersedes D-072's "recorded, not fixed"):**
+  after closing out the rest of the external bug report, bug #19 (a fixed-window counter lets ~2x the limit
+  through at a window boundary) was revisited and fixed with a sliding-window blend:
+  `check_rate_limit()` now estimates `previous_window_hits * weight + current_window_hits`, where `weight`
+  decays linearly from 1.0 at the boundary to 0.0 after a full window — one extra, cheap primary-key read
+  (`_read_hits()`, new) of the previous window's row alongside the existing upsert; no new storage, same
+  table shape. Verified: 10 hits filling window A to its limit, then a request 1s into window B (weight
+  ≈0.983) is still blocked, where the old code gave a fresh, fully independent 10 — and a second test confirms
+  gradual recovery, not a hard wall (6s in: 9 of the limit still "spent," by 36s in: only 4, with round
+  numbers chosen so the math comes out exact). **A real fragment-matching collision found and fixed in the
+  offline test double:** `MemoryDB`'s existing, looser `"SELECT hits FROM rate_limits WHERE user_key = %s"`
+  handler (from an earlier test's own diagnostic query) is a substring of the new, fully-scoped lookup, so it
+  silently swallowed it and returned nonsense (ignoring bucket/window, summing across all of a user's
+  windows) — fixed by registering the correctly-scoped handler after it, so it matches first.
+  `test_a_new_window_starts_a_fresh_count` directly encoded the bug itself (asserted a fresh window gives a
+  full fresh allowance right after the previous one was maxed out) and was renamed/rewritten to assert the
+  fixed behavior; its backward-compatible half (an idle previous window still gives a fresh count) is now its
+  own separate test. 3 mutation checks (the blend reverted to ignore `previous_hits`, the decay weight frozen
+  at 1.0, the previous-window read removed) each fail the right tests — the third is also caught by
+  `test_ask_integration.py`'s statement-order check, since the read is now a real counted database call in
+  that path. 649 passed offline, 139 live deselected; `pytest -m live tests/test_rate_limit.py`: 28/28 pass.
 - **CORS addendum (2026-11-10, D-062):** an external bug report (bug #8, Medium) found
   `allow_origins=["*"]` combined with `allow_credentials=True` in the `CORSMiddleware` setup. Independently
   reproduced before fixing: an `OPTIONS /ask` preflight with `Origin: https://evil.com` got back
@@ -872,6 +893,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Checked bug #25 (/ask latency, Low) — confirmed as the same already-documented get_conn()/database-latency issue (Phase 13.3's eval findings, Known issues); no new fix, cross-referenced only |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Checked bugs #26 (poor throughput under concurrency, Low) and #27 (rate limits work as designed, Info) — #26 is the same already-documented latency root cause measured under load, recorded with connection pooling named as the real (infrastructure) fix; #27 confirmed correct, nothing to change. All 27 items in the external bug report are now accounted for |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-077, supersedes D-069): bug #16 (typo-degraded ranking) revisited and fixed — correct_typos() corrects a query against the knowledge base's own vocabulary (titles + headings) locally, no Gemini call, reversing the originally-measured ranking regression; two real false positives (a plural, an unrelated close word) found and fixed while building it |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-078, supersedes D-072): bug #19 (fixed-window rate limiter allows a boundary burst) revisited and fixed — check_rate_limit() now blends the previous fixed window's hits in by a linearly-decaying weight, one extra cheap read, no new storage; found and fixed a real fragment-matching collision in MemoryDB's test double along the way, and rewrote one existing test that had encoded the bug itself as correct behavior |
 
 ## Deployment
 
@@ -1002,12 +1024,18 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   counted as a fix (same treatment as bug #10). **Bug #16 (Low — typo-degraded ranking) was revisited and
   fixed on 2026-11-11 (D-077, superseding D-069's "recorded, not fixed")** — a local, no-network-call
   correction against the knowledge base's own vocabulary, a third option neither D-069 nor D-075 had
-  considered. **All 27 items from the report are now accounted for:** 21 fixed with a code change (#1–9,
-  #11–18, #21–24), 2 checked and confirmed already correct with nothing to change (#10, #27), and 4 measured
-  and recorded rather than code-fixed because the real fix is a genuine architecture/infrastructure tradeoff,
-  not a small patch (#19 rate-limiter window, #20 needs a Neon branch database, #25/#26 need connection
-  pooling). Worth pulling the PDF's test file and results doc into the repo so the methodology is tracked
-  alongside the fixes, not only in a PDF.
+  considered. **Bug #16 (Low — typo-degraded ranking) was revisited and
+  fixed on 2026-11-11 (D-077, superseding D-069's "recorded, not fixed")** — a local, no-network-call
+  correction against the knowledge base's own vocabulary, a third option neither D-069 nor D-075 had
+  considered. **Bug #19 (Info — the rate-limiter's fixed-window boundary burst) was also revisited and fixed
+  on 2026-11-11 (D-078, superseding D-072's "recorded, not fixed")** — a sliding-window blend of the current
+  and previous fixed windows, with one extra cheap primary-key read and no new storage, a third option
+  neither D-072 nor D-077 had considered for this particular bug. **All 27 items from the report are now
+  accounted for:** 22 fixed with a code change (#1–9, #11–19, #21–24), 2 checked and confirmed already
+  correct with nothing to change (#10, #27), and 3 measured and recorded rather than code-fixed because the
+  real fix is a genuine architecture/infrastructure tradeoff, not a small patch (#20 needs a Neon branch
+  database, #25/#26 need connection pooling). Worth pulling the PDF's test file and results doc into the repo
+  so the methodology is tracked alongside the fixes, not only in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
@@ -1081,12 +1109,14 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   Kubernetes section first (0.773 vs 0.764), reversing the original ranking. See D-077 for the two false
   positives found and fixed while building it, and why titles/headings (not full chunk content) were chosen
   as the vocabulary source.
-- **The rate limiter's fixed window allows a boundary burst (bug #19 in the external report, Info, D-072 — recorded, not
-  fixed):** `app/ratelimit.py`'s window is `int(now // 60) * 60` (D-036); a client can send up to the configured per-minute
-  limit at the very end of one window and the same limit again at the start of the next, getting roughly 2x the stated
-  limit through in about a second. Confirmed against the actual code. The report itself calls this "by design; document," not
-  a defect — the real fixes (a sliding-window log, a token bucket) are genuine algorithm changes with their own cost/latency
-  tradeoffs, not small patches; see D-072.
+- **Fixed, 2026-11-11 (D-078, supersedes D-072):** bug #19 — the rate limiter's fixed window used to let a
+  client send up to the configured limit at the very end of one window and the same limit again at the start
+  of the next, ~2x the stated limit in about a second. `check_rate_limit()` now blends in the previous
+  window's hits, weighted by how much of it still overlaps the trailing 60s ending now (1.0 right at the
+  boundary, decaying to 0.0 after a full window) — a request 1s into a new window is now still blocked if the
+  previous window was at its limit, with the quota recovering gradually (not a hard wall) as real time passes.
+  One extra, cheap primary-key read per check; no new storage. See D-078 for a real fragment-matching
+  collision found and fixed in the offline test double while building this.
 - **Runbook text disagrees with the app in places (found reading them for 13.1):** `api_troubleshooting.md` §7 says `POST /ask` is
   limited to 20 requests/minute and `GET /health` to 100/minute, but the app enforces 10/minute on `/ask` (D-036) and does not
   limit `/health`; it and `on_call_guide.md` also say the Gemini retry is "up to 3 attempts" where the code makes 4 (D-032). `/ask`

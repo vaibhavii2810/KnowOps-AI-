@@ -100,13 +100,44 @@ def test_retry_after_is_the_time_left_in_the_window(user, window_start):
     assert check_rate_limit(user, "ask", 1, now=window_start + 59.2).retry_after == 1  # never below 1s
 
 
-def test_a_new_window_starts_a_fresh_count(user, window_start):
-    for _ in range(3):
-        check_rate_limit(user, "ask", 3, now=window_start + 5)
-    assert check_rate_limit(user, "ask", 3, now=window_start + 5).allowed is False
-    next_window = check_rate_limit(user, "ask", 3, now=window_start + 65)
-    assert next_window.allowed is True
-    assert next_window.remaining == 2
+def test_a_burst_at_a_window_boundary_is_blocked_not_a_fresh_quota(user, window_start):
+    """Bug #19 (external bug report, Info, D-078 — supersedes D-072's "recorded, not fixed"): a plain
+    fixed-window counter resets hard at each boundary, so a burst could land 10 hits at the very end of one
+    window and 10 more at the very start of the next and both would be allowed — ~2x the limit in about a
+    second. The sliding-window blend closes this: right at the boundary, the previous window's hits still
+    count almost in full (weight ~1.0), so a request 1s into the new window is still blocked if the previous
+    window was at its limit."""
+    for _ in range(10):
+        check_rate_limit(user, "ask", 10, now=window_start + 55)  # fills window A right up to the limit
+
+    boundary_burst = check_rate_limit(user, "ask", 10, now=window_start + 61)  # 1s into window B
+    assert boundary_burst.allowed is False
+
+
+def test_the_limit_recovers_gradually_through_a_new_window_not_all_at_once(user, window_start):
+    """The other half of the same fix: it isn't a hard wall either — as real time passes into the new
+    window, the previous window's weight decays linearly, so some allowance returns well before a full
+    window has elapsed. Numbers chosen so the weighted math comes out to exact integers."""
+    for _ in range(10):
+        check_rate_limit(user, "ask", 10, now=window_start + 50)  # window A: exactly at the limit, 10 hits
+
+    # 6s into window B: weight = (60-6)/60 = 0.9 -> 10*0.9 = 9 carried over, exactly, from window A
+    first_in_b = check_rate_limit(user, "ask", 10, now=window_start + 66)
+    assert (first_in_b.allowed, first_in_b.remaining) == (True, 0)   # 9 + 1 = 10, right at the limit
+    assert check_rate_limit(user, "ask", 10, now=window_start + 66).allowed is False  # 9 + 2 = 11, over
+
+    # 36s into window B: weight = (60-36)/60 = 0.4 -> 10*0.4 = 4 carried over, exactly
+    later_in_b = check_rate_limit(user, "ask", 10, now=window_start + 96)
+    assert (later_in_b.allowed, later_in_b.remaining) == (True, 3)   # 4 + 3 (the 2 above + this one) = 7
+
+
+def test_a_new_window_with_no_prior_activity_starts_a_fresh_count(user, window_start):
+    """When the previous window has no recorded hits at all (a genuinely new user/bucket, or one that's
+    been idle), the sliding-window blend contributes nothing and behaves exactly like a plain fixed window."""
+    first = check_rate_limit(user, "ask", 3, now=window_start + 65)  # nothing at all in the previous window
+    assert (first.allowed, first.remaining) == (True, 2)
+    second = check_rate_limit(user, "ask", 3, now=window_start + 65)
+    assert (second.allowed, second.remaining) == (True, 1)
 
 
 def test_users_and_buckets_are_counted_separately(user, window_start):

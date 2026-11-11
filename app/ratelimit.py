@@ -2,10 +2,18 @@
 app/ratelimit.py  –  Phase 10.5
 Per-user rate limiting for the expensive endpoints (D-036).
 
-A fixed-window counter kept in Postgres rather than in process memory: the API runs as serverless
+A sliding-window counter kept in Postgres rather than in process memory: the API runs as serverless
 instances that restart often and run side by side, so an in-memory counter would reset on every cold
 start and each instance would count separately — the real limit would be N times the configured one.
 The database is already shared by every instance.
+
+The count for a window is a weighted blend of the current fixed window's hits and the *previous* fixed
+window's hits, weighted by how much of the previous window's 60s still "overlaps" the trailing 60s ending
+now (D-078, bug #19, supersedes D-072's "recorded, not fixed"): a plain fixed-window counter resets hard at
+each boundary, so up to 2x the limit could pass in a couple of real seconds by bursting at the end of one
+window and the start of the next. Blending in the previous window's hits (weight 1 right at the boundary,
+decaying linearly to 0 by the time a full window has passed) closes that gap at the cost of one extra,
+cheap, primary-key read per check — no new log/timestamp storage, no change to the table shape.
 
 Latency: the app's get_conn() costs ~1.2s per call against the remote Neon database (a plain connect is
 ~0.4s; the rest is pgvector type registration, which the limiter does not need), so the limiter keeps
@@ -64,8 +72,8 @@ class RateLimitResult:
     retry_after: int  # seconds until the current window ends
 
 
-def _upsert_hit(user_key: str, bucket: str, window_start: int, now: float) -> int:
-    """Count one hit and return the new total, on the shared connection (one reconnect if it was stale)."""
+def _with_conn(fn: Callable[[psycopg.Connection], int]) -> int:
+    """Run `fn` on the shared connection, reconnecting once if it has gone stale."""
     global _conn, _table_ready
     with _conn_lock:
         for attempt in (1, 2):
@@ -77,19 +85,7 @@ def _upsert_hit(user_key: str, bucket: str, window_start: int, now: float) -> in
                     # first use on this connection: create the table, so production needs no manual migration
                     _conn.execute(CREATE_TABLE_SQL)
                     _table_ready = True
-                hits = _conn.execute(
-                    """
-                    INSERT INTO rate_limits (user_key, bucket, window_start, hits)
-                    VALUES (%s, %s, %s, 1)
-                    ON CONFLICT (user_key, bucket, window_start)
-                    DO UPDATE SET hits = rate_limits.hits + 1
-                    RETURNING hits
-                    """,
-                    (user_key, bucket, window_start),
-                ).fetchone()[0]
-                if random.random() < 0.01:  # opportunistic cleanup of windows older than a day
-                    _conn.execute("DELETE FROM rate_limits WHERE window_start < %s", (int(now) - 86400,))
-                return hits
+                return fn(_conn)
             except psycopg.OperationalError:
                 try:
                     if _conn is not None:
@@ -102,6 +98,39 @@ def _upsert_hit(user_key: str, bucket: str, window_start: int, now: float) -> in
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+def _upsert_hit(user_key: str, bucket: str, window_start: int, now: float) -> int:
+    """Count one hit in `window_start`'s row and return its new total."""
+    def _do(conn: psycopg.Connection) -> int:
+        hits = conn.execute(
+            """
+            INSERT INTO rate_limits (user_key, bucket, window_start, hits)
+            VALUES (%s, %s, %s, 1)
+            ON CONFLICT (user_key, bucket, window_start)
+            DO UPDATE SET hits = rate_limits.hits + 1
+            RETURNING hits
+            """,
+            (user_key, bucket, window_start),
+        ).fetchone()[0]
+        if random.random() < 0.01:  # opportunistic cleanup of windows older than a day
+            conn.execute("DELETE FROM rate_limits WHERE window_start < %s", (int(now) - 86400,))
+        return hits
+
+    return _with_conn(_do)
+
+
+def _read_hits(user_key: str, bucket: str, window_start: int) -> int:
+    """The hit count already recorded for `window_start`, or 0 if that window has no row yet (D-078: used
+    to read the *previous* window's count for the sliding-window blend, without incrementing it)."""
+    def _do(conn: psycopg.Connection) -> int:
+        row = conn.execute(
+            "SELECT hits FROM rate_limits WHERE user_key = %s AND bucket = %s AND window_start = %s",
+            (user_key, bucket, window_start),
+        ).fetchone()
+        return row[0] if row else 0
+
+    return _with_conn(_do)
+
+
 def check_rate_limit(
     user_key: str,
     bucket: str,
@@ -109,22 +138,36 @@ def check_rate_limit(
     now: Optional[float] = None,
     window_seconds: int = WINDOW_SECONDS,
 ) -> RateLimitResult:
-    """Count one request for (user, bucket) in the current window and say whether it is allowed."""
+    """
+    Count one request for (user, bucket) and say whether it is allowed, using a sliding-window estimate
+    (D-078): `previous_window_hits * weight + current_window_hits`, where `weight` is how much of the
+    previous fixed window still falls within the trailing `window_seconds` ending now (1.0 right at the
+    boundary, decaying linearly to 0.0 by the time a full window has passed). This is what actually fixes
+    bug #19 — a plain fixed-window count lets a burst at the end of one window and the start of the next
+    pass as if they were two independent, fully-fresh allowances.
+    """
     now = time.time() if now is None else now
     window_start = int(now // window_seconds) * window_seconds
+    previous_window_start = window_start - window_seconds
+    # retry_after stays "time until this fixed window ends" — a simple, always-correct upper bound. The
+    # sliding estimate can in practice allow a request again sooner, as the previous window's weight decays.
     retry_after = max(1, math.ceil(window_start + window_seconds - now))
 
     try:
-        hits = _upsert_hit(user_key, bucket, window_start, now)
+        current_hits = _upsert_hit(user_key, bucket, window_start, now)
+        previous_hits = _read_hits(user_key, bucket, previous_window_start)
     except Exception as exc:
         log_event("rate_limiter_unavailable", "warning", bucket=bucket, action="allowed (fail-open)",
                   error_type=type(exc).__name__, error=str(exc)[:120])
         return RateLimitResult(allowed=True, limit=limit, remaining=limit, retry_after=retry_after)
 
+    weight = max(0.0, (window_seconds - (now - window_start)) / window_seconds)
+    estimated = previous_hits * weight + current_hits
+
     return RateLimitResult(
-        allowed=hits <= limit,
+        allowed=estimated <= limit,
         limit=limit,
-        remaining=max(0, limit - hits),
+        remaining=max(0, int(limit - estimated)),
         retry_after=retry_after,
     )
 
