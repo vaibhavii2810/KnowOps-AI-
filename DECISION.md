@@ -1718,3 +1718,49 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Revisit if:** a live or eval-harness case surfaces a topic-pivot follow-up that retrieves worse because of
   this fold-in; consider then whether to fold in only when the new question looks pronoun-like (a cheap
   heuristic) rather than unconditionally.
+
+### D-076 · A capped agent run can't leak raw ReAct trace text, and `total_steps` stops over-counting it
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #24, Medium)
+- **Decision:** two independent fixes in `app/agent.py`:
+  1. `SUMMARY_INSTRUCTION` now explicitly says "Do not continue the Thought/Action/Observation format from
+     the steps above"; `plain_text_answer()` gained a code-level backstop, `_REACT_CONTINUATION` (a regex
+     matching text starting with `Thought N:`, `Action N:` or `Observation N:`), returning `""` when matched
+     so the caller's existing fallback text (`"Incident investigation concluded."`) is shown instead of raw
+     internal reasoning.
+  2. `run_agent()`'s returned `total_steps` is now `sum(1 for s in trace if "action" in s)` instead of
+     `len(trace)` — it no longer counts the synthesized wrap-up entry appended when the loop runs out of
+     steps, since that entry is not a ReAct step (`AgentChatResponse.total_steps`'s own documented meaning:
+     "Number of ReAct steps executed"). `steps` (the full trace) is unchanged and still includes that entry.
+- **Why:** verified live before fixing, twice reproduced out of several tries — `max_steps=1` reported
+  `total_steps=2`, and the `resolution` field was literally `"Thought 2: I need to also look up the runbook
+  for database failover...\nAction 2: lookup_runbook({"query": "database failover"})\nObservation 2:
+  <untrusted_data ...>..."` — raw internal agent reasoning shown to the operator as if it were the answer.
+  Root cause of the leak: the summary prompt's transcript is itself shaped like
+  `"Thought 1: ...\nAction 1: ...\nObservation 1: ..."`, and nothing stopped the model from pattern-matching
+  that shape and continuing it as "Thought 2: ..." instead of writing the prose report
+  `SUMMARY_INSTRUCTION` asked for — the same class of problem D-045 already hit once with JSON leaking into
+  the summary, fixed the same way: strengthen the instruction, and add a code-level backstop because the
+  instruction alone isn't reliable.
+- **Why `total_steps` excludes the synthesis entry, not `steps`:** the synthesis call is explicitly *not* one
+  of the capped "tool iterations" `max_steps` governs (confirmed from `run_agent()`'s own docstring: "Maximum
+  number of tool iterations to prevent runaway loops") — it is a one-time wrap-up after the cap is hit. An
+  operator reading `max_steps=1` and `total_steps=2` back reasonably reads that as the cap being violated by
+  one, which the report calls out directly ("the step cap is exceeded by one"). Distinguishing the two kinds
+  of trace entries by whether the step dict has an `"action"` key works because every real loop iteration
+  always sets one (even `""` for a no-tool final step, per the step_record construction), while the
+  synthesized entry never does.
+- **Alternatives considered:** dropping the synthesis entry from `steps` entirely instead of just excluding
+  it from the count — rejected, operators should still be able to see that a wrap-up summary happened and
+  read its content, which `steps` already supports; the fix only changes what `total_steps` counts. For the
+  leak: discarding any model output that merely *contains* `Thought N:` anywhere, not just at the start —
+  rejected as too aggressive, a legitimate prose report could reasonably quote or reference a prior step by
+  that label; matching only when the text *starts* with the pattern targets the actual observed failure mode
+  (the model picking the format back up from where the transcript left off) without discarding a real answer
+  that happens to mention a step number in passing.
+- **Tradeoff accepted:** the existing test `test_max_steps_caps_tool_calls_then_one_summary_call` previously
+  asserted `total_steps == max_steps + 1` as the expected (if confusing) behavior; it now asserts
+  `total_steps == max_steps` and `len(steps) == max_steps + 1` separately — a deliberate, understood change
+  to what the field means, not an accidental test weakening.
+- **Revisit if:** a legitimate agent answer is ever seen starting with text matching `_REACT_CONTINUATION`
+  coincidentally (e.g. a report that opens by literally quoting "Thought 1: ..." as evidence) — narrow the
+  regex then; not observed in testing.

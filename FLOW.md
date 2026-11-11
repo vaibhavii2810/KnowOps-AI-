@@ -182,10 +182,13 @@ api_agent_chat(AgentChatRequest) → agent.run_agent(prompt, max_steps)
       wrapped by guardrails.fence() as <untrusted_data> (forged closing tags are stripped)
   if the loop ran every step without a final answer (`for … else`) → outcome "max_steps"
   if no step gave a *non-blank* final answer (checks truthiness, not just key presence — D-026)
-    → [Gemini] one summary call on `Task: …` + the step transcript + SUMMARY_INSTRUCTION (plain text, not JSON) —
-      not the full history, whose tool list says "Format … as JSON" (D-045); the reply goes through
-      plain_text_answer(), which unwraps a JSON/fenced-JSON answer to its final_answer (if it fails: the summary's
-      error type is recorded, a canned answer is used)
+    → [Gemini] one summary call on `Task: …` + the step transcript + SUMMARY_INSTRUCTION (plain text, not JSON,
+      and explicitly not a continuation of the Thought/Action/Observation format — D-076) — not the full
+      history, whose tool list says "Format … as JSON" (D-045); the reply goes through plain_text_answer(),
+      which unwraps a JSON/fenced-JSON answer to its final_answer, and discards a reply that instead continues
+      the ReAct format itself (falls back to a canned answer — D-076, bug #24; if it fails outright: the
+      summary's error type is recorded, a different canned answer is used); this synthesized entry is appended
+      to `steps` but is not counted in `total_steps` (D-076 — only entries with an "action" key are)
   if the run was tainted → a code-generated "[Security notice]" listing blocked actions is appended to the
     resolution, whatever the model said
 → {task, total_steps, steps, resolution} → AgentChatResponse

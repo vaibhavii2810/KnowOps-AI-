@@ -306,21 +306,34 @@ CRITICAL RULES:
 
 SUMMARY_INSTRUCTION = (
     "Write the final SRE incident resolution report for the operator, based on all the observations above. "
-    "Answer in plain text (Markdown is fine). Do not answer in JSON and do not wrap the whole answer in a code block."
+    "Answer in plain text (Markdown is fine). Do not answer in JSON and do not wrap the whole answer in a "
+    "code block. Do not continue the Thought/Action/Observation format from the steps above — write a "
+    "normal prose report instead, with no 'Thought N:' or 'Action N:' labels."
 )
 
 _WHOLE_ANSWER_CODE_FENCE = re.compile(r"^```[a-zA-Z]*\s*\n(.*?)\n?```\s*$", re.DOTALL)
+
+# Bug #24 (external bug report, Medium, D-076): seen live — given a transcript already shaped like
+# "Thought 1: ...\nAction 1: ...\nObservation 1: ...", the summary call sometimes continues that exact
+# pattern itself ("Thought 2: ...\nAction 2: get_ticket(...)\n...") instead of writing a prose report, even
+# though SUMMARY_INSTRUCTION says not to. The instruction alone isn't reliable (same lesson as D-045's JSON
+# leak), so this is a second, code-level backstop.
+_REACT_CONTINUATION = re.compile(r"^\s*(?:Thought|Action|Observation)\s+\d+\s*:", re.IGNORECASE)
 
 
 def plain_text_answer(text: Optional[str]) -> str:
     """
     The summary call's text as something to show a person. If the model still answered with a JSON object (bare
     or in a ``` fence) — what it did when the summary prompt carried the agent's JSON-format instructions (D-045) —
-    return its final_answer (or thought). Any other text, Markdown with code blocks included, is returned as is.
+    return its final_answer (or thought). If it instead continued the ReAct Thought/Action/Observation format
+    itself (D-076), return "" so the caller's fallback text is shown instead of raw internal reasoning. Any
+    other text, Markdown with code blocks included, is returned as is.
     """
     if not text:
         return ""
     stripped = text.strip()
+    if _REACT_CONTINUATION.match(stripped):
+        return ""
     fenced = _WHOLE_ANSWER_CODE_FENCE.match(stripped)
     candidate = fenced.group(1).strip() if fenced else stripped
     if candidate.startswith("{"):
@@ -635,7 +648,13 @@ When you have gathered enough information and resolved or completed the task, se
 
     return {
         "task": task_prompt,
-        "total_steps": len(trace),
+        # Bug #24 (external bug report, Medium, D-076): was len(trace), which also counted the synthesized
+        # wrap-up entry appended above when the loop ran out of steps — so a run with max_steps=1 could
+        # report total_steps=2, contradicting this field's own documented meaning ("Number of ReAct steps
+        # executed", AgentChatResponse.total_steps) and the step cap the caller actually asked for. That
+        # wrap-up entry is the only one with no "action" key (every real loop iteration always sets one,
+        # even "" for a no-tool-call final step) — `steps` still includes it, for full transparency.
+        "total_steps": sum(1 for s in trace if "action" in s),
         "steps": trace,
         "resolution": resolution,
     }

@@ -194,6 +194,24 @@ ingested 5 docs / 80 chunks into Neon (80 after the 2026-10-20 code-fence fix, w
   escalation takes priority over ticketing (D-028); reproduced 3x before the fix, fixed 3x after
 - Two deterministic regression tests added (`tests/test_agent.py`) covering the malformed-response and
   bundled-is_final bugs, so neither depends on reproducing a live Gemini flake again
+- **7.3 addendum (2026-11-11, D-076):** an external bug report (bug #24, Medium) found two things on a capped
+  run — reproduced live, twice out of several tries: `max_steps=1` reported `total_steps=2` (the field is
+  documented as "Number of ReAct steps executed," but the synthesized wrap-up entry was counted too), and the
+  `resolution` was literally raw ReAct trace text ("Thought 2: ...\nAction 2: lookup_runbook(...)\nObservation
+  2: ..."), not a prose report — the summary call pattern-matched the transcript's own
+  Thought/Action/Observation shape and continued it instead of following `SUMMARY_INSTRUCTION`. Fixed both:
+  `total_steps` now counts only entries with an `"action"` key (every real loop iteration always has one; the
+  synthesis entry never does) — `steps` is unchanged and still shows the wrap-up entry. The instruction now
+  explicitly forbids continuing that format, and `plain_text_answer()` gained a code-level backstop
+  (`_REACT_CONTINUATION`) that discards text starting with that pattern, same lesson as D-045's JSON-leak
+  fix: the instruction alone isn't reliable. 4 new tests in `tests/test_agent_dispatch.py` (the backstop
+  directly, 3 payload shapes; a capped run whose summary leaks a step falls back to the safe message); the
+  existing `test_max_steps_caps_tool_calls_then_one_summary_call` updated to assert `total_steps == max_steps`
+  and `len(steps) == max_steps + 1` separately, a deliberate semantic change. 2 mutation checks (the backstop
+  removed, `total_steps` reverted to `len(trace)`) each fail the right tests. Verified live after the fix
+  (twice): `total_steps=1` with `max_steps=1` in both runs, no leaked ReAct text in either. 636 passed
+  offline, 136 live deselected; `pytest -m live tests/test_agent.py tests/test_agent_dispatch.py
+  tests/test_agent_logging.py`: 6/6 pass.
 
 **Phase 8 — Mock CRM / tickets** ✅
 - 8.1 `app/crm.py` verified directly against Postgres: `create_ticket()` genuinely inserts a row (confirmed
@@ -828,6 +846,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-074): fixed stored XSS in the console's formatMarkdown() (bug #21, High) — the whole answer is now escaped before any markdown transform runs, closing the gap where plain text, bold and inline-code spans (unlike code fences) let a hostile payload execute; the JWT-in-localStorage theft vector itself is a separate, unaddressed architecture decision |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-075): /ask retrieval now folds the most recent user turn into the query (bug #22, Medium) — a pronoun-style follow-up used to embed alone and miss the conversation's actual topic, confirmed live (retrieved unrelated sections, model refused); fixed without an extra Gemini call, same latency tradeoff already weighed in D-069 |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Re-verified bug #23 (refusals showing citation cards) live with the report's exact off-topic probes — already fixed as a direct consequence of D-056's threshold raise (2026-11-10); all three now return 0 sources, no new code change |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-076): capped agent runs no longer over-count total_steps (synthesis wrap-up no longer counted) or leak raw Thought/Action/Observation text as the resolution (bug #24, Medium) — both reproduced live before fixing; the leak fix adds a code-level backstop since the prompt instruction alone wasn't reliable (same lesson as D-045) |
 
 ## Deployment
 
@@ -947,9 +966,11 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   Known issues. Bug #22 (Medium — follow-up questions losing retrieval context, D-075) is fixed. Bug #23
   (Medium — refusals still showing citation cards) was already fixed as a direct consequence of D-056 (bug
   #2's threshold raise) — re-verified live here, 2026-11-11, with the report's exact off-topic probes ("what
-  is 2+2", "Terraform state locking," a prompt-injection string), all now 0 sources. The other 4 (#24–27) are
-  **not yet fixed or verified against this codebase**. Worth pulling the PDF's test file and results doc into
-  the repo so the rest aren't only tracked in a PDF.
+  is 2+2", "Terraform state locking," a prompt-injection string), all now 0 sources. Bug #24 (Medium — a
+  capped agent run over-counting `total_steps` and sometimes leaking raw ReAct trace text as the resolution,
+  D-076) is fixed, reproduced live before fixing. The other 3 (#25–27) are **not yet fixed or verified
+  against this codebase**. Worth pulling the PDF's test file and results doc into the repo so the rest aren't
+  only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any

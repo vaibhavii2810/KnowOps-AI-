@@ -173,7 +173,10 @@ def test_max_steps_caps_tool_calls_then_one_summary_call(max_steps, spies, fake_
     summary_call = fake_gemini.chat_calls[-1]
     assert "Write the final SRE incident resolution report" in summary_call["contents"]
     assert "response_mime_type" not in summary_call["config"]
-    assert result["total_steps"] == max_steps + 1
+    # Bug #24 (external bug report, Medium, D-076): total_steps counts only real ReAct iterations, not the
+    # synthesized wrap-up entry below the cap — len(result["steps"]) is max_steps + 1, total_steps is not.
+    assert result["total_steps"] == max_steps
+    assert len(result["steps"]) == max_steps + 1
     assert result["resolution"] == "Summary after the cap."
 
 
@@ -229,3 +232,32 @@ def test_a_json_wrapped_summary_is_unwrapped_to_its_answer(reply, expected, spie
 def test_plain_text_and_markdown_answers_are_left_alone(text):
     from app.agent import plain_text_answer
     assert plain_text_answer(text) == text
+
+
+# --- Bug #24 (external bug report, Medium, D-076): the summary call must not leak raw ReAct text ----------
+
+@pytest.mark.parametrize("leaked", [
+    'Thought 2: I need to also look up the runbook.\nAction 2: lookup_runbook({"query": "database failover"})\n'
+    'Observation 2: <untrusted_data source="tool: lookup_runbook">...</untrusted_data>',
+    "thought 1: continuing.\naction 1: get_ticket({})",
+    "   Observation 3: some tool result text",
+])
+def test_plain_text_answer_discards_a_leaked_react_continuation(leaked):
+    """The summary call is supposed to write a prose report, not keep generating Thought/Action/Observation
+    steps the way SUMMARY_INSTRUCTION explicitly tells it not to — but that instruction alone isn't reliable
+    (seen live). Returning "" here lets the caller's own fallback text stand in instead of showing an
+    operator raw internal reasoning."""
+    from app.agent import plain_text_answer
+    assert plain_text_answer(leaked) == ""
+
+
+def test_capped_run_falls_back_to_a_safe_message_when_the_summary_leaks_a_react_step(spies, fake_gemini):
+    fake_gemini.reply(
+        step("lookup_runbook", {"query": "try 0"}),
+        'Thought 2: I need to also check something else.\nAction 2: get_ticket({"ticket_id": 7})',
+    )
+
+    result = run_agent("Keep searching forever.", max_steps=1)
+
+    assert result["resolution"] == "Incident investigation concluded."
+    assert "Thought 2" not in result["resolution"]
