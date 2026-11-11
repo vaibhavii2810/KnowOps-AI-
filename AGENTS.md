@@ -827,6 +827,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Checked bug #20 (local .env points at the live database, D-073) and confirmed directly (a Phase 14.4 production ticket is readable locally) — documented as a known risk pending a Neon branch database; user chose to defer provisioning it |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-074): fixed stored XSS in the console's formatMarkdown() (bug #21, High) — the whole answer is now escaped before any markdown transform runs, closing the gap where plain text, bold and inline-code spans (unlike code fences) let a hostile payload execute; the JWT-in-localStorage theft vector itself is a separate, unaddressed architecture decision |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-075): /ask retrieval now folds the most recent user turn into the query (bug #22, Medium) — a pronoun-style follow-up used to embed alone and miss the conversation's actual topic, confirmed live (retrieved unrelated sections, model refused); fixed without an extra Gemini call, same latency tradeoff already weighed in D-069 |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Re-verified bug #23 (refusals showing citation cards) live with the report's exact off-topic probes — already fixed as a direct consequence of D-056's threshold raise (2026-11-10); all three now return 0 sources, no new code change |
 
 ## Deployment
 
@@ -943,9 +944,12 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   Phase-14.4 production ticket is readable through it) and recorded as a known risk pending an operational
   fix (a Neon branch database), not a code change. Bug #21 (High — stored XSS in `formatMarkdown()`, D-074)
   is fixed; its JWT-in-`localStorage` theft vector is a separate, unaddressed architecture decision — see
-  Known issues. Bug #22 (Medium — follow-up questions losing retrieval context, D-075) is fixed. The other 5
-  (#23–27) are **not yet fixed or verified against this codebase**. Worth pulling the PDF's test file and
-  results doc into the repo so the rest aren't only tracked in a PDF.
+  Known issues. Bug #22 (Medium — follow-up questions losing retrieval context, D-075) is fixed. Bug #23
+  (Medium — refusals still showing citation cards) was already fixed as a direct consequence of D-056 (bug
+  #2's threshold raise) — re-verified live here, 2026-11-11, with the report's exact off-topic probes ("what
+  is 2+2", "Terraform state locking," a prompt-injection string), all now 0 sources. The other 4 (#24–27) are
+  **not yet fixed or verified against this codebase**. Worth pulling the PDF's test file and results doc into
+  the repo so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
