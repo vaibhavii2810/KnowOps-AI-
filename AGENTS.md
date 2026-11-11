@@ -916,6 +916,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-078, supersedes D-072): bug #19 (fixed-window rate limiter allows a boundary burst) revisited and fixed — check_rate_limit() now blends the previous fixed window's hits in by a linearly-decaying weight, one extra cheap read, no new storage; found and fixed a real fragment-matching collision in MemoryDB's test double along the way, and rewrote one existing test that had encoded the bug itself as correct behavior |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-079, supersedes D-073): bug #20 (local .env pointed at the real production database) resolved — a dedicated Neon branch database provisioned via Vercel's Storage tab, local .env repointed, knowledge base re-ingested, pytest -m live (139/139) verified against it; no Vercel MCP tool exists to create a Neon branch, confirmed before giving the user manual step-by-step instructions |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-080): bug #25 (/ask latency) partially fixed — get_conn() no longer registers pgvector's adapter unconditionally (only scripts/ingest.py's write path needs it, confirmed by auditing every embedding read/write site); measured ~0.8s saved per connection, /ask down to ~4.0s from a 5.6s median baseline; the function-to-database distance half of the finding is unchanged and remains open, same as bug #26 |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Checked bug #26 (poor throughput under concurrency, D-081) after D-080 and found it mostly resolved as a side effect — p50 3.6-4.0s -> 0.89-1.24s, throughput 2.5 -> 7.2-8.7 req/s at concurrency 10, reproduced twice; weighed building a connection pool for the remaining gap (two shapes considered) and, with the user's agreement, left it as an accepted tradeoff rather than risk destabilizing 649 offline + 141 live tests for a now-much-smaller gain. All 27 items from the external bug report are closed out |
 
 ## Deployment
 
@@ -1034,11 +1035,9 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   #2's threshold raise) — re-verified live here, 2026-11-11, with the report's exact off-topic probes ("what
   is 2+2", "Terraform state locking," a prompt-injection string), all now 0 sources. Bug #24 (Medium — a
   capped agent run over-counting `total_steps` and sometimes leaking raw ReAct trace text as the resolution,
-  D-076) is fixed, reproduced live before fixing. Bug #26 (Low — poor throughput under concurrency) is the
-  same root cause bug #25 shared, measured under load, also recorded without a new fix (connection pooling is
-  a real infrastructure change). Bug #27 (Info) was the report's own concurrent-request check confirming rate
-  limits work exactly as designed — checked, nothing to fix, not counted as a fix (same treatment as bug
-  #10). **Bug #16 (Low — typo-degraded ranking) was revisited and
+  D-076) is fixed, reproduced live before fixing. Bug #27 (Info) was the report's own concurrent-request check
+  confirming rate limits work exactly as designed — checked, nothing to fix, not counted as a fix (same
+  treatment as bug #10). **Bug #16 (Low — typo-degraded ranking) was revisited and
   fixed on 2026-11-11 (D-077, superseding D-069's "recorded, not fixed")** — a local, no-network-call
   correction against the knowledge base's own vocabulary, a third option neither D-069 nor D-075 had
   considered. **Bug #19 (Info — the rate-limiter's fixed-window boundary burst) was also revisited and fixed
@@ -1051,13 +1050,17 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   (Low — `/ask` latency) was also revisited and partially fixed on 2026-11-11 (D-080)** — `get_conn()` no
   longer registers pgvector's adapter unconditionally (only `scripts/ingest.py`'s write path needs it),
   cutting ~0.8s from every other database connection; `/ask` measured ~4.0s afterward, down from the Phase
-  13.3 baseline's median 5.6s. The rest of the finding (function-to-database distance) is unchanged and
-  remains open, same as #26. **All 27 items from the report are now accounted for:** 24 fixed with a code
-  change (#1–9, #11–20, #21–25), 2 checked and confirmed already correct with nothing to change (#10, #27),
-  and 1 measured and recorded rather than code-fixed because the real fix is a genuine infrastructure
-  tradeoff, not a small patch (#26 needs connection pooling across serverless invocations). Worth pulling the
-  PDF's test file and results doc into the repo so the methodology is tracked alongside the fixes, not only
-  in a PDF.
+  13.3 baseline's median 5.6s. **Bug #26 (Low — poor throughput under concurrency) was re-measured (not
+  assumed) after that same fix and found mostly resolved as a side effect (D-081)** — p50 for a DB-backed
+  route dropped from the report's 3.6–4.0s to 0.89–1.24s and throughput rose from ~2.5 to 7.2–8.7 req/s at
+  the same concurrency (10), reproduced twice; the remaining per-request-connect gap was weighed against
+  building a connection pool (two shapes considered, both presented to the user) and left as an accepted
+  tradeoff given the size of what's left and the bug's own Low severity. **All 27 items from the report are
+  now accounted for:** 24 fixed with a code change (#1–9, #11–20, #21–25), 2 checked and confirmed already
+  correct with nothing to change (#10, #27), and 1 measured, re-measured after a related fix, and recorded as
+  mostly resolved with an accepted remaining tradeoff rather than a further code change (#26). Worth pulling
+  the PDF's test file and results doc into the repo so the methodology is tracked alongside the fixes, not
+  only in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
@@ -1104,14 +1107,15 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   response is produced; live client-side timings showed no measurable difference (see 12.4), but a caller may still wait
   for it on a serverless runtime. `/metrics` has no percentiles (only sums and a max are stored). `METRICS_ENABLED=false`
   turns counting off; if the cost ever shows, batch or sample the writes.
-- **Throughput under concurrency is poor for DB-backed routes (bug #26 in the external report, Low — recorded,
-  not fixed):** the report's load test measured DB routes at p50 3.6–4.0s and only ~2.5 req/s at concurrency 10,
-  while `/auth/me` (no database call) is capped near 10 req/s with a 2s p50 at concurrency 20 — the same root
-  cause already recorded above (a new connection + `register_vector` per call, plus the serialized per-request
-  metrics write), just measured here under load rather than one request at a time. No new fix here beyond what's
-  already on record: a real fix is connection pooling across invocations (e.g. a pooler in front of Neon, or
-  reusing the rate-limiter's persistent-connection pattern more broadly) — an infrastructure/architecture change,
-  not a small patch, and the same class of deferred work as the latency item above.
+- **Mostly fixed as a side effect of D-080, 2026-11-11 (D-081):** bug #26 — the report's own load test
+  measured DB-backed routes at p50 3.6–4.0s and ~2.5 req/s at concurrency 10. Re-measured (not assumed) after
+  D-080 removed `get_conn()`'s unconditional `register_vector()` call: p50 is now 0.89–1.24s and throughput
+  7.2–8.7 req/s at the same concurrency, reproduced twice. The remaining gap — each request still opens its
+  own fresh connection rather than reusing one — was seriously weighed against building a connection pool
+  (either a real pool library, which runs a background thread that behaves unpredictably across Vercel's
+  freeze/thaw cycles, or a hand-rolled multi-connection pool, which needs staleness-detection retrofitted
+  into every `get_conn()` call site) and left as an accepted tradeoff given the now-much-smaller gap and the
+  bug's own Low severity. See D-081 for both options considered and what would change the calculus.
 - **Bug #27 (Info) checked and confirmed correct, no fix needed:** the report's own concurrent-request test found
   the rate limits work exactly as designed (`/ask` 10/min, agent 5/min, `Retry-After` present), with the only
   caveat being the already-recorded fixed-window boundary behavior (bug #19, D-072). Nothing to change.

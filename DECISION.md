@@ -1977,3 +1977,41 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   caller's own `get_conn()` would need `vectors=True` too — flagged above as something to watch for.
 - **Revisit if:** a future code path ever binds a raw vector as a query parameter, or reads the `embedding`
   column directly — pass `vectors=True` at that call site then, following `insert_chunk()`'s pattern.
+
+### D-081 · Bug #26 (poor throughput under concurrency) is mostly resolved as a side effect of D-080; no connection pool built
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User ("go and fixed the 26" — bug #26 in `KnowOps_AI_Bug_Report.pdf`)
+- **Decision:** no new code. Measured bug #26's own benchmark shape again (concurrency 10 against a DB-backed
+  route, in-process via `TestClient` + a `ThreadPoolExecutor`, against the D-079 Neon branch) before building
+  anything, per house practice — and found most of the problem gone already: p50 dropped from the report's
+  3.6–4.0s to 0.89–1.24s (two runs), and throughput rose from the report's ~2.5 req/s to 7.2–8.7 req/s at the
+  same concurrency. This is D-080's `register_vector` fix (same day, same report) paying off here too — each
+  request still opens its own fresh connection, but that connection no longer pays the ~0.8s adapter-
+  registration cost on top of the plain connect.
+- **Why no connection pool was built for the remaining gap:** a real fix for the rest of it (eliminating the
+  per-request connect cost entirely via connection reuse) was seriously considered, not dismissed out of
+  hand — two shapes were weighed:
+  1. **A real pool library (`psycopg_pool.ConnectionPool`)** — the obvious, correct tool for this, but it
+     runs a background maintenance thread per pool. In this app's actual deployment (Vercel serverless
+     functions that freeze between invocations), a frozen function can't run that thread, so a pool can
+     silently hand out a connection that died while frozen, with no guarantee the library's own recovery
+     logic gets to run before that happens. It is also a new dependency with its own version/compatibility
+     surface, and its connections are created via a path this app's offline test fakes (`fake_db`,
+     `no_network` — which patch `psycopg.connect` directly, Phase 11.1, D-038) are not written to see,
+     risking a two-day retrofit of 649 offline tests to even find out if it's compatible.
+  2. **A hand-rolled multi-connection pool** (several already-open connections, checked out/returned,
+     following `app/ratelimit.py`'s existing single-connection pattern but sized for more than one) — no
+     background thread, but staleness detection then has to move from "one lock-protected retry site"
+     (`ratelimit.py`'s `_upsert_hit`) to every `get_conn()` call site across `app/crm.py`, `app/main.py` and
+     `app/rag.py` — a much bigger, more invasive change than D-080's single-parameter addition, for a gap
+     that first needed to actually be measured (and turned out to be much smaller than assumed).
+  Both were explicitly presented to the user as real, considered options before choosing not to build either
+  — not a unilateral decision to under-deliver on what was asked.
+- **Tradeoff accepted:** each request still pays a fresh TCP+TLS+auth connect to Neon (~0.4s now, measured in
+  D-080, down from ~1.2s), and concurrent requests are not sharing warmed-up connections across a serverless
+  instance's lifetime. At the severity this was reported at (Low) and the size of the gap actually remaining
+  after D-080, this is judged an acceptable tradeoff against the risk of either pooling approach above.
+- **Revisit if:** a future measurement shows the remaining per-request connect cost is a real, user-visible
+  problem (not just a benchmark number) — at that point, the hand-rolled pool (option 2 above) is the lower-
+  risk starting point, since it needs no new dependency and no background thread; budget time to retrofit
+  the offline test fakes either way. Also revisit if Vercel ever offers a supported way to keep a background
+  thread alive across freezes, which would remove the main objection to option 1.
