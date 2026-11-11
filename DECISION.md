@@ -1621,3 +1621,24 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Revisit if:** real abuse exploiting this boundary is ever observed in production logs, or the limiter is
   revisited for an unrelated reason (e.g. the latency work already flagged in Known issues) — then weigh a
   sliding-window or token-bucket replacement against the cost of both at that time.
+
+### D-073 · Local `.env` points at the real production Neon database (recorded, not fixed)
+- **Date · by · source:** 2026-11-11 · Vaishnavi (with Claude) · User (bug report: `KnowOps_AI_Bug_Report.pdf`, bug #20, Info)
+- **Decision:** no code change. Confirmed directly against real data, not taken on the report's word: ticket
+  #42, created in Phase 14.4's live production smoke test against `knowops-ai.vercel.app`, is readable through
+  the connection in the local `.env` file. This means the "two Neon databases" already documented in
+  AGENTS.md's Deployment section (D-024) are not two independent databases — the local one *is* the
+  production one — so `pytest -m live` and any local write test write real rows into the live application's
+  database.
+- **Why not fixed here:** the only real remedy is operational — provision a separate Neon branch database (or
+  a wholly separate Neon project) and repoint the local `.env`'s `DATABASE_URL` at it — not a code change to
+  this repo. That requires an action in the Neon dashboard (creating the branch, copying its connection
+  string) that only the project owner can take; asked the user directly whether to do this now, create the
+  branch, or document-and-defer, and the answer was to document and defer.
+- **Alternatives considered:** none — this isn't a design choice with tradeoffs to weigh, it's a missing
+  operational step.
+- **Tradeoff accepted:** `pytest -m live` continues to write/read real tickets and conversations in the
+  production database until a branch database exists; the README/AGENTS.md documentation already named this
+  risk (D-024) but understated it as "a different database" rather than confirming it as the same live one.
+- **Revisit if:** the user is ready to provision a Neon branch database — at that point, update `AGENTS.md`'s
+  Deployment section and `.env.example` guidance to point local dev at the branch instead of production.

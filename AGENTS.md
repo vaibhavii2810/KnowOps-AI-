@@ -795,6 +795,7 @@ Append one line per finished phase (newest last).
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-070): create_ticket() now rejects an invalid priority (ValueError) instead of silently defaulting to P2, matching update_ticket_status()'s existing pattern — closes the gap where the agent's create_ticket tool had no Pydantic layer the HTTP API already had |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Post-launch fix (D-071): PATCH /tickets/{id} can now clear resolution_notes with an explicit null — omitted vs. null used to collapse to the same None, so a wrong note could never be cleared; fixed with a model_fields_set check plus an UNSET sentinel, including a matching gap in MemoryDB's own test double |
 | 2026-11-11 | — | Vaishnavi (with Claude) | Checked bug #19 (fixed-window rate limiter allows a ~2x boundary burst, D-072) against the real code — confirmed as the report itself says, "by design; document," not fixed; real fixes are genuine algorithm changes (sliding window, token bucket), not small patches |
+| 2026-11-11 | — | Vaishnavi (with Claude) | Checked bug #20 (local .env points at the live database, D-073) and confirmed directly (a Phase 14.4 production ticket is readable locally) — documented as a known risk pending a Neon branch database; user chose to defer provisioning it |
 
 ## Deployment
 
@@ -804,11 +805,17 @@ Append one line per finished phase (newest last).
   bundles `static/` and `data/`. These exist on the `sprint-2` branch.
 - Env vars live in that project's dashboard (Preview + Production), never in git. `.env` is gitignored.
 - Hobby plan: Git deploys only build commits by the project owner's account.
-- **Two Neon databases exist:** the Vercel app's `DATABASE_URL` points at a different Neon database from the one
-  first used in a local `.env` (D-024). Re-ingest after any `data/docs/` or chunker change into **each** one you
-  care about: `DATABASE_URL='<url>' python scripts/ingest.py --reset --quiet` (the env var overrides `.env`).
-  A local `.env` pointing at the live database means `pytest -m live` writes test tickets into it (plain `pytest` no
-  longer touches any database, D-040).
+- **Two Neon databases exist — and the local one is confirmed to be the real production database, not a safe
+  separate copy (bug #20 in the external report, Info, D-073 — recorded, not fixed):** the Vercel app's
+  `DATABASE_URL` points at a different Neon database from the one first used in a local `.env` (D-024).
+  Confirmed directly, 2026-11-11: ticket #42 ("Phase 14 smoke test," created live against production in
+  Phase 14.4) is readable through the *local* `.env`'s connection — it is the same database, not merely a
+  look-alike. Re-ingest after any `data/docs/` or chunker change into **each** one you care about:
+  `DATABASE_URL='<url>' python scripts/ingest.py --reset --quiet` (the env var overrides `.env`). A local
+  `.env` pointing at the live database means `pytest -m live` and any local write test write real rows into
+  production (plain `pytest` never touches any database, D-040). No code fix applies here — the real remedy
+  is operational (point local dev at a separate Neon branch database), not a patch to this repo; left open
+  pending that infra step.
 - `GEMINI_API_KEY` must exist in Vercel for **Preview** as well as Production (a missing key shows as a 503
   "No API key was provided" from `/ask`); variables only apply to new deployments.
 
@@ -900,10 +907,12 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   /tickets/{id} could never clear resolution_notes, D-071) are fixed. Bug #19 (Info — a fixed-window rate
   limiter can let ~2x the configured limit through at a window boundary, D-072) was confirmed against the
   real code and recorded as an accepted, by-design limitation, per the report's own "by design; document"
-  note — not a defect, and every real fix (sliding window, token bucket) is a genuine algorithm change. The
-  other 8 (including #21, High — stored-XSS in the console via `formatMarkdown`) are **not yet fixed or
-  verified against this codebase**. Worth pulling the PDF's test file and results doc into the repo so the
-  rest aren't only tracked in a PDF.
+  note — not a defect, and every real fix (sliding window, token bucket) is a genuine algorithm change.
+  Bug #20 (Info — local `.env` points at the real production database, D-073) was confirmed directly (a
+  Phase-14.4 production ticket is readable through it) and recorded as a known risk pending an operational
+  fix (a Neon branch database), not a code change. The other 7 (including #21, High — stored-XSS in the
+  console via `formatMarkdown`) are **not yet fixed or verified against this codebase**. Worth pulling the
+  PDF's test file and results doc into the repo so the rest aren't only tracked in a PDF.
 
 - **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
   `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
