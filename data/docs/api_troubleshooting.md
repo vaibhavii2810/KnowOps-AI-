@@ -70,7 +70,7 @@ The JWT secret may have been rotated. All existing tokens are immediately invali
    # Check Gemini API status
    curl https://status.cloud.google.com/incidents.json | python3 -m json.tool | grep -i gemini
    ```
-   The API has built-in retry logic (3 attempts with exponential backoff). If persisting, check application logs.
+   The API has built-in retry logic (4 attempts in total — the first try plus 3 retries — with exponential backoff). If persisting, check application logs.
 
 2. **Database Connection Failure:**
    ```bash
@@ -191,21 +191,24 @@ Filter by trace ID in Datadog to follow a single request across all services.
 
 ## 7. Rate Limiting
 
-The API enforces rate limits per authenticated user:
+The API enforces rate limits per authenticated user, except login, which is limited per client IP address:
 
 | Endpoint | Rate Limit | Window |
 |---|---|---|
-| `POST /ask` | 20 requests | per minute |
-| `POST /auth/login` | 5 requests | per minute |
-| `GET /health` | 100 requests | per minute |
+| `POST /ask` | 10 requests | per minute |
+| `POST /agent/chat` and `POST /agent/triage/{id}` | 5 requests (shared between the two) | per minute |
+| `POST /auth/login` | 5 requests, and 30 requests | per minute, and per hour |
 
-If a client hits the rate limit, they receive a `429` response with:
+`GET /health` is not rate limited.
+
+If a client hits the rate limit, it receives a `429` response with a `Retry-After` header (seconds) and a body such as:
 ```json
 {
-  "error": "rate_limit_exceeded",
-  "retry_after_seconds": 45
+  "detail": "Rate limit exceeded: 10 requests per minute for this endpoint. Try again in 45 seconds."
 }
 ```
+
+Every limited response also carries `X-RateLimit-Limit` and `X-RateLimit-Remaining` headers.
 
 Clients should implement exponential backoff when receiving 429 responses.
 

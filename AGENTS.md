@@ -1062,10 +1062,9 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   the PDF's test file and results doc into the repo so the methodology is tracked alongside the fixes, not
   only in a PDF.
 
-- **Preview `GEMINI_API_KEY` is scoped to one branch (found in Phase 14.3, 2026-11-08):** the Vercel project has
-  `GEMINI_API_KEY` for Production, and for Preview only on the `sprint-2` git branch. A Preview deployment of any
-  other branch would get a 503 from `/ask` ("No API key was provided"). Low impact today (Preview is only used for
-  `sprint-2`), but worth widening to all Preview branches before relying on Preview deploys of other branches.
+- **Fixed, 2026-11-14:** Preview `GEMINI_API_KEY` used to be scoped to the `sprint-2` branch only (Phase 14.3). Its branch
+  restriction was removed in the Vercel dashboard, so it now covers every Preview branch (saved with the value field left
+  blank, i.e. unchanged). Not yet proven by a Preview deploy of another branch; applies to new deployments only.
 
 - **Admin login hardening (password fixed 2026-11-03; residual risks):** Vercel's `APP_PASSWORD` was changed by hand to
   the strong one from the local `.env` and checked live: `admin`/`admin` → 401, the new password → 200 and its token works
@@ -1094,8 +1093,10 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - **Fixed, 2026-11-14 (D-082):** the console's session is now an HttpOnly `SameSite=Strict` cookie (`Secure` on Vercel), not
   `localStorage`; Bearer headers still work for scripts. CSRF rests on `SameSite=Strict` alone (see D-082). Not yet verified
   in a real browser on the deployed site.
-- **n8n triage workflow has no auth:** `n8n/incident_triage_workflow.json` calls `POST /tickets` and
-  `/agent/triage/{id}` without an `Authorization` header, so since Phase 5.4 it would get 401s.
+- **Fixed in the file, 2026-11-14 (D-085):** `n8n/incident_triage_workflow.json` now starts with a "Log In to KnowOps" node
+  (`POST /auth/login`, credentials from the n8n environment variables `KNOWOPS_USERNAME` / `KNOWOPS_PASSWORD`) and sends
+  `Authorization: Bearer` on the ticket and triage calls. Checked offline only (`tests/test_n8n_workflow.py`) — nobody has run
+  it in a real n8n yet (same as the Phase 9.4 workflow).
 - **Phase 7.1 (partial, remainder of D-015):** `create_ticket`/`escalate_to_human` were added (D-025), but
   `run_system_diagnostics`/`execute_recovery_action` are still simulated for everything except the database
   diagnostic — no real infrastructure is inspected or changed.
@@ -1142,10 +1143,11 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   previous window was at its limit, with the quota recovering gradually (not a hard wall) as real time passes.
   One extra, cheap primary-key read per check; no new storage. See D-078 for a real fragment-matching
   collision found and fixed in the offline test double while building this.
-- **Runbook text disagrees with the app in places (found reading them for 13.1):** `api_troubleshooting.md` §7 says `POST /ask` is
-  limited to 20 requests/minute and `GET /health` to 100/minute, but the app enforces 10/minute on `/ask` (D-036) and does not
-  limit `/health`; it and `on_call_guide.md` also say the Gemini retry is "up to 3 attempts" where the code makes 4 (D-032). `/ask`
-  answers from these documents, so it repeats them. Not fixed; no golden question depends on these facts.
+- **Fixed, 2026-11-14:** the runbooks used to quote wrong limits (`/ask` 20/min, `/health` 100/min, Gemini retry "3 attempts").
+  `api_troubleshooting.md` §7 now lists the real ones (`/ask` 10/min, agent 5/min shared, login 5/min + 30/hour per IP, `/health`
+  unlimited, the real 429 body and headers) and both docs say 4 attempts (D-032). The dev database was re-ingested and `/ask`
+  now answers "10 requests per minute"; Production picks the change up at its next 03:00 UTC reindex (or run `/cron/reindex`).
+  `scripts/ingest.py` also no longer crashes printing its ✅ summary on a Windows console.
 - **Phase 9.4:** `n8n/workflow.json`'s Slack URL is a placeholder (`.../mock/webhook/...`); the backend→webhook
   mechanism is verified (D-031) but nobody has actually run `npx n8n` and imported the workflow for real yet.
 

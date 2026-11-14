@@ -130,7 +130,7 @@ LIMIT 5;
 
 **Immediate action:**
 - Check Google Cloud Status: status.cloud.google.com
-- The `chat_completion()` function has automatic retry logic with exponential backoff (up to 3 attempts)
+- The `chat_completion()` function has automatic retry logic with exponential backoff (up to 4 attempts: the first try plus 3 retries)
 - If persisting >15 minutes: switch to degraded mode (return cached answers only)
 - Notify users: "AI responses may be delayed"
 

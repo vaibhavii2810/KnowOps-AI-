@@ -427,6 +427,7 @@ def reindex_knowledge_base(force: bool = False, verbose: bool = True) -> dict:
 
 def main() -> None:
     configure_logging()  # run as a script, app.main never loads: set up the JSON logs here (Phase 12.2)
+    sys.stdout.reconfigure(encoding="utf-8")  # Windows consoles default to cp1252, which cannot print the ✅ summary lines
     parser = argparse.ArgumentParser(
         description="Ingest Markdown documents into the KnowOps knowledge base."
     )

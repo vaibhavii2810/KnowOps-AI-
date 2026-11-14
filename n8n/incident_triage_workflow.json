@@ -11,7 +11,39 @@
       "name": "Incoming Alert Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
-      "position": [240, 300]
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/auth/login",
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "username",
+              "value": "={{ $env.KNOWOPS_USERNAME }}"
+            },
+            {
+              "name": "password",
+              "value": "={{ $env.KNOWOPS_PASSWORD }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-login",
+      "name": "Log In to KnowOps",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        350,
+        300
+      ]
     },
     {
       "parameters": {
@@ -23,25 +55,37 @@
           "parameters": [
             {
               "name": "subject",
-              "value": "={{ $json.body.alert_name || 'Production Alert: High Error Rate' }}"
+              "value": "={{ $('Incoming Alert Webhook').item.json.body.alert_name || 'Production Alert: High Error Rate' }}"
             },
             {
               "name": "description",
-              "value": "={{ $json.body.message || 'Alert triggered from monitoring system. Requires immediate triage.' }}"
+              "value": "={{ $('Incoming Alert Webhook').item.json.body.message || 'Alert triggered from monitoring system. Requires immediate triage.' }}"
             },
             {
               "name": "priority",
-              "value": "={{ $json.body.severity || 'P1' }}"
+              "value": "={{ $('Incoming Alert Webhook').item.json.body.severity || 'P1' }}"
             }
           ]
         },
-        "options": {}
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Log In to KnowOps').item.json.access_token }}"
+            }
+          ]
+        }
       },
       "id": "node-create-ticket",
       "name": "Create Incident Ticket",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
-      "position": [460, 300]
+      "position": [
+        570,
+        300
+      ]
     },
     {
       "parameters": {
@@ -49,13 +93,25 @@
         "url": "=http://localhost:8000/agent/triage/{{ $json.id }}",
         "options": {
           "timeout": 60000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Log In to KnowOps').item.json.access_token }}"
+            }
+          ]
         }
       },
       "id": "node-agent-triage",
       "name": "Autonomous Agent Triage",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
-      "position": [680, 300]
+      "position": [
+        790,
+        300
+      ]
     },
     {
       "parameters": {
@@ -77,7 +133,10 @@
       "name": "Notify On-Call Channel",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
-      "position": [900, 300]
+      "position": [
+        1010,
+        300
+      ]
     }
   ],
   "connections": {
@@ -85,7 +144,7 @@
       "main": [
         [
           {
-            "node": "Create Incident Ticket",
+            "node": "Log In to KnowOps",
             "type": "main",
             "index": 0
           }
@@ -108,6 +167,17 @@
         [
           {
             "node": "Notify On-Call Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log In to KnowOps": {
+      "main": [
+        [
+          {
+            "node": "Create Incident Ticket",
             "type": "main",
             "index": 0
           }

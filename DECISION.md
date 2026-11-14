@@ -2047,3 +2047,12 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Why:** the cache was stamped `0.0` and treated as fresh while `time.monotonic() < 300`. On a freshly booted machine (the CI
   runner, a new serverless microVM) that is true, so the vocabulary was never loaded and typo correction was silently off for
   the first 5 minutes. It never failed locally because the dev machine had been up longer.
+
+### D-085 · n8n triage workflow logs in before calling the API
+- **Date · by · source:** 2026-11-14 · Niranjan (with Claude) · Known issues (since Phase 5.4 the workflow got 401s)
+- **Decision:** `n8n/incident_triage_workflow.json` gets a first "Log In to KnowOps" HTTP node; the ticket and triage nodes send
+  `Authorization: Bearer {{ token }}`. Credentials come from n8n environment variables `KNOWOPS_USERNAME` / `KNOWOPS_PASSWORD`,
+  never the file. The ticket node now reads the alert from `$('Incoming Alert Webhook')` because `$json` is the login response.
+- **Why a login per run instead of a stored token:** tokens expire after `jwt_expire_minutes` (60), so a pasted token would
+  break silently; a login per alert is one cheap call (limit 5/min per IP, which alert volume here does not approach).
+- **Tradeoff accepted:** validated only by an offline structure test; not run in a real n8n.

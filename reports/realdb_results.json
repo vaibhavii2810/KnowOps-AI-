@@ -1,0 +1,132 @@
+{
+ "results": [
+  {
+   "id": "T8a",
+   "name": "open P1 counts as active",
+   "expected": "+1",
+   "actual": 1,
+   "result": "PASS"
+  },
+  {
+   "id": "T8b",
+   "name": "CLOSED P1 is not an active incident",
+   "expected": "+0",
+   "actual": "+1",
+   "result": "FAIL"
+  },
+  {
+   "id": "T8c",
+   "name": "resolved P1 is not active",
+   "expected": "+0",
+   "actual": "+0",
+   "result": "PASS"
+  },
+  {
+   "id": "T9",
+   "name": "stats parts add up to total",
+   "expected": "total +4 == parts +4",
+   "actual": "total +4, parts +3",
+   "result": "FAIL"
+  },
+  {
+   "id": "T2",
+   "name": "list order P1,P2,P3",
+   "expected": [
+    "ZZ order p1",
+    "ZZ order p2",
+    "ZZ order p3"
+   ],
+   "actual": [
+    "ZZ order p1",
+    "ZZ order p2",
+    "ZZ order p3"
+   ],
+   "result": "PASS"
+  },
+  {
+   "id": "T4",
+   "name": "limit=1 returns exactly 1",
+   "expected": 1,
+   "actual": 1,
+   "result": "PASS"
+  },
+  {
+   "id": "T3",
+   "name": "combined filter returns only closed P1",
+   "expected": "all closed+P1",
+   "actual": 1,
+   "result": "PASS"
+  },
+  {
+   "id": "T10",
+   "name": "SQL metachars/unicode round-trip byte-for-byte; 5000-char description",
+   "expected": "identical",
+   "actual": "identical",
+   "result": "PASS"
+  },
+  {
+   "id": "T1",
+   "name": "created_at == updated_at on create",
+   "expected": "equal",
+   "actual": "2026-11-08 13:28:44.367308+00:00 / 2026-11-08 13:28:44.367308+00:00",
+   "result": "PASS"
+  },
+  {
+   "id": "T6",
+   "name": "PATCH bumps updated_at, keeps created_at",
+   "expected": "updated>created",
+   "actual": "2026-11-08 13:28:44.367308+00:00 -> 2026-11-08 13:28:44.536289+00:00",
+   "result": "PASS"
+  },
+  {
+   "id": "T7",
+   "name": "PATCH nonexistent id returns None",
+   "expected": null,
+   "actual": null,
+   "result": "PASS"
+  },
+  {
+   "id": "T14",
+   "name": "invalid priority is rejected (API gives 422)",
+   "expected": "error",
+   "actual": "stored as P2",
+   "result": "FAIL"
+  },
+  {
+   "id": "T5",
+   "name": "reopen closed ticket (allowed?)",
+   "expected": "documented",
+   "actual": "status=open, notes kept='first notes'",
+   "result": "PASS"
+  },
+  {
+   "id": "PATCH-notes",
+   "name": "PATCH without notes keeps old notes (cannot clear)",
+   "expected": "can clear",
+   "actual": "notes='first notes'",
+   "result": "FAIL"
+  },
+  {
+   "id": "R10",
+   "name": "history sent to model includes the latest message (12)",
+   "expected": "message 12 in history",
+   "actual": "last in history = 'message 8'",
+   "result": "FAIL"
+  },
+  {
+   "id": "FK",
+   "name": "deleting a conversation cascades to messages",
+   "expected": 0,
+   "actual": 0,
+   "result": "PASS"
+  },
+  {
+   "id": "NUL",
+   "name": "NUL byte at DB layer is rejected (API blocks it first)",
+   "expected": "rejected",
+   "actual": "DataError",
+   "result": "PASS"
+  }
+ ],
+ "leftover": 0
+}

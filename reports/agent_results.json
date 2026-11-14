@@ -1,0 +1,57 @@
+[
+ {
+  "name": "get_ticket real",
+  "status": 200,
+  "secs": 8,
+  "total_steps": 2,
+  "tools": [
+   "get_ticket"
+  ],
+  "ok": true,
+  "resolution": "Ticket #42 ('Phase 14 smoke test') currently has a status of 'closed' with a priority of 'P3'. Description: 'End-to-end check, safe to close'."
+ },
+ {
+  "name": "get_ticket missing",
+  "status": 200,
+  "secs": 9,
+  "total_steps": 2,
+  "tools": [
+   "get_ticket"
+  ],
+  "ok": true,
+  "resolution": "Ticket #999999 does not exist in the system."
+ },
+ {
+  "name": "lookup",
+  "status": 200,
+  "secs": 7,
+  "total_steps": 2,
+  "tools": [
+   "lookup_runbook"
+  ],
+  "ok": true,
+  "resolution": "According to the verified runbooks ([Kubernetes Cluster Operations Guide \u203a 4.3 Rollback] and [Disaster Recovery Runbook \u203a 5.2 Rollback to Previous Version]), you can roll back a Kubernetes deployment using the following commands:\n\n1. **Check rollout history** to identify the revision you want to ret"
+ },
+ {
+  "name": "diagnostics db",
+  "status": 200,
+  "secs": 6,
+  "total_steps": 2,
+  "tools": [
+   "run_system_diagnostics"
+  ],
+  "ok": true,
+  "resolution": "System diagnostics for the database indicate that the component is 'healthy'. The Neon PostgreSQL pooler is online with a ping latency of 69.75 ms, 5 active documents, 80 active chunks, and the replication state shows the streaming standby is online (db-replica-01.internal)."
+ },
+ {
+  "name": "max_steps=1",
+  "status": 200,
+  "secs": 11,
+  "total_steps": 2,
+  "tools": [
+   "lookup_runbook"
+  ],
+  "ok": true,
+  "resolution": "Thought 2: I have successfully retrieved the runbook for pod CrashLoopBackOff. Now I need to check ticket #42 as requested in the initial task.\nAction 2: get_ticket({\"ticket_id\": 42})\nObservation 2: <untrusted_data source=\"tool: get_ticket\">\n{\n  \"ticket_id\": 42,\n  \"subject\": \"API pods crashing conti"
+ }
+]

@@ -1,0 +1,50 @@
+[
+ {
+  "path": "/auth/me",
+  "requests": 200,
+  "concurrency": 20,
+  "codes": {
+   "200": 200
+  },
+  "p50": 2.07,
+  "p95": 2.08,
+  "max": 2.09,
+  "rps": 9.7
+ },
+ {
+  "path": "/health",
+  "requests": 60,
+  "concurrency": 10,
+  "codes": {
+   "200": 60
+  },
+  "p50": 3.69,
+  "p95": 4.15,
+  "max": 4.22,
+  "rps": 2.6
+ },
+ {
+  "path": "/tickets/stats",
+  "requests": 60,
+  "concurrency": 10,
+  "codes": {
+   "200": 60
+  },
+  "p50": 4.04,
+  "p95": 4.25,
+  "max": 4.33,
+  "rps": 2.5
+ },
+ {
+  "path": "/tickets?limit=20",
+  "requests": 60,
+  "concurrency": 10,
+  "codes": {
+   "200": 60
+  },
+  "p50": 3.64,
+  "p95": 3.81,
+  "max": 3.88,
+  "rps": 2.7
+ }
+]
