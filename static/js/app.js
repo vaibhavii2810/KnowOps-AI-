@@ -8,7 +8,6 @@
 
   // State
   let activeConversationId = null;
-  let jwtToken = localStorage.getItem('knowops_jwt') || null;
   let currentUser = null;
 
   // DOM Elements
@@ -67,7 +66,7 @@
   function authHeaders(withJson) {
     const headers = {};
     if (withJson) headers['Content-Type'] = 'application/json';
-    if (jwtToken) headers['Authorization'] = `Bearer ${jwtToken}`;
+    // D-082: no token in JS — the browser sends the HttpOnly session cookie by itself.
     return headers;
   }
 
@@ -99,32 +98,24 @@
       elDiagDbVal.style.color = '#f87171';
     }
 
-    elDiagJwtVal.textContent = jwtToken ? 'Valid Active JWT' : 'None (Guest Mode)';
+    elDiagJwtVal.textContent = currentUser ? 'Valid Active JWT' : 'None (Guest Mode)';
   }
 
   // ---------------------------------------------------------------------------
   // Authentication
   // ---------------------------------------------------------------------------
   async function restoreAuthSession() {
-    if (!jwtToken) {
-      updateAuthUI(null);
-      return;
-    }
-
     try {
-      const res = await fetch('/auth/me', {
-        headers: { 'Authorization': `Bearer ${jwtToken}` }
-      });
+      const res = await fetch('/auth/me');
       if (res.ok) {
         currentUser = await res.json();
         updateAuthUI(currentUser);
       } else {
-        // Token expired or invalid
-        logout();
+        updateAuthUI(null); // no session cookie, or it expired
       }
     } catch (err) {
       console.warn('Session restoration failed:', err);
-      logout();
+      updateAuthUI(null);
     }
   }
 
@@ -146,7 +137,7 @@
       elUserAvatar.textContent = 'OP';
       elUserAvatar.style.background = 'linear-gradient(135deg, #3b82f6, #1d4ed8)';
     }
-    elDiagJwtVal.textContent = jwtToken ? 'Active Operator JWT' : 'None (Guest Mode)';
+    elDiagJwtVal.textContent = currentUser ? 'Active Operator JWT' : 'None (Guest Mode)';
   }
 
   async function handleLoginSubmit(e) {
@@ -168,8 +159,6 @@
       }
 
       const data = await res.json();
-      jwtToken = data.access_token;
-      localStorage.setItem('knowops_jwt', jwtToken);
       currentUser = { username: data.username, role: 'operator' };
       updateAuthUI(currentUser);
       elModalLogin.classList.add('hidden');
@@ -182,9 +171,9 @@
   }
 
   function logout() {
-    jwtToken = null;
     currentUser = null;
-    localStorage.removeItem('knowops_jwt');
+    fetch('/auth/logout', { method: 'POST' }).catch(() => {}); // clears the HttpOnly cookie
+    localStorage.removeItem('knowops_jwt'); // leftover from before D-082
     updateAuthUI(null);
     elSessionList.innerHTML = '';
     activeConversationId = null;
@@ -194,7 +183,7 @@
   // Conversation Sessions (Multi-Turn)
   // ---------------------------------------------------------------------------
   async function loadRecentConversations() {
-    if (!jwtToken) {
+    if (!currentUser) {
       elSessionList.innerHTML = '';
       return;
     }
@@ -276,7 +265,7 @@
     if (!queryText || !queryText.trim()) return;
 
     // Phase 5.4: /ask now requires a signed-in operator.
-    if (!jwtToken) {
+    if (!currentUser) {
       elModalLogin.classList.remove('hidden');
       return;
     }
@@ -522,7 +511,7 @@
 
     // Auth Modal Triggers
     elBtnAuthToggle.onclick = () => {
-      if (jwtToken) {
+      if (currentUser) {
         // Sign out
         if (confirm('Sign out from KnowOps operator console?')) {
           logout();
@@ -575,7 +564,7 @@
   // CRM & Agent Triage Handlers (Phase 3)
   // ---------------------------------------------------------------------------
   async function loadCrmData() {
-    if (!jwtToken) {
+    if (!currentUser) {
       const tbody = document.getElementById('tickets-table-body');
       if (tbody) {
         tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:16px;">Sign in to view incident tickets.</td></tr>';
@@ -650,7 +639,7 @@
 
   async function handleCreateTicketSubmit(e) {
     e.preventDefault();
-    if (!jwtToken) {
+    if (!currentUser) {
       alert('Please sign in to create a ticket.');
       return;
     }
@@ -676,7 +665,7 @@
   }
 
   async function executeAgentTriage(ticketId, triggerBtn) {
-    if (!jwtToken) {
+    if (!currentUser) {
       elModalLogin.classList.remove('hidden');
       return;
     }

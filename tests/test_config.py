@@ -51,7 +51,8 @@ def test_insecure_defaults_are_fine_off_vercel():
 
 
 def _import_app_main(env_overrides: dict) -> subprocess.CompletedProcess:
-    env = {"PATH": __import__("os").environ.get("PATH", "")}
+    import os
+    env = {k: os.environ[k] for k in ("PATH", "SYSTEMROOT") if k in os.environ}  # SYSTEMROOT: Windows sockets need it
     env.update(env_overrides)
     return subprocess.run(
         [sys.executable, "-c", "import app.main"],

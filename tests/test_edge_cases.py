@@ -111,7 +111,7 @@ PROTECTED = [
     ("POST", "/agent/triage/{ticket_id}", None),
 ]
 # Deliberately open: the SPA shell, health, login, and the cron job (its own CRON_SECRET check, D-022)
-OPEN = {("GET", "/"), ("GET", "/health"), ("POST", "/auth/login"), ("GET", "/cron/reindex")}
+OPEN = {("GET", "/"), ("GET", "/health"), ("POST", "/auth/login"), ("POST", "/auth/logout"), ("GET", "/cron/reindex")}
 
 
 def test_every_api_route_is_either_protected_here_or_deliberately_open():

@@ -5,7 +5,8 @@ KnowOps AI — Production FastAPI Application, Autonomous Agent & Operations Pla
 Endpoints:
     GET  /                          → Operations Console SPA (Web Frontend)
     GET  /health                    → Database & knowledge base health check
-    POST /auth/login                → Operator JWT authentication
+    POST /auth/login                → Operator JWT authentication (also sets the HttpOnly session cookie)
+    POST /auth/logout               → Clears the session cookie
     GET  /auth/me                   → Current authenticated operator session
     POST /conversations             → Create a new conversation session
     GET  /conversations             → List recent conversations
@@ -28,13 +29,14 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.agent import run_agent, triage_ticket_with_agent
 from app.auth import (
+    SESSION_COOKIE,
     create_access_token,
     get_current_user_required,
     verify_operator_credentials,
@@ -155,6 +157,7 @@ def serve_dashboard():
 )
 def login(
     request: LoginRequest,
+    response: Response,
     _rate_limit: None = Depends(login_rate_limited),
 ) -> TokenResponse:
     """
@@ -175,12 +178,25 @@ def login(
         expires_delta=expires,
     )
 
+    # D-082: also set the session as an HttpOnly cookie for the browser console. SameSite=Strict is the CSRF
+    # defence (a cookie is now ambient, unlike the Bearer header); Secure whenever deployed on Vercel (https).
+    response.set_cookie(
+        SESSION_COOKIE, token, max_age=settings.jwt_expire_minutes * 60,
+        httponly=True, samesite="strict", secure=bool(settings.vercel), path="/",
+    )
     return TokenResponse(
         access_token=token,
         token_type="bearer",
         expires_in=settings.jwt_expire_minutes * 60,
         username=request.username,
     )
+
+
+@app.post("/auth/logout", summary="Clear the console session cookie", tags=["Authentication"])
+def logout(response: Response) -> dict:
+    """Expires the session cookie (the browser cannot do it itself: the cookie is HttpOnly)."""
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return {"detail": "Signed out."}
 
 
 @app.get(

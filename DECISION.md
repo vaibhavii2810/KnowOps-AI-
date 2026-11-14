@@ -2015,3 +2015,28 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   risk starting point, since it needs no new dependency and no background thread; budget time to retrofit
   the offline test fakes either way. Also revisit if Vercel ever offers a supported way to keep a background
   thread alive across freezes, which would remove the main objection to option 1.
+
+### D-082 · Console session moves from `localStorage` to an HttpOnly cookie
+- **Date · by · source:** 2026-11-14 · Niranjan (with Claude) · bug #21's leftover risk (AGENTS.md Known issues)
+- **Decision:** `POST /auth/login` still returns the JWT in the body, and now also sets it as the `knowops_session` cookie
+  (`HttpOnly`, `SameSite=Strict`, `Secure` on Vercel, lifetime = `jwt_expire_minutes`). `get_current_user_*` read the
+  `Authorization: Bearer` header first, then the cookie. New `POST /auth/logout` clears the cookie. `static/js/app.js` no
+  longer stores or sends a token: login state comes from `GET /auth/me`.
+- **Why:** with the token in `localStorage`, any future XSS could read and exfiltrate it (D-074 closed the known hole, not
+  the class of bug). An HttpOnly cookie cannot be read by script. Bearer support stays so the eval harness, n8n and
+  scripts are unchanged.
+- **Tradeoff accepted:** a cookie is an ambient credential, so CSRF becomes relevant (D-062 relied on "never a cookie").
+  `SameSite=Strict` blocks cross-site requests in modern browsers and is the only defence; no CSRF token or Origin check
+  was added. CORS stays `allow_credentials=False`, so other sites still cannot read responses.
+- **Revisit if:** older browsers without SameSite support matter, or a second front-end origin is added.
+
+### D-083 · Pin Vercel Functions to `sin1` (Singapore), next to the Neon database
+- **Date · by · source:** 2026-11-14 · Niranjan (with Claude) · Known issues ("`get_conn()` latency", bug #25's remaining half)
+- **Decision:** `vercel.json` gains `"regions": ["sin1"]`.
+- **Why:** Neon (`neon-camel-bridge`) is in AWS ap-southeast-1 (Singapore), but Production ran in `iad1` (Washington);
+  measured before the change: `/health` 2.2–2.4 s warm (5.6 s cold) with `x-vercel-id: bom1::iad1::…`. Every `/ask` makes
+  several round trips to the database, so each pays the intercontinental latency.
+- **Tradeoff accepted:** Hobby allows one region, so users far from Singapore pay a longer hop to the function instead. The
+  app is database-bound (3 connections + 2 Gemini calls per `/ask`), so moving next to the database is the larger win.
+  Gemini calls now start from Singapore too (not measured).
+- **Revisit if:** the measured `/health` and `/ask` times do not improve after deploy — then revert (new entry, mark this one superseded).

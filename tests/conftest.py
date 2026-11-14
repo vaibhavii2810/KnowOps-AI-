@@ -89,12 +89,12 @@ def no_network(monkeypatch):
         return str(address[0]) if isinstance(address, tuple) else str(address)
 
     def guarded_connect(sock, address):
-        if sock.family == socket.AF_UNIX or _host(address) in _LOOPBACK:
+        if sock.family == getattr(socket, "AF_UNIX", None) or _host(address) in _LOOPBACK:
             return real_connect(sock, address)
         _blocked(f"socket connect to {address!r}")
 
     def guarded_connect_ex(sock, address):
-        if sock.family == socket.AF_UNIX or _host(address) in _LOOPBACK:
+        if sock.family == getattr(socket, "AF_UNIX", None) or _host(address) in _LOOPBACK:
             return real_connect_ex(sock, address)
         _blocked(f"socket connect to {address!r}")
 

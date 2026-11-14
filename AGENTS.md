@@ -1088,16 +1088,12 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   `/health` averaging 4.5s, `/tickets/{id}` 4.3s, `/tickets/stats` 2.5s against 1.9ms for `/auth/me` (no
   database call) — most of that gap looks like function-to-database distance (the logs show the function
   running in `bom1`/`sfo1`/`iad1`, the database in Singapore), not the `register_vector` cost just removed;
-  pinning the function's region next to Neon is still untested. **The Phase 13.3 evaluation's baseline numbers
+  pinning the function's region next to Neon (`"regions": ["sin1"]` in `vercel.json`, D-083, 2026-11-14) is written but **not yet deployed or measured** (baseline before: `/health` 2.2–2.4 s warm, function in `iad1`). **The Phase 13.3 evaluation's baseline numbers
   (median 5.6s in-process, 14.2–14.4s deployed) predate this fix** and haven't been re-run against production
   since — re-running `python -m evals` would show the new baseline there.
-- **The JWT is stored in `localStorage`, readable by any script on the page (part of bug #21's impact, High,
-  D-074 — not fixed):** `static/js/app.js`'s stored-XSS gap itself is fixed (D-074), removing the main way a
-  hostile payload could reach the page, but the token's storage location is unchanged — any other script
-  injection vector (a future XSS bug, a compromised dependency) could still read it straight out of
-  `localStorage` and act as the logged-in operator. Moving it to an httpOnly cookie is a real
-  auth-architecture change (server-side cookie issuance, CSRF protection, `SameSite` policy), not a small
-  patch, and was out of scope for the XSS fix itself.
+- **Fixed, 2026-11-14 (D-082):** the console's session is now an HttpOnly `SameSite=Strict` cookie (`Secure` on Vercel), not
+  `localStorage`; Bearer headers still work for scripts. CSRF rests on `SameSite=Strict` alone (see D-082). Not yet verified
+  in a real browser on the deployed site.
 - **n8n triage workflow has no auth:** `n8n/incident_triage_workflow.json` calls `POST /tickets` and
   `/agent/triage/{id}` without an `Authorization` header, so since Phase 5.4 it would get 401s.
 - **Phase 7.1 (partial, remainder of D-015):** `create_ticket`/`escalate_to_human` were added (D-025), but

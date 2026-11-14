@@ -83,7 +83,7 @@ metrics(hours=24 [1–168]) → metrics.read_metrics(hours)
   → MetricsResponse           (503 "Metrics are unavailable" if the database cannot be read)
 ```
 
-### `POST /auth/login`
+### `POST /auth/login`  (D-082: on success it also sets the HttpOnly `knowops_session` cookie; `POST /auth/logout` clears it; `get_current_user_*` accept the Bearer header first, then that cookie)
 ```
 login(LoginRequest, Depends(ratelimit.login_rate_limited))
   → [DB] per-client-IP counters BEFORE the credentials are looked at: 5 attempts/min and 30/hour, every attempt
@@ -291,7 +291,7 @@ DOMContentLoaded → init()
   → loadRecentConversations()  GET /conversations?limit=15
 
 User actions (Phase 5.4: `authHeaders()` attaches the JWT; each of these bails out to the login modal /
-shows a "sign in" message instead of firing the request when `jwtToken` is null, since the route now 401s):
+shows a "sign in" message instead of firing the request when `jwtToken` is null, since the route now 401s; since D-082 `currentUser` — set from `GET /auth/me` on load — replaces the old `jwtToken`, and the session is an HttpOnly cookie JS cannot read):
   ask question       → submitQuery()               POST /ask                           (requires JWT)
   log in             → handleLoginSubmit()         POST /auth/login → loadRecentConversations()
   open conversation  → switchConversation()        GET /conversations/{id}             (requires JWT)

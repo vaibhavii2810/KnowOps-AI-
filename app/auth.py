@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import settings
@@ -29,6 +29,17 @@ from app.logs import log_event, set_request_user
 
 # HTTP Bearer scheme for Swagger UI and header extraction
 security_bearer = HTTPBearer(auto_error=False)
+
+# D-082: the console's session lives in an HttpOnly cookie (script on the page cannot read it, so an XSS can no
+# longer steal the token). Scripts, the eval harness and n8n keep using the Authorization: Bearer header.
+SESSION_COOKIE = "knowops_session"
+
+
+def _credentials(request: Request, auth: Optional[HTTPAuthorizationCredentials]) -> Optional[str]:
+    """The bearer token if sent, otherwise the session cookie, otherwise None."""
+    if auth and auth.credentials:
+        return auth.credentials
+    return request.cookies.get(SESSION_COOKIE) or None
 
 
 def hash_password(password: str, salt: Optional[str] = None) -> str:
@@ -140,32 +151,36 @@ def decode_access_token(token: str) -> dict:
 
 
 def get_current_user_optional(
+    request: Request,
     auth: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer),
 ) -> Optional[dict]:
     """
     FastAPI dependency that extracts and verifies JWT if present.
     Returns None if no token is provided.
     """
-    if not auth or not auth.credentials:
+    token = _credentials(request, auth)
+    if not token:
         return None
-    payload = decode_access_token(auth.credentials)
+    payload = decode_access_token(token)
     set_request_user(payload.get("sub"))
     return payload
 
 
 def get_current_user_required(
+    request: Request,
     auth: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer),
 ) -> dict:
     """
     FastAPI dependency that strictly requires a valid JWT.
     Raises HTTP 401 if missing or invalid.
     """
-    if not auth or not auth.credentials:
+    token = _credentials(request, auth)
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication credentials were not provided.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    payload = decode_access_token(auth.credentials)
+    payload = decode_access_token(token)
     set_request_user(payload.get("sub"))
     return payload
