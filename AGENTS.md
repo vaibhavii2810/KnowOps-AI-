@@ -1096,10 +1096,13 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - **Fixed in the file, 2026-11-14 (D-085):** `n8n/incident_triage_workflow.json` now starts with a "Log In to KnowOps" node
   (`POST /auth/login`, credentials from the n8n environment variables `KNOWOPS_USERNAME` / `KNOWOPS_PASSWORD`) and sends
   `Authorization: Bearer` on the ticket and triage calls. Checked offline only (`tests/test_n8n_workflow.py`) — nobody has run
-  it in a real n8n yet (same as the Phase 9.4 workflow). **Attempt 2026-11-14:** `npm install n8n` (v2.x) worked and the workflow
-  imported and showed as published once, but its webhook never registered on `n8n start` (`POST /webhook/incident-alert` stayed
-  404, and a later start reported 0 published workflows), so nothing reached the app. Cause not found; n8n 2.x wants an owner
-  account created through its UI and may reject this older node format. A person running n8n with the editor should import it there.
+  it in a real n8n yet (same as the Phase 9.4 workflow). **Run for real, 2026-11-14 (D-086):** `npm install n8n` (v2.x) in a scratch folder, owner
+  created with `n8n user-management:reset`, workflow imported + `publish:workflow`, then `n8n start` and a POST to the webhook.
+  The first attempts failed (`POST /webhook/incident-alert` → 404): the webhook node had no `webhookId` and `typeVersion` 1, so
+  n8n 2.x never registered it. With `webhookId` + `typeVersion` 2 (now in both workflow files) the chain ran against the local app:
+  `POST /auth/login` 200 → `POST /tickets` 200 (Bearer token accepted) → `POST /agent/triage/158` 200 (14.8 s, real Gemini).
+  The final Slack node posts to a placeholder URL by design, so its outcome was not confirmed. Not yet run for `workflow.json`
+  (escalation) — only given the same webhook fix.
 - **Phase 7.1 (partial, remainder of D-015):** `create_ticket`/`escalate_to_human` were added (D-025), but
   `run_system_diagnostics`/`execute_recovery_action` are still simulated for everything except the database
   diagnostic — no real infrastructure is inspected or changed.

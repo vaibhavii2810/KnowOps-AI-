@@ -2056,3 +2056,11 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
 - **Why a login per run instead of a stored token:** tokens expire after `jwt_expire_minutes` (60), so a pasted token would
   break silently; a login per alert is one cheap call (limit 5/min per IP, which alert volume here does not approach).
 - **Tradeoff accepted:** validated only by an offline structure test; not run in a real n8n.
+
+### D-086 · n8n webhook nodes get a `webhookId` and `typeVersion` 2
+- **Date · by · source:** 2026-11-14 · Niranjan (with Claude) · first real n8n run of the workflows
+- **Decision:** the webhook node in `n8n/incident_triage_workflow.json` and `n8n/workflow.json` becomes `typeVersion: 2` with a fixed `webhookId`.
+- **Why:** on n8n 2.x the old node (typeVersion 1, no `webhookId`) was published but its production URL returned 404, so no alert could
+  start the workflow. Changing both made it register; I did not test them separately, so which one mattered is unknown.
+- **Verified:** triage workflow end to end against a local app (login 200, ticket 200, triage 200). Not verified: the Slack post
+  (placeholder URL) and `workflow.json` run.

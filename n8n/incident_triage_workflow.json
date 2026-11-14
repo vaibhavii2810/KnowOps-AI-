@@ -10,11 +10,12 @@
       "id": "node-webhook-trigger",
       "name": "Incoming Alert Webhook",
       "type": "n8n-nodes-base.webhook",
-      "typeVersion": 1,
+      "typeVersion": 2,
       "position": [
         240,
         300
-      ]
+      ],
+      "webhookId": "3f1c2a7e-8b4d-4c1e-9a55-1d2e3f4a5b6c"
     },
     {
       "parameters": {

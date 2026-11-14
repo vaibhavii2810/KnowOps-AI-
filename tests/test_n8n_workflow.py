@@ -38,3 +38,10 @@ def test_nodes_form_one_chain_from_the_webhook_to_slack():
     assert order == ["Incoming Alert Webhook", "Log In to KnowOps", "Create Incident Ticket",
                      "Autonomous Agent Triage", "Notify On-Call Channel"]
     assert set(order) == {n["name"] for n in WORKFLOW["nodes"]}
+
+
+def test_webhook_nodes_have_a_webhook_id_and_a_current_node_version():
+    """n8n 2.x did not register the webhook (404 on its production URL) until the node had a webhookId and
+    typeVersion 2 — found by running the workflow in a real n8n, 2026-11-14."""
+    nodes = [n for n in WORKFLOW["nodes"] if n["type"] == "n8n-nodes-base.webhook"]
+    assert nodes and all(n.get("webhookId") and n["typeVersion"] >= 2 for n in nodes)

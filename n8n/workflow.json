@@ -10,8 +10,12 @@
       "id": "node-webhook-trigger",
       "name": "Escalation Webhook",
       "type": "n8n-nodes-base.webhook",
-      "typeVersion": 1,
-      "position": [240, 300]
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "5a9d0e41-2c7b-4f38-8d16-7b2e9c4a1f03"
     },
     {
       "parameters": {
@@ -33,7 +37,10 @@
       "name": "Notify On-Call Channel",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
-      "position": [460, 300]
+      "position": [
+        460,
+        300
+      ]
     }
   ],
   "connections": {
