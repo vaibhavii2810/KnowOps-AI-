@@ -1097,7 +1097,7 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   (median 5.6s in-process, 14.2–14.4s deployed) predate this fix** and haven't been re-run against production
   since — re-running `python -m evals` would show the new baseline there.
 - **Fixed, 2026-11-14 (D-082):** the console's session is now an HttpOnly `SameSite=Strict` cookie (`Secure` on Vercel), not
-  `localStorage`; Bearer headers still work for scripts. CSRF rests on `SameSite=Strict` alone (see D-082). Verified live on Production by the eval's login + `/ask` over HTTP (2026-11-14); the browser cookie reload check on the live site is still unchecked.
+  `localStorage`; Bearer headers still work for scripts. CSRF rests on `SameSite=Strict` alone (see D-082). Verified live on Production by the eval's login + `/ask` over HTTP (2026-11-14); the browser sign-in + reload check on the live site was done by Niranjan on 2026-11-14 (reported in chat, not seen by the assistant).
 - **Fixed in the file, 2026-11-14 (D-085):** `n8n/incident_triage_workflow.json` now starts with a "Log In to KnowOps" node
   (`POST /auth/login`, credentials from the n8n environment variables `KNOWOPS_USERNAME` / `KNOWOPS_PASSWORD`) and sends
   `Authorization: Bearer` on the ticket and triage calls. Checked offline only (`tests/test_n8n_workflow.py`) — nobody has run
