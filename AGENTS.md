@@ -1070,7 +1070,7 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 
 - **Fixed, 2026-11-14:** Preview `GEMINI_API_KEY` used to be scoped to the `sprint-2` branch only (Phase 14.3). Its branch
   restriction was removed in the Vercel dashboard, so it now covers every Preview branch (saved with the value field left
-  blank, i.e. unchanged). Not yet proven by a Preview deploy of another branch; applies to new deployments only.
+  blank, i.e. unchanged). **Proven 2026-11-14:** a Preview deploy of a different branch (`preview-key-check`) answered `/ask` over HTTP — g05 passed (2/2 facts, 1.7 s) and g17 was correctly refused (1.2 s) — so the key works there. Applies to new deployments only.
 
 - **Admin login hardening (password fixed 2026-11-03; residual risks):** Vercel's `APP_PASSWORD` was changed by hand to
   the strong one from the local `.env` and checked live: `admin`/`admin` → 401, the new password → 200 and its token works
