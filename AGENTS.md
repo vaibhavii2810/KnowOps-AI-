@@ -1007,6 +1007,12 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 
 ## Known issues
 
+- **Outage 2026-11-14 (≈20 min), self-inflicted and by design:** changing Production's `APP_PASSWORD` in the Vercel dashboard to `admin`
+  (and, before that, saving it blank) made every deployment refuse to start — `InsecureDefaultSecret: … APP_PASSWORD` (D-063), so
+  `/` and `/health` returned 500 `FUNCTION_INVOCATION_FAILED`. Fixed by setting a real non-default value and redeploying. Lesson: the
+  guard rejects the literal `admin`, an empty value and the default `JWT_SECRET`; Vercel only applies env changes on a new deployment,
+  so redeploy after changing one. Instant Rollback to the previous deployment is the quick way back.
+
 - **An external bug report (`KnowOps_AI_Bug_Report.pdf`, 2026-11-08, 27 findings) is not yet in this repo:** it
   references `tests/test_suspected_bugs.py` and `TEST_RESULTS.md`, neither of which exist here — that testing
   pass happened somewhere outside this repo's history. Bug #1 (High — `/cron/reindex` open when `CRON_SECRET` is
@@ -1087,12 +1093,11 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
   `/health` averaging 4.5s, `/tickets/{id}` 4.3s, `/tickets/stats` 2.5s against 1.9ms for `/auth/me` (no
   database call) — most of that gap looks like function-to-database distance (the logs show the function
   running in `bom1`/`sfo1`/`iad1`, the database in Singapore), not the `register_vector` cost just removed;
-  pinning the function's region next to Neon (`"regions": ["sin1"]` in `vercel.json`, D-083, 2026-11-14) is written but **not yet deployed or measured** (baseline before: `/health` 2.2–2.4 s warm, function in `iad1`). **The Phase 13.3 evaluation's baseline numbers
+  pinning the function's region next to Neon (`"regions": ["sin1"]` in `vercel.json`, D-083, 2026-11-14) is **deployed and measured, 2026-11-14:** `/health` 2.3 s → 0.22–0.41 s (function now in `sin1`), and `python -m evals --url https://knowops-ai.vercel.app --only g05,g17` over HTTP gave **1.2 s and 1.5 s** per answer (was 14.2–14.4 s) with 2/2 correct (g05 passed with 2/2 facts, g17 correctly refused). **The Phase 13.3 evaluation's baseline numbers
   (median 5.6s in-process, 14.2–14.4s deployed) predate this fix** and haven't been re-run against production
   since — re-running `python -m evals` would show the new baseline there.
 - **Fixed, 2026-11-14 (D-082):** the console's session is now an HttpOnly `SameSite=Strict` cookie (`Secure` on Vercel), not
-  `localStorage`; Bearer headers still work for scripts. CSRF rests on `SameSite=Strict` alone (see D-082). Not yet verified
-  in a real browser on the deployed site.
+  `localStorage`; Bearer headers still work for scripts. CSRF rests on `SameSite=Strict` alone (see D-082). Verified live on Production by the eval's login + `/ask` over HTTP (2026-11-14); the browser cookie reload check on the live site is still unchecked.
 - **Fixed in the file, 2026-11-14 (D-085):** `n8n/incident_triage_workflow.json` now starts with a "Log In to KnowOps" node
   (`POST /auth/login`, credentials from the n8n environment variables `KNOWOPS_USERNAME` / `KNOWOPS_PASSWORD`) and sends
   `Authorization: Bearer` on the ticket and triage calls. Checked offline only (`tests/test_n8n_workflow.py`) — nobody has run
