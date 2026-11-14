@@ -50,9 +50,9 @@ def rag_vocabulary_cache_reset():
     for the rest of the suite (via whatever fake_db/memory_db happened to be active then), making behavior
     order-dependent. Reset before and after every test so each one starts cold."""
     import app.rag as rag
-    rag._vocabulary_cache = (0.0, frozenset())
+    rag._vocabulary_cache = rag._COLD_CACHE
     yield
-    rag._vocabulary_cache = (0.0, frozenset())
+    rag._vocabulary_cache = rag._COLD_CACHE
 
 
 # ---------------------------------------------------------------------------

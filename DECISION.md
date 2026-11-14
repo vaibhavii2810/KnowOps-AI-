@@ -2040,3 +2040,10 @@ why this tradeoff was acceptable. Rules for when to add one are in `AGENTS.md`.
   app is database-bound (3 connections + 2 Gemini calls per `/ask`), so moving next to the database is the larger win.
   Gemini calls now start from Singapore too (not measured).
 - **Revisit if:** the measured `/health` and `/ask` times do not improve after deploy — then revert (new entry, mark this one superseded).
+
+### D-084 · Typo-vocabulary cache starts at `-inf`, not `0.0` (bug fix to D-077)
+- **Date · by · source:** 2026-11-14 · Niranjan (with Claude) · CI failure on `6d48dde` and `2197ed2`
+- **Decision:** `app/rag.py` `_COLD_CACHE` is `(float("-inf"), frozenset())`; the test fixture resets to it.
+- **Why:** the cache was stamped `0.0` and treated as fresh while `time.monotonic() < 300`. On a freshly booted machine (the CI
+  runner, a new serverless microVM) that is true, so the vocabulary was never loaded and typo correction was silently off for
+  the first 5 minutes. It never failed locally because the dev machine had been up longer.

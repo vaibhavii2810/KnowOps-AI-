@@ -225,3 +225,13 @@ def test_recent_history_query_shape_against_real_postgres():
     # The latest 8 of 10 (messages 3-10), still oldest-first so the model reads a real conversation.
     assert [h["content"] for h in history] == [f"message {i}" for i in range(3, 11)]
     assert [h["role"] for h in history] == ["user", "model"] * 4
+
+
+def test_vocabulary_cache_is_cold_even_when_the_clock_is_young(monkeypatch):
+    """A fresh machine has time.monotonic() < the 300 s TTL; a cache stamped 0.0 would then look fresh and skip loading
+    (found by CI on a new runner, bug #16 / D-077)."""
+    import app.rag as rag
+    monkeypatch.setattr(rag, "_vocabulary_cache", rag._COLD_CACHE)
+    monkeypatch.setattr(rag.time, "monotonic", lambda: 10.0)
+    monkeypatch.setattr(rag, "_load_vocabulary", lambda: frozenset({"loaded"}))
+    assert rag._vocabulary() == frozenset({"loaded"})

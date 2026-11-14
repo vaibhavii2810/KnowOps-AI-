@@ -51,7 +51,8 @@ SIMILARITY_THRESHOLD = 0.65
 # history fold-in — chat_completion() and the response still see the user's actual words.
 _VOCABULARY_TTL_SECONDS = 300
 _WORD_RE = re.compile(r"[A-Za-z]{4,}")
-_vocabulary_cache: tuple[float, frozenset[str]] = (0.0, frozenset())
+_COLD_CACHE: tuple[float, frozenset[str]] = (float("-inf"), frozenset())  # -inf, not 0.0: monotonic() can be < TTL on a fresh machine
+_vocabulary_cache = _COLD_CACHE
 
 
 def _load_vocabulary() -> frozenset[str]:
