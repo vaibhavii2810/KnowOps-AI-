@@ -1096,7 +1096,10 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - **Fixed in the file, 2026-11-14 (D-085):** `n8n/incident_triage_workflow.json` now starts with a "Log In to KnowOps" node
   (`POST /auth/login`, credentials from the n8n environment variables `KNOWOPS_USERNAME` / `KNOWOPS_PASSWORD`) and sends
   `Authorization: Bearer` on the ticket and triage calls. Checked offline only (`tests/test_n8n_workflow.py`) — nobody has run
-  it in a real n8n yet (same as the Phase 9.4 workflow).
+  it in a real n8n yet (same as the Phase 9.4 workflow). **Attempt 2026-11-14:** `npm install n8n` (v2.x) worked and the workflow
+  imported and showed as published once, but its webhook never registered on `n8n start` (`POST /webhook/incident-alert` stayed
+  404, and a later start reported 0 published workflows), so nothing reached the app. Cause not found; n8n 2.x wants an owner
+  account created through its UI and may reject this older node format. A person running n8n with the editor should import it there.
 - **Phase 7.1 (partial, remainder of D-015):** `create_ticket`/`escalate_to_human` were added (D-025), but
   `run_system_diagnostics`/`execute_recovery_action` are still simulated for everything except the database
   diagnostic — no real infrastructure is inspected or changed.
@@ -1146,7 +1149,7 @@ EdTech (D-009), ~500-char chunks (D-010), deploy through the existing `knowops-a
 - **Fixed, 2026-11-14:** the runbooks used to quote wrong limits (`/ask` 20/min, `/health` 100/min, Gemini retry "3 attempts").
   `api_troubleshooting.md` §7 now lists the real ones (`/ask` 10/min, agent 5/min shared, login 5/min + 30/hour per IP, `/health`
   unlimited, the real 429 body and headers) and both docs say 4 attempts (D-032). The dev database was re-ingested and `/ask`
-  now answers "10 requests per minute"; Production picks the change up at its next 03:00 UTC reindex (or run `/cron/reindex`).
+  now answers "10 requests per minute". Production: `main` deployed (`345fe69`), then "Run Schedule" in the Vercel dashboard ran the reindex (completed, 10 s; chunk count 80 → 81 on `/health`).
   `scripts/ingest.py` also no longer crashes printing its ✅ summary on a Windows console.
 - **Phase 9.4:** `n8n/workflow.json`'s Slack URL is a placeholder (`.../mock/webhook/...`); the backend→webhook
   mechanism is verified (D-031) but nobody has actually run `npx n8n` and imported the workflow for real yet.
